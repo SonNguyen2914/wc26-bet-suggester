@@ -52,3 +52,17 @@ CORS_ORIGINS = os.getenv("CORS_ORIGINS", "http://localhost:3000,https://namson.d
 MODEL_WEIGHT = float(os.getenv("MODEL_WEIGHT", "0.60"))
 MAX_ODDS = float(os.getenv("MAX_ODDS", "8.0"))       # skip lottery-ticket longshots
 MAX_SUGGESTIONS_PER_MATCH = int(os.getenv("MAX_SUGGESTIONS_PER_MATCH", "3"))
+
+# --- Ranking board (likelihood-first) -------------------------------------
+# The board shows bets MOST LIKELY TO HAPPEN that the user can then judge by
+# edge/multiplier themselves. Likelihood is the gate and the sort key; edge
+# is informational only (never a filter). Two-tier floor: if nothing clears
+# the primary floor across all matches, retry once at the fallback floor,
+# then show an honest empty state (no further lowering).
+SUGGEST_PRIMARY_FLOOR = float(os.getenv("SUGGEST_PRIMARY_FLOOR", "0.49"))
+SUGGEST_FALLBACK_FLOOR = float(os.getenv("SUGGEST_FALLBACK_FLOOR", "0.40"))
+
+# Keep tracking a match through kickoff (live odds move on goals) and stop
+# only once it's truly done: kickoff + 4h covers 90 min + ET + pens + Kalshi
+# book-settling. Applies to the scheduler, the poller, and the board.
+TRACK_HOURS_AFTER_KICKOFF = float(os.getenv("TRACK_HOURS_AFTER_KICKOFF", "4"))

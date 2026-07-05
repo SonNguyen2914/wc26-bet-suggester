@@ -37,6 +37,7 @@ class Prediction(Base):
     xg_home = Column(Float)
     xg_away = Column(Float)
     scoreline_json = Column(Text)              # top scorelines as JSON
+    outcome_key = Column(String(32))           # home_win, over_2_5, score_2_1, ...
 
     source = Column(String(24), default="scheduled")   # scheduled | on_demand | final_lock
     is_final = Column(Boolean, default=False)
@@ -137,6 +138,20 @@ SessionLocal = sessionmaker(bind=engine, expire_on_commit=False, future=True)
 
 def init_db() -> None:
     Base.metadata.create_all(engine)
+    _migrate()
+
+
+def _migrate() -> None:
+    """Tiny forward-only migration: create_all doesn't alter existing tables,
+    so if a persisted volume carries an old predictions table, add the
+    outcome_key column in place instead of crashing on the first insert."""
+    from sqlalchemy import text
+    with engine.connect() as conn:
+        cols = [r[1] for r in conn.execute(text("PRAGMA table_info(predictions)"))]
+        if cols and "outcome_key" not in cols:
+            conn.execute(text("ALTER TABLE predictions ADD COLUMN outcome_key VARCHAR(32)"))
+            conn.commit()
+            print("[db] migrated: added predictions.outcome_key")
 
 
 def get_setting(session, key: str, default: float) -> float:

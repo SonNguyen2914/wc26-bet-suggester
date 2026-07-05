@@ -175,6 +175,11 @@ SKIP_FAMILIES = (
     "KXWC2HTOTAL", "KXWC2HSPREAD", "KXWC2HBTTS",
     "KXWC1HSCORE", "KXWC2HSCORE",
     "KXWCTEAMTOTAL", "KXWCSTART",
+    # KXWCFTTS = "Team to score first" (resolves on the game's OPENING goal,
+    # incl. extra time — per Kalshi's own market rules). NOT a winner market;
+    # the text fallback was mislabeling it as home/away_win. Our 90-min sim
+    # doesn't model goal order, so skip until a real first-goal model exists.
+    "KXWCFTTS",
 )
 
 

@@ -56,6 +56,7 @@ def latest_for_match(match_id: str) -> dict | None:
             {
                 "market_id": r.market_id,
                 "market_title": r.market_title,
+                "outcome_key": r.outcome_key,
                 "model_probability": r.model_probability,
                 "kalshi_odds": r.kalshi_odds,
                 "implied_probability": r.implied_probability,
@@ -67,14 +68,20 @@ def latest_for_match(match_id: str) -> dict | None:
     }
 
 
-def timeline_for_match(match_id: str, market_suffix: str = "HOME_WIN",
+def timeline_for_match(match_id: str, outcome_key: str = "home_win",
                        limit: int = 24) -> list[dict]:
-    """How the headline prediction evolved across runs (for the timeline view)."""
+    """How one outcome's prediction evolved across runs (timeline view).
+
+    Filters by the classified outcome_key, which works for real Kalshi
+    tickers. The old ticker-substring filter ("%HOME_WIN%") only ever
+    matched demo-mode's synthetic tickers, so this endpoint silently
+    returned nothing in live mode.
+    """
     with SessionLocal() as session:
         rows = session.execute(
             select(Prediction)
             .where(Prediction.match_id == match_id,
-                   Prediction.market_id.like(f"%{market_suffix}%"))
+                   Prediction.outcome_key == outcome_key)
             .order_by(Prediction.created_at.desc())
             .limit(limit)
         ).scalars().all()

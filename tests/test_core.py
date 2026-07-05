@@ -51,8 +51,8 @@ class TestSimulator:
         assert p is not None and 0.0 <= p <= 1.0
 
     def test_even_match_is_uncertain(self):
-        even = self.sim.simulate(get_team_stats("Germany"), get_team_stats("Spain"))
-        lopsided = self.sim.simulate(get_team_stats("Argentina"), get_team_stats("Serbia"))
+        even = self.sim.simulate(get_team_stats("Portugal"), get_team_stats("Spain"))
+        lopsided = self.sim.simulate(get_team_stats("France"), get_team_stats("Egypt"))
         assert even["confidence"] < lopsided["confidence"]
 
 
@@ -112,3 +112,150 @@ class TestAPI:
         resp = self.client.post("/api/settings", json={"min_edge": 0.07}).json()
         assert resp["min_edge"] == 0.07
         self.client.post("/api/settings", json={"min_edge": 0.05})
+
+
+class TestDedupeMarkets:
+    """Half-1 build: KXWCGAME vs KXWCMOV-REG duplicates collapse to one
+    buyer-favorable contract per outcome_key."""
+
+    def _mkt(self, mid, key, yes, vol):
+        return {"market_id": mid, "outcome_key": key, "yes_price": yes,
+                "volume_24h": vol, "decimal_odds": round(1 / yes, 2),
+                "title": mid}
+
+    def test_keeps_cheapest_yes_price(self):
+        from src.suggester import SuggesterEngine
+        mkts = [self._mkt("KXWCGAME-BRA", "home_win", 0.55, 9000),
+                self._mkt("KXWCMOV-BRAREG", "home_win", 0.53, 2000)]
+        out = SuggesterEngine._dedupe_markets(mkts)
+        assert len(out) == 1
+        assert out[0]["market_id"] == "KXWCMOV-BRAREG"  # cheaper yes wins
+
+    def test_tie_breaks_to_higher_volume(self):
+        from src.suggester import SuggesterEngine
+        mkts = [self._mkt("A", "away_win", 0.30, 500),
+                self._mkt("B", "away_win", 0.30, 8000)]
+        out = SuggesterEngine._dedupe_markets(mkts)
+        assert len(out) == 1 and out[0]["market_id"] == "B"
+
+    def test_distinct_keys_untouched(self):
+        from src.suggester import SuggesterEngine
+        mkts = [self._mkt("A", "home_win", 0.5, 1),
+                self._mkt("B", "over_2_5", 0.4, 1),
+                self._mkt("C", None, 0.3, 1)]  # unclassified passes through
+        assert len(SuggesterEngine._dedupe_markets(mkts)) == 3
+
+
+class TestTrackingWindow:
+    """Half-1 build: matches stay trackable through kickoff + N hours."""
+
+    def test_is_trackable_spans_kickoff(self):
+        from datetime import datetime, timedelta, timezone
+        from src.schedule_data import is_trackable, load_schedule
+        m = load_schedule()[0]
+        before = m.kickoff - timedelta(hours=1)
+        during = m.kickoff + timedelta(hours=1)
+        after = m.kickoff + timedelta(hours=5)
+        assert is_trackable(m, before, 72, 4)
+        assert is_trackable(m, during, 72, 4)      # in-play: still tracked
+        assert not is_trackable(m, after, 72, 4)   # 4h past kickoff: done
+        far = m.kickoff - timedelta(hours=100)
+        assert not is_trackable(m, far, 72, 4)     # outside look-ahead
+
+
+class TestOutcomeKeyPlumbing:
+    """Half-1 build: outcome_key persists to Prediction rows and the
+    timeline filters on it (the live-mode timeline fix)."""
+
+    def setup_method(self):
+        import config
+        config.DEMO_MODE = True
+        from src.db import init_db
+        init_db()
+
+    def test_prediction_rows_carry_outcome_key(self):
+        from sqlalchemy import select
+        from src.db import Prediction, SessionLocal
+        from src.schedule_data import load_schedule
+        from src.suggester import SuggesterEngine
+        eng = SuggesterEngine()
+        m = load_schedule()[0]
+        eng.run_for_match(m, source="test")
+        with SessionLocal() as s:
+            keys = [r.outcome_key for r in s.execute(
+                select(Prediction).where(Prediction.match_id == m.match_id)
+            ).scalars().all()]
+        assert keys and any(k == "home_win" for k in keys)
+
+    def test_timeline_filters_by_outcome_key(self):
+        from src.cache import timeline_for_match
+        from src.schedule_data import load_schedule
+        from src.suggester import SuggesterEngine
+        eng = SuggesterEngine()
+        m = load_schedule()[0]
+        eng.run_for_match(m, source="test")
+        pts = timeline_for_match(m.match_id, outcome_key="home_win")
+        assert len(pts) >= 1
+        assert timeline_for_match(m.match_id, outcome_key="no_such_key") == []
+
+
+class TestLikelihoodBoard:
+    """Half-2 build: /api/suggestions is a likelihood-first ranking board
+    with tiered floors, no edge gate, no per-match cap."""
+
+    def setup_method(self):
+        import config
+        from fastapi.testclient import TestClient
+        from src.db import init_db
+        from api.main import app
+        config.DEMO_MODE = True
+        init_db()
+        self.config = config
+        self.client = TestClient(app)
+        self._floors = (config.SUGGEST_PRIMARY_FLOOR,
+                        config.SUGGEST_FALLBACK_FLOOR)
+        self._window = (config.HOURLY_PREDICTION_WINDOW_HOURS,
+                        config.TRACK_HOURS_AFTER_KICKOFF)
+        # make every schedule match trackable regardless of container clock
+        config.HOURLY_PREDICTION_WINDOW_HOURS = 100000
+        config.TRACK_HOURS_AFTER_KICKOFF = 100000
+        self.client.post("/api/refresh-all")  # populate predictions
+
+    def teardown_method(self):
+        (self.config.SUGGEST_PRIMARY_FLOOR,
+         self.config.SUGGEST_FALLBACK_FLOOR) = self._floors
+        (self.config.HOURLY_PREDICTION_WINDOW_HOURS,
+         self.config.TRACK_HOURS_AFTER_KICKOFF) = self._window
+
+    def test_refresh_all_shape(self):
+        data = self.client.post("/api/refresh-all").json()
+        assert data["failed"] == []
+        assert len(data["refreshed"]) == 6          # all R16 matches
+        assert isinstance(data["duration_ms"], int)
+        assert "generated_at" in data
+
+    def test_tier1_no_cap_sorted(self):
+        self.config.SUGGEST_PRIMARY_FLOOR = 0.01    # everything qualifies
+        data = self.client.get("/api/suggestions?limit=200").json()
+        assert data["tier_used"] == 1
+        s = data["suggestions"]
+        assert len(s) > self.config.MAX_SUGGESTIONS_PER_MATCH  # cap is gone
+        probs = [x["model_probability"] for x in s]
+        assert probs == sorted(probs, reverse=True)  # likelihood desc
+        assert any(x["edge"] < 0 for x in s)         # negative edge NOT gated
+        assert {"outcome_key", "expected_value", "home",
+                "away"} <= set(s[0].keys())
+
+    def test_fallback_tier_fires(self):
+        self.config.SUGGEST_PRIMARY_FLOOR = 0.999   # tier 1 empty
+        self.config.SUGGEST_FALLBACK_FLOOR = 0.01
+        data = self.client.get("/api/suggestions").json()
+        assert data["tier_used"] == 1               # int(round(0.01*100))
+        assert len(data["suggestions"]) > 0
+
+    def test_honest_empty_state(self):
+        self.config.SUGGEST_PRIMARY_FLOOR = 0.999
+        self.config.SUGGEST_FALLBACK_FLOOR = 0.999
+        data = self.client.get("/api/suggestions").json()
+        assert data["suggestions"] == []
+        assert data["tier_used"] is None

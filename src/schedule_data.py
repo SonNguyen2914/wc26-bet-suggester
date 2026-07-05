@@ -1,16 +1,42 @@
 """World Cup 2026 schedule + team stat provider — LIVE knockout edition.
 
-Real remaining Round of 16 fixtures (verified July 4, 2026). As each round
-resolves, append the quarterfinal/semifinal fixtures here — kickoffs are
-already known (QF: Jul 9-11, SF: Jul 14-15, Final: Jul 19 at MetLife).
+FIXTURES: real remaining Round of 16 matches (verified July 4, 2026).
+Hand-fed by design (auto-discovery deferred). When R16 resolves, add QFs —
+the slots/venues are already known (see the comment block below).
 
-Team stats are hand-calibrated from tournament form through the Round of 32.
-For sharper numbers, wire get_team_stats() to FBref/Transfermarkt later.
+TEAM STATS: rebuilt July 5, 2026 from real, multi-source tournament data
+(replacing the original hand-typed estimates). Sources per field:
+
+  elo      footballratings.org, "Ratings as of 4 July 2026" (live Elo table).
+           USA & Egypt were below the retrieved top slice — their values are
+           ESTIMATES (bounded < Belgium 1910; Egypt Jan-2026 archive ~1653),
+           flagged inline. TODO(Son): grab exact values from the site.
+  attack   xG-for per game from RealGM's WC26 xG tracker + FIFA official
+           match stats + OddAlerts team xG table, blended with goals/game
+           where per-match xG was partial.
+  defence  xG-against / goals-against per game from the same sources, plus
+           qualitative signals (Opta clean-sheet records, ESPN tactical
+           analysis) noted inline.
+  form     Last-5-official W/D/L strings from footballratings.org
+           (W=1, D=0.5, L=0, simple average).
+  set_piece_threat / red_card_risk / fatigue
+           HONEST ESTIMATES. Only strong direct evidence is encoded:
+           Argentina fatigue (Scaloni: "absolutely knackered", 120 min),
+           Belgium (AET comeback), Egypt (120 min + pens), USA red-card
+           risk (Balogun sent off + suspended). Everything else is a
+           reasonable default, not a measured value.
+
+CONVERSION FORMULA (tournament base xG = LEAGUE_BASE_XG = 1.30):
+  attack  = clamp(xGF_per_game / 1.30, 0.75, 1.45)
+  defence = clamp(0.55 + 0.45 * (xGA_per_game / 1.30), 0.62, 1.06)
+            (lower = better; avg xGA -> ~1.0, elite ~0.3/g -> ~0.65)
+Small documented qualitative nudges (±0.03) applied where narrative
+evidence is strong (e.g. Brazil's aging back four).
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 
 @dataclass
@@ -32,10 +58,7 @@ _SCHEDULE: list[Match] | None = None
 
 
 def load_schedule() -> list[Match]:
-    """Remaining WC26 Round of 16 fixtures, kickoff times in UTC.
-    (ET + 4h = UTC.) Matches whose kickoff has passed are automatically
-    ignored by the scheduler and API filters.
-    """
+    """Remaining WC26 Round of 16 fixtures, kickoff times in UTC (ET+4h)."""
     global _SCHEDULE
     if _SCHEDULE is None:
         _SCHEDULE = [
@@ -54,52 +77,83 @@ def load_schedule() -> list[Match]:
                   stage="knockout", venue="Mercedes-Benz Stadium, Atlanta"),
             Match("SUI_COL", "Switzerland", "Colombia", "R16", _utc(2026, 7, 7, 20),
                   stage="knockout", venue="BC Place, Vancouver"),
-            # --- Quarterfinals (add opponents as R16 resolves) ---
-            # Jul 9 21:00? Foxborough: FRA/PAR winner vs Morocco
-            # Jul 10: POR/ESP winner vs USA/BEL winner (Los Angeles)
-            # Jul 11: BRA/NOR winner vs MEX/ENG winner (Miami)
-            # Jul 11: ARG/EGY winner vs SUI/COL winner (Kansas City)
+            # --- Quarterfinals: slots known, add winners as R16 resolves ---
+            # Thu Jul 9  ~20:00 UTC  Morocco vs FRA/PAR winner   (Gillette, Boston)
+            # Fri Jul 10 ~19:00 UTC  USA/BEL w. vs POR/ESP w.    (SoFi, Inglewood)
+            # Sat Jul 11 ~21:00 UTC  BRA/NOR w. vs MEX/ENG w.    (Hard Rock, Miami)
+            # Sun Jul 12 ~01:00 UTC  ARG/EGY w. vs SUI/COL w.    (Arrowhead, KC)
         ]
     return _SCHEDULE
 
 
+def is_trackable(match: Match, now: datetime,
+                 hours_ahead: float, hours_after: float) -> bool:
+    """A match is trackable from `hours_ahead` before kickoff until
+    `hours_after` past kickoff (live odds keep moving on goals; Kalshi
+    books settle within a few hours of the final whistle)."""
+    return (match.kickoff <= now + timedelta(hours=hours_ahead)
+            and now < match.kickoff + timedelta(hours=hours_after))
+
+
 # ---------------------------------------------------------------------------
-# Team stats calibrated from WC26 tournament form (through Round of 32).
-# attack/defence are relative ratings ~1.0; form 0-1 from recent results.
+# TEAM_STATS — sourced, see module docstring for methodology & sources.
+# Comment format per team: xGF/g, xGA/g inputs -> formula outputs, evidence.
 # ---------------------------------------------------------------------------
 TEAM_STATS: dict[str, dict] = {
-    # 4-0-0 feel: France cruising (3-1, 3-0, 4-1, 3-0 vs Sweden)
-    "France":        {"attack": 1.62, "defence": 0.68, "form": 0.85, "set_piece_threat": 0.26, "red_card_risk": 0.05, "fatigue": 0.24, "elo": 2180},
-    # Brazil solid, edged Japan 2-1 in R32
-    "Brazil":        {"attack": 1.50, "defence": 0.74, "form": 0.72, "set_piece_threat": 0.28, "red_card_risk": 0.05, "fatigue": 0.22, "elo": 2130},
-    # Norway: Haaland 5 of their 9 goals; beat Ivory Coast, lost 1-4 to France
-    "Norway":        {"attack": 1.34, "defence": 0.92, "form": 0.66, "set_piece_threat": 0.24, "red_card_risk": 0.05, "fatigue": 0.20, "elo": 1940},
-    # Mexico: hosts, 2-0 over Ecuador, strong group
-    "Mexico":        {"attack": 1.22, "defence": 0.84, "form": 0.74, "set_piece_threat": 0.19, "red_card_risk": 0.06, "fatigue": 0.18, "elo": 1930},
-    # England: 4-2 Croatia, ground out results since
-    "England":       {"attack": 1.44, "defence": 0.78, "form": 0.70, "set_piece_threat": 0.32, "red_card_risk": 0.04, "fatigue": 0.22, "elo": 2090},
-    # Portugal: 2-1 Croatia in R32, won without Ronaldo starting
-    "Portugal":      {"attack": 1.48, "defence": 0.80, "form": 0.72, "set_piece_threat": 0.25, "red_card_risk": 0.06, "fatigue": 0.24, "elo": 2080},
-    # Spain: 3-0 Austria, "mojo back", first KO win since 2010
-    "Spain":         {"attack": 1.54, "defence": 0.70, "form": 0.80, "set_piece_threat": 0.20, "red_card_risk": 0.04, "fatigue": 0.22, "elo": 2140},
-    # USA: 2-0 over Bosnia, but Balogun suspended (red card) for Belgium
-    "United States": {"attack": 1.12, "defence": 0.88, "form": 0.68, "set_piece_threat": 0.21, "red_card_risk": 0.05, "fatigue": 0.18, "elo": 1900},
-    # Belgium: 3-2 AET over Senegal, KDB/Lukaku vintage but leggy
-    "Belgium":       {"attack": 1.38, "defence": 0.95, "form": 0.64, "set_piece_threat": 0.24, "red_card_risk": 0.06, "fatigue": 0.30, "elo": 2000},
-    # Argentina: Messi Golden Boot leader but scraped Cape Verde 3-2 AET
-    "Argentina":     {"attack": 1.55, "defence": 0.76, "form": 0.70, "set_piece_threat": 0.27, "red_card_risk": 0.06, "fatigue": 0.28, "elo": 2170},
-    # Egypt: first KO advancement ever, via pens; Salah-dependent
-    "Egypt":         {"attack": 1.02, "defence": 0.90, "form": 0.62, "set_piece_threat": 0.18, "red_card_risk": 0.07, "fatigue": 0.30, "elo": 1820},
-    # Switzerland: 2-0 Algeria, defensively organized as ever
-    "Switzerland":   {"attack": 1.18, "defence": 0.80, "form": 0.68, "set_piece_threat": 0.22, "red_card_risk": 0.05, "fatigue": 0.20, "elo": 1950},
-    # Colombia: 1-0 Ghana, reshaped after bad loss to France in prep
-    "Colombia":      {"attack": 1.20, "defence": 0.82, "form": 0.66, "set_piece_threat": 0.21, "red_card_risk": 0.07, "fatigue": 0.20, "elo": 1940},
-    # For QFs when they resolve:
-    "Morocco":       {"attack": 1.24, "defence": 0.76, "form": 0.76, "set_piece_threat": 0.20, "red_card_risk": 0.07, "fatigue": 0.24, "elo": 1990},
-    "Paraguay":      {"attack": 1.00, "defence": 0.84, "form": 0.62, "set_piece_threat": 0.19, "red_card_risk": 0.08, "fatigue": 0.26, "elo": 1840},
+    # xGF~2.05 (8GF/4, 0 conceded run), xGA 0.28/g (OddAlerts: 1.1 total, best
+    # in tournament). Elo #1. "Dominant" vs Austria 3-0. Form WWWDD.
+    "Spain":         {"attack": 1.45, "defence": 0.65, "form": 0.80, "set_piece_threat": 0.20, "red_card_risk": 0.04, "fatigue": 0.20, "elo": 2159},
+    # xGF~1.85 (Messi 7 goals), xGA~0.85 (conceded 2 to Cape Verde). 120-min
+    # R32; Scaloni: squad "absolutely knackered" -> fatigue 0.34. Form WWWWL.
+    "Argentina":     {"attack": 1.42, "defence": 0.84, "form": 0.80, "set_piece_threat": 0.27, "red_card_risk": 0.06, "fatigue": 0.34, "elo": 2151},
+    # xGF~1.55, xGA~1.0. Fell behind early to DR Congo, Kane rescue. WWDWW.
+    "England":       {"attack": 1.19, "defence": 0.88, "form": 0.90, "set_piece_threat": 0.30, "red_card_risk": 0.04, "fatigue": 0.22, "elo": 2046},
+    # xGF 1.98 (6.19 group xG + 1.72 vs Japan), xGA~0.65. Formula defence 0.77
+    # +0.03 qualitative: 2nd-oldest Brazil WC XI ever, ESPN flags fragility;
+    # needed 96' winner vs Japan. Form WWWDL.
+    "Brazil":        {"attack": 1.45, "defence": 0.80, "form": 0.70, "set_piece_threat": 0.27, "red_card_risk": 0.05, "fatigue": 0.24, "elo": 2031},
+    # xG diff -0.43/g (RealGM) — results outrunning underlying quality.
+    # attack blends xGF~1.2 with 2.0 goals/g finishing overperformance.
+    # defence formula -> 1.06 clamp: allowing real chance quality. Won R32
+    # via 68' pen (Ronaldo's 1st-ever WC KO goal) + 94' header. Form WDWDW.
+    "Portugal":      {"attack": 1.17, "defence": 1.06, "form": 0.80, "set_piece_threat": 0.24, "red_card_risk": 0.06, "fatigue": 0.24, "elo": 2013},
+    # xGF~1.15, xGA~0.45: 3 consecutive clean sheets (team record), grinding
+    # 1-goal wins. Form DWWWW.
+    "Colombia":      {"attack": 0.88, "defence": 0.71, "form": 0.90, "set_piece_threat": 0.22, "red_card_risk": 0.07, "fatigue": 0.20, "elo": 2004},
+    # xGF~1.30 (1.41/0.48/1.79/~1.5), xGA~0.55: 0 conceded in 4 — first team
+    # since 1994 (Opta). Formula defence 0.74, -0.02 qualitative (record run,
+    # Azteca fortress: never lost a WC match there, W8 D2). Form WWWWW.
+    "Mexico":        {"attack": 1.00, "defence": 0.72, "form": 0.95, "set_piece_threat": 0.20, "red_card_risk": 0.06, "fatigue": 0.18, "elo": 1943},
+    # xGF~1.45 (9GF/4), xGA~0.95. First KO win since 1938. Form WWWDD.
+    "Switzerland":   {"attack": 1.12, "defence": 0.88, "form": 0.80, "set_piece_threat": 0.22, "red_card_risk": 0.05, "fatigue": 0.20, "elo": 1943},
+    # xGF~1.55 but Haaland (5 of team's goals) finishing OVER xG; Ivory Coast
+    # out-created them (missed 1.75 xG). xGA~1.45 (8 GA/4 raw incl 1-4 FRA).
+    # Haaland-dependent attack, genuinely leaky defence. Form WLWWW.
+    "Norway":        {"attack": 1.19, "defence": 1.05, "form": 0.80, "set_piece_threat": 0.26, "red_card_risk": 0.05, "fatigue": 0.20, "elo": 1934},
+    # Official xGF 2.42/90 (OddAlerts, tournament-high 9.68) inflated by 5-1
+    # vs New Zealand -> damped to ~1.70. xGA~1.0. AET comeback vs Senegal:
+    # old-guard legs -> fatigue 0.32. Form WWDDW.
+    "Belgium":       {"attack": 1.31, "defence": 0.90, "form": 0.80, "set_piece_threat": 0.24, "red_card_risk": 0.06, "fatigue": 0.32, "elo": 1910},
+    # xGF~1.55 formula 1.19, -0.08: Balogun (their sharpest finisher)
+    # SUSPENDED for this match after R32 red card. xGA~1.35 (Türkiye put
+    # 2.71 xG on them). Held a clean sheet a man down vs Bosnia (resilient).
+    # ELO IS AN ESTIMATE (below Belgium 1910; FIFA rank 17). Form ~LWDWW.
+    "United States": {"attack": 1.11, "defence": 1.02, "form": 0.70, "set_piece_threat": 0.21, "red_card_risk": 0.08, "fatigue": 0.20, "elo": 1855},
+    # xGF~1.05 (Salah "off-colour" — Al Jazeera; wasted best chances),
+    # xGA~1.0. First-ever KO advancement, via 120 min + pens -> fatigue 0.30.
+    # ELO IS AN ESTIMATE (Jan-2026 archive ~1653 + solid WC run).
+    "Egypt":         {"attack": 0.81, "defence": 0.90, "form": 0.60, "set_piece_threat": 0.19, "red_card_risk": 0.07, "fatigue": 0.30, "elo": 1720},
+    # --- For QFs when R16 resolves (France elo sourced; others estimates) ---
+    # Tournament-leading 14 goals, xGF~2.3; cruising (WWWWW). Elo sourced 2134.
+    "France":        {"attack": 1.45, "defence": 0.83, "form": 0.95, "set_piece_threat": 0.25, "red_card_risk": 0.05, "fatigue": 0.18, "elo": 2134},
+    # Beat Canada 3-0, eliminated Netherlands on pens. ELO ESTIMATE.
+    "Morocco":       {"attack": 1.15, "defence": 0.81, "form": 0.85, "set_piece_threat": 0.21, "red_card_risk": 0.07, "fatigue": 0.24, "elo": 1935},
+    # Two straight 120-min matches (pens vs Germany); minimal attack
+    # (0.24-0.32 xG games). ELO ESTIMATE.
+    "Paraguay":      {"attack": 0.78, "defence": 0.85, "form": 0.60, "set_piece_threat": 0.19, "red_card_risk": 0.08, "fatigue": 0.34, "elo": 1840},
 }
 
-_DEFAULT = {"attack": 1.1, "defence": 1.0, "form": 0.5, "set_piece_threat": 0.2,
+_DEFAULT = {"attack": 1.0, "defence": 0.95, "form": 0.5, "set_piece_threat": 0.2,
             "red_card_risk": 0.06, "fatigue": 0.2, "elo": 1800}
 
 

@@ -20,6 +20,7 @@ class BetSuggestion:
     match_id: str
     market_id: str
     market_title: str
+    outcome_key: str | None
     kickoff: str
     decimal_odds: float
     model_probability: float
@@ -45,7 +46,7 @@ class SuggesterEngine:
         away_stats = get_team_stats(match.away)
         sim = self.simulator.simulate(home_stats, away_stats, stage=match.stage)
 
-        markets = self.kalshi.get_markets_for_match(match)
+        markets = self._dedupe_markets(self.kalshi.get_markets_for_match(match))
         suggestions: list[BetSuggestion] = []
 
         with SessionLocal() as session:
@@ -76,7 +77,9 @@ class SuggesterEngine:
 
                 session.add(Prediction(
                     match_id=match.match_id, market_id=mkt["market_id"],
-                    market_title=mkt["title"], model_probability=model_p,
+                    market_title=mkt["title"],
+                    outcome_key=mkt.get("outcome_key"),
+                    model_probability=model_p,
                     kalshi_odds=mkt["decimal_odds"], implied_probability=implied_p,
                     edge=edge, expected_value=ev, confidence=sim["confidence"],
                     xg_home=sim["xg"]["home"], xg_away=sim["xg"]["away"],
@@ -87,7 +90,9 @@ class SuggesterEngine:
 
                 suggestions.append(BetSuggestion(
                     match_id=match.match_id, market_id=mkt["market_id"],
-                    market_title=mkt["title"], kickoff=match.kickoff.isoformat(),
+                    market_title=mkt["title"],
+                    outcome_key=mkt.get("outcome_key"),
+                    kickoff=match.kickoff.isoformat(),
                     decimal_odds=mkt["decimal_odds"],
                     model_probability=round(model_p, 4),
                     implied_probability=round(implied_p, 4),
@@ -119,6 +124,35 @@ class SuggesterEngine:
             "source": source,
             "is_final": is_final,
         }
+
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _dedupe_markets(markets: list[dict]) -> list[dict]:
+        """Collapse Kalshi contracts that represent the same real bet.
+
+        Kalshi lists several ticker families for one outcome — e.g.
+        KXWCGAME (moneyline) and KXWCMOV-...REG (regulation win) both
+        resolve as "team wins in 90 minutes" and both classify to the
+        same outcome_key. Keep the buyer-favorable contract per key:
+        LOWEST yes_price (= highest decimal odds). Ties break to the
+        higher 24h volume. Markets without an outcome_key pass through
+        untouched — we can't assert two unclassified contracts are the
+        same bet.
+        """
+        best: dict[str, dict] = {}
+        passthrough: list[dict] = []
+        for mkt in markets:
+            key = mkt.get("outcome_key")
+            if not key:
+                passthrough.append(mkt)
+                continue
+            cur = best.get(key)
+            if cur is None or (
+                (mkt["yes_price"], -mkt.get("volume_24h", 0))
+                < (cur["yes_price"], -cur.get("volume_24h", 0))
+            ):
+                best[key] = mkt
+        return list(best.values()) + passthrough
 
     # ------------------------------------------------------------------
     @staticmethod

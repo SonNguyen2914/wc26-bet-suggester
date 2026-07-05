@@ -3,11 +3,12 @@
 Endpoints
   GET  /api/health
   GET  /api/matches/upcoming?hours_ahead=48
-  GET  /api/suggestions                      ranked TAKE bets across matches
+  GET  /api/suggestions                      likelihood ranking board (tiered)
   GET  /api/prediction/{match_id}            cached (or fresh if stale/missing)
   GET  /api/prediction/{match_id}?force_refresh=true
-  GET  /api/prediction/{match_id}/timeline   how the prediction evolved
-  POST /api/prediction/{match_id}/refresh    force a fresh run
+  GET  /api/prediction/{match_id}/timeline   how one outcome evolved
+  POST /api/prediction/{match_id}/refresh    force a fresh run (one match)
+  POST /api/refresh-all                      force fresh runs (all trackable)
   GET  /api/settings                         current thresholds
   POST /api/settings                         update thresholds
 """
@@ -23,9 +24,10 @@ from sqlalchemy import select
 
 import config
 from src.cache import latest_for_match, timeline_for_match
-from src.db import (SessionLocal, Suggestion, get_setting, init_db,
+from src.db import (SessionLocal, get_setting, init_db,
                     set_setting, utcnow)
-from src.schedule_data import get_match, load_schedule
+from src.model_cache import refresh_model_cache
+from src.schedule_data import get_match, is_trackable, load_schedule
 from src.suggester import SuggesterEngine
 
 app = FastAPI(title="Kalshi WC26 Bet Suggester", version="0.1.0")
@@ -77,53 +79,59 @@ def upcoming_matches(hours_ahead: int = Query(48, ge=1, le=720)):
 
 
 @app.get("/api/suggestions")
-def suggestions(limit: int = Query(25, ge=1, le=100)):
-    """Latest TAKE suggestions across all matches, ranked by EV."""
-    with SessionLocal() as session:
-        rows = session.execute(
-            select(Suggestion)
-            .where(Suggestion.recommendation == "TAKE",
-                   Suggestion.kickoff > utcnow())
-            .order_by(Suggestion.created_at.desc())
-            .limit(300)
-        ).scalars().all()
+def suggestions(limit: int = Query(50, ge=1, le=200)):
+    """Ranking board: every market on every trackable match, filtered by
+    LIKELIHOOD only — edge is displayed, never a gate — sorted most-likely
+    first with a deterministic tiebreak (likelihood ↓, edge ↓, kickoff ↑).
 
-    # de-dupe: keep newest row per market
-    seen, unique = set(), []
-    for r in rows:
-        if r.market_id in seen:
+    Tier 1 keeps markets at/above SUGGEST_PRIMARY_FLOOR (49%). If nothing
+    across ALL matches clears it, tier 2 falls back to SUGGEST_FALLBACK_FLOOR
+    (40%). If even that is empty, the board is honestly empty: tier_used is
+    null so the frontend can say so instead of pretending. No per-match cap —
+    one match may contribute many rows. TAKE/alert logic stays edge-based
+    elsewhere; this endpoint is purely the likelihood board.
+    """
+    now = utcnow()
+    pool: list[dict] = []
+    for m in load_schedule():
+        if not is_trackable(m, now, config.HOURLY_PREDICTION_WINDOW_HOURS,
+                            config.TRACK_HOURS_AFTER_KICKOFF):
             continue
-        seen.add(r.market_id)
-        # Kelly fraction: the honest ranking — how much of a bankroll a
-        # rational bettor would stake. Penalizes longshots that raw EV loves.
-        b = max((r.kalshi_odds or 1.01) - 1, 0.01)
-        kelly = max((r.model_probability * (b + 1) - 1) / b, 0.0)
-        unique.append({
-            "match_id": r.match_id,
-            "market_id": r.market_id,
-            "market_title": r.market_title,
-            "kickoff": r.kickoff.isoformat() if r.kickoff else None,
-            "kalshi_odds": r.kalshi_odds,
-            "model_probability": r.model_probability,
-            "implied_probability": r.implied_probability,
-            "edge": r.edge,
-            "expected_value": r.expected_value,
-            "kelly_fraction": round(kelly, 4),
-            "confidence": r.confidence,
-            "is_final": r.is_final,
-            "reason": r.reason,
-        })
-    # Rank by Kelly, then cap per match so one opinion can't flood the list
-    unique.sort(key=lambda x: x["kelly_fraction"], reverse=True)
-    per_match: dict[str, int] = {}
-    capped = []
-    for s in unique:
-        n = per_match.get(s["match_id"], 0)
-        if n >= config.MAX_SUGGESTIONS_PER_MATCH:
+        snap = latest_for_match(m.match_id)
+        if not snap:
             continue
-        per_match[s["match_id"]] = n + 1
-        capped.append(s)
-    return {"suggestions": capped[:limit], "generated_at": utcnow().isoformat()}
+        for mkt in snap["markets"]:
+            pool.append({
+                "match_id": m.match_id,
+                "home": m.home,
+                "away": m.away,
+                "market_id": mkt["market_id"],
+                "market_title": mkt["market_title"],
+                "outcome_key": mkt.get("outcome_key"),
+                "kickoff": m.kickoff.isoformat(),
+                "kalshi_odds": mkt["kalshi_odds"],
+                "model_probability": mkt["model_probability"],
+                "implied_probability": mkt["implied_probability"],
+                "edge": mkt["edge"],
+                "expected_value": mkt["expected_value"],
+                "confidence": snap["confidence"],
+                "is_final": snap["is_final"],
+            })
+
+    tier_used = None
+    floor = config.SUGGEST_PRIMARY_FLOOR
+    board = [s for s in pool if s["model_probability"] >= floor]
+    if board:
+        tier_used = int(round(floor * 100))
+    else:
+        floor = config.SUGGEST_FALLBACK_FLOOR
+        board = [s for s in pool if s["model_probability"] >= floor]
+        if board:
+            tier_used = int(round(floor * 100))
+
+    board.sort(key=lambda s: (-s["model_probability"], -s["edge"], s["kickoff"]))
+    return {"suggestions": board[:limit], "tier_used": tier_used,
+            "generated_at": now.isoformat()}
 
 
 @app.get("/api/prediction/{match_id}")
@@ -139,6 +147,7 @@ def get_prediction(match_id: str, force_refresh: bool = False):
 
     t0 = time.time()
     result = engine.run_for_match(match, source="on_demand")
+    refresh_model_cache(result)   # keep the ripeness poller's edge current
     fresh = latest_for_match(match_id)
     return {
         "freshness": "fresh",
@@ -149,11 +158,11 @@ def get_prediction(match_id: str, force_refresh: bool = False):
 
 
 @app.get("/api/prediction/{match_id}/timeline")
-def prediction_timeline(match_id: str, market_suffix: str = "HOME_WIN"):
+def prediction_timeline(match_id: str, outcome_key: str = "home_win"):
     if not get_match(match_id):
         raise HTTPException(404, f"Unknown match_id '{match_id}'")
-    points = timeline_for_match(match_id, market_suffix=market_suffix)
-    return {"match_id": match_id, "market_suffix": market_suffix,
+    points = timeline_for_match(match_id, outcome_key=outcome_key)
+    return {"match_id": match_id, "outcome_key": outcome_key,
             "points": points, "count": len(points)}
 
 
@@ -163,9 +172,36 @@ def refresh_prediction(match_id: str):
     if not match:
         raise HTTPException(404, f"Unknown match_id '{match_id}'")
     result = engine.run_for_match(match, source="on_demand")
+    refresh_model_cache(result)   # keep the ripeness poller's edge current
     return {"status": "refreshed", "match_id": match_id,
             "suggestions": result["suggestions"],
             "generated_at": result["generated_at"]}
+
+
+@app.post("/api/refresh-all")
+def refresh_all():
+    """Force a fresh simulation + live Kalshi prices for every trackable
+    match. One failing match never blocks the rest: it lands in `failed`
+    and the loop continues, so the response always says exactly which
+    matches are current and which are showing last-known data."""
+    now = utcnow()
+    t0 = time.time()
+    refreshed: list[str] = []
+    failed: list[str] = []
+    for m in load_schedule():
+        if not is_trackable(m, now, config.HOURLY_PREDICTION_WINDOW_HOURS,
+                            config.TRACK_HOURS_AFTER_KICKOFF):
+            continue
+        try:
+            result = engine.run_for_match(m, source="on_demand")
+            refresh_model_cache(result)
+            refreshed.append(m.match_id)
+        except Exception as exc:          # isolate, report, move on
+            print(f"[refresh-all] {m.match_id} FAILED: {exc}")
+            failed.append(m.match_id)
+    return {"refreshed": refreshed, "failed": failed,
+            "duration_ms": round((time.time() - t0) * 1000),
+            "generated_at": utcnow().isoformat()}
 
 
 # ---------------------------------------------------------------------------

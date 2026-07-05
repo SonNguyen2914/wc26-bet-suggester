@@ -83,7 +83,7 @@ class TestTiming:
         timing = {"score": 90, "current_edge": 0.10, "current_odds": 2.5,
                   "reasons": ["test"]}
         assert should_alert(self.MKT, timing) is True
-        save_alert("BRA_SRB", self.MKT, "test market", timing)
+        save_alert(load_schedule()[0].match_id, self.MKT, "test market", timing)
         assert should_alert(self.MKT, timing) is False  # cooldown active
 
 
@@ -96,7 +96,7 @@ class TestWatchlistAPI:
             s.commit()
 
     def test_add_list_remove(self):
-        body = {"match_id": "BRA_SRB", "market_id": "WC26-BRA_SRB-HOME_WIN",
+        body = {"match_id": load_schedule()[0].match_id, "market_id": "TEST-WATCH-MKT",
                 "market_title": "Brazil to win"}
         assert self.client.post("/api/watchlist", json=body).json()["status"] == "watching"
         assert self.client.post("/api/watchlist", json=body).json()["status"] == "already_watching"
@@ -106,7 +106,7 @@ class TestWatchlistAPI:
         assert "timing" in wl["watchlist"][0]
 
         assert self.client.delete(
-            "/api/watchlist/WC26-BRA_SRB-HOME_WIN").json()["status"] == "removed"
+            "/api/watchlist/TEST-WATCH-MKT").json()["status"] == "removed"
         assert self.client.get("/api/watchlist").json()["watchlist"] == []
 
     def test_unknown_match_rejected(self):
@@ -114,7 +114,7 @@ class TestWatchlistAPI:
         assert self.client.post("/api/watchlist", json=body).status_code == 404
 
     def test_timing_endpoint(self):
-        r = self.client.get("/api/timing/BRA_SRB/WC26-BRA_SRB-HOME_WIN")
+        r = self.client.get(f"/api/timing/{load_schedule()[0].match_id}/TEST-WATCH-MKT")
         assert r.status_code == 200
         assert "score" in r.json()
 
