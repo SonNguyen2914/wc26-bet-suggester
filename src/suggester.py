@@ -47,6 +47,74 @@ class SuggesterEngine:
         self.simulator = MatchSimulator()
 
     # ------------------------------------------------------------------
+    def price_live(self, match: Match, current_home: int, current_away: int,
+                   minutes_elapsed: float, red_home: bool = False,
+                   red_away: bool = False,
+                   attack_home_mult: float = 1.0, attack_away_mult: float = 1.0
+                   ) -> dict:
+        """Price every current Kalshi market against a LIVE, in-progress
+        state (Layer 3 manual entry). Uses simulate_remaining() — score
+        seeded, time-scaled, known red cards, plus optional user-set attack
+        levers for qualitative reads ("team B chasing"). The multipliers are
+        the USER's transparent adjustment, applied to the raw stats before
+        the sim; the response echoes them back so nothing is hidden.
+
+        Deliberately does NOT persist and does NOT gate on edge: live edge
+        vs. a market that already knows the score is informational only, not
+        a signal. Never resurrect the aggressive TAKE board mid-match.
+        """
+        home_stats = dict(get_team_stats(match.home))
+        away_stats = dict(get_team_stats(match.away))
+        home_stats["attack"] = home_stats["attack"] * attack_home_mult
+        away_stats["attack"] = away_stats["attack"] * attack_away_mult
+
+        sim = self.simulator.simulate_remaining(
+            home_stats, away_stats, current_home, current_away,
+            minutes_elapsed=minutes_elapsed, stage=match.stage,
+            red_home=red_home, red_away=red_away)
+
+        markets = self._dedupe_markets(self.kalshi.get_markets_for_match(match))
+        rows: list[dict] = []
+        for mkt in markets:
+            raw_model_p = self.simulator.prob_for_outcome_key(
+                sim, mkt["outcome_key"])
+            if raw_model_p is None:
+                continue
+            implied_p = mkt["yes_price"]
+            model_p = (config.MODEL_WEIGHT * raw_model_p
+                       + (1 - config.MODEL_WEIGHT) * implied_p)
+            rows.append({
+                "market_id": mkt["market_id"],
+                "market_title": mkt["title"],
+                "outcome_key": mkt.get("outcome_key"),
+                "kalshi_odds": mkt["decimal_odds"],
+                # what the market currently thinks vs. our live read
+                "market_probability": round(implied_p, 4),
+                "live_model_probability": round(model_p, 4),
+                # informational only — NOT a betting signal in-play
+                "difference": round(model_p - implied_p, 4),
+                "volume_24h": mkt["volume_24h"],
+            })
+
+        rows.sort(key=lambda r: r["live_model_probability"], reverse=True)
+        return {
+            "match_id": match.match_id,
+            "teams": {"home": match.home, "away": match.away},
+            "stage": match.stage,
+            "live_state": sim["live_state"],
+            "live_outcomes": sim["outcomes"],
+            "live_advance": sim.get("advance"),
+            "live_confidence": sim["confidence"],
+            "user_attack_levers": {"home": attack_home_mult,
+                                   "away": attack_away_mult},
+            "markets": rows,
+            "generated_at": utcnow().isoformat(),
+            "disclaimer": ("Live estimate given the entered state. The market "
+                           "already reflects the score; differences are "
+                           "informational, not exploitable edge."),
+        }
+
+    # ------------------------------------------------------------------
     def run_for_match(self, match: Match, source: str = "scheduled",
                       is_final: bool = False) -> dict:
         """Simulate a match, price every Kalshi market on it, persist, return."""

@@ -8,6 +8,7 @@ Endpoints
   GET  /api/prediction/{match_id}?force_refresh=true
   GET  /api/prediction/{match_id}/timeline   how one outcome evolved
   POST /api/prediction/{match_id}/refresh    force a fresh run (one match)
+  POST /api/prediction/{match_id}/live       price markets vs a live state
   POST /api/refresh-all                      force fresh runs (all trackable)
   GET  /api/settings                         current thresholds
   POST /api/settings                         update thresholds
@@ -155,6 +156,41 @@ def get_prediction(match_id: str, force_refresh: bool = False):
         "suggestions": result["suggestions"],
         **fresh,
     }
+
+
+class LiveStateIn(BaseModel):
+    current_home: int = 0
+    current_away: int = 0
+    minutes_elapsed: float = 0.0
+    red_home: bool = False
+    red_away: bool = False
+    # user-set attack levers for qualitative reads (1.0 = no adjustment)
+    attack_home_mult: float = 1.0
+    attack_away_mult: float = 1.0
+
+
+@app.post("/api/prediction/{match_id}/live")
+def live_prediction(match_id: str, state: LiveStateIn):
+    """Layer 3: price current markets against a manually-entered live state.
+    Ephemeral (not persisted), edge-ungated, honestly framed — see
+    SuggesterEngine.price_live()."""
+    match = get_match(match_id)
+    if not match:
+        raise HTTPException(404, f"Unknown match_id '{match_id}'")
+    if state.current_home < 0 or state.current_away < 0:
+        raise HTTPException(422, "score cannot be negative")
+    if not (0 <= state.minutes_elapsed <= 130):
+        raise HTTPException(422, "minutes_elapsed out of range")
+    for m in (state.attack_home_mult, state.attack_away_mult):
+        if not (0.25 <= m <= 3.0):
+            raise HTTPException(422, "attack lever out of range (0.25-3.0)")
+    try:
+        return engine.price_live(
+            match, state.current_home, state.current_away,
+            state.minutes_elapsed, state.red_home, state.red_away,
+            state.attack_home_mult, state.attack_away_mult)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
 
 
 @app.get("/api/prediction/{match_id}/timeline")
