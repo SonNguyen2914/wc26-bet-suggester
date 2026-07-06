@@ -66,3 +66,16 @@ SUGGEST_FALLBACK_FLOOR = float(os.getenv("SUGGEST_FALLBACK_FLOOR", "0.40"))
 # only once it's truly done: kickoff + 4h covers 90 min + ET + pens + Kalshi
 # book-settling. Applies to the scheduler, the poller, and the board.
 TRACK_HOURS_AFTER_KICKOFF = float(os.getenv("TRACK_HOURS_AFTER_KICKOFF", "4"))
+
+# --- Live match feed (Layer 2: API-Football) ------------------------------
+# Optional. When API_FOOTBALL_KEY is set, the /live endpoint can auto-fetch
+# the real score/minute/red-cards instead of the user typing them. Free tier
+# is 100 requests/day, so calls are budgeted: a hard daily cap (stop before
+# the limit) plus a short cache so repeated reads of the same match don't
+# each cost a request. World Cup is league id 1 in API-Football.
+API_FOOTBALL_KEY = os.getenv("API_FOOTBALL_KEY", "")
+API_FOOTBALL_BASE = os.getenv("API_FOOTBALL_BASE", "https://v3.football.api-sports.io")
+API_FOOTBALL_LEAGUE_ID = int(os.getenv("API_FOOTBALL_LEAGUE_ID", "1"))
+API_FOOTBALL_SEASON = int(os.getenv("API_FOOTBALL_SEASON", "2026"))
+API_FOOTBALL_DAILY_CAP = int(os.getenv("API_FOOTBALL_DAILY_CAP", "90"))  # < 100
+API_FOOTBALL_CACHE_SECONDS = int(os.getenv("API_FOOTBALL_CACHE_SECONDS", "20"))

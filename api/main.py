@@ -9,6 +9,8 @@ Endpoints
   GET  /api/prediction/{match_id}/timeline   how one outcome evolved
   POST /api/prediction/{match_id}/refresh    force a fresh run (one match)
   POST /api/prediction/{match_id}/live       price markets vs a live state
+  GET  /api/prediction/{match_id}/live-state  auto-fetch live state (feed)
+  GET  /api/live-feed/budget                  API-Football calls remaining today
   POST /api/refresh-all                      force fresh runs (all trackable)
   GET  /api/settings                         current thresholds
   POST /api/settings                         update thresholds
@@ -27,6 +29,7 @@ import config
 from src.cache import latest_for_match, timeline_for_match
 from src.db import (SessionLocal, get_setting, init_db,
                     set_setting, utcnow)
+from src.live_feed import budget_status, live_state_for
 from src.model_cache import refresh_model_cache
 from src.schedule_data import get_match, is_trackable, load_schedule
 from src.suggester import SuggesterEngine
@@ -191,6 +194,43 @@ def live_prediction(match_id: str, state: LiveStateIn):
             state.attack_home_mult, state.attack_away_mult)
     except ValueError as exc:
         raise HTTPException(422, str(exc))
+
+
+@app.get("/api/prediction/{match_id}/live-state")
+def fetch_live_state(match_id: str):
+    """Layer 2: auto-fetch the real current state (score/minute/red cards)
+    for a match from API-Football, so the live panel can pre-fill instead of
+    the user typing it. Returns {available: false, ...} (never an error) when
+    the feed is unconfigured, over budget, or the match isn't live — the UI
+    then falls back to manual entry."""
+    match = get_match(match_id)
+    if not match:
+        raise HTTPException(404, f"Unknown match_id '{match_id}'")
+    state = live_state_for(match.home, match.away)
+    if state is None:
+        return {"available": False, "match_id": match_id,
+                "budget": budget_status(),
+                "reason": ("feed not configured" if not config.API_FOOTBALL_KEY
+                           else "no live match found or feed unavailable")}
+    return {
+        "available": True,
+        "match_id": match_id,
+        "current_home": state["home_goals"],
+        "current_away": state["away_goals"],
+        "minutes_elapsed": state["minutes_elapsed"],
+        "red_home": state["red_home"],
+        "red_away": state["red_away"],
+        "status_short": state["status_short"],
+        "is_live": state["is_live"],
+        "is_finished": state["is_finished"],
+        "budget": budget_status(),
+    }
+
+
+@app.get("/api/live-feed/budget")
+def live_feed_budget():
+    """How many API-Football calls remain today (transparency + debugging)."""
+    return budget_status()
 
 
 @app.get("/api/prediction/{match_id}/timeline")
