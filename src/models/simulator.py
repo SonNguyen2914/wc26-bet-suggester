@@ -23,6 +23,17 @@ ET_MINUTES = 30
 # so the continuation resolves unbroken ties at exactly 50/50.
 PENALTY_HOME_WIN_P = 0.5
 
+# --- Red-card effect (Piece 3) ----------------------------------------------
+# Vecer, Kopriva & Ichiba (2009), "Estimating the Effect of the Red Card in
+# Soccer", J. Quantitative Analysis in Sports 5(1): estimated from in-play
+# betting data on FIFA World Cup 2006 + Euro 2008 (same competition class as
+# ours). The sanctioned team's scoring intensity falls to ~2/3 of its
+# original rate; the opponent's rises by a factor of ~5/4. Direction
+# corroborated by van Ours & van Tuijl (2017, Empirical Economics) on WC
+# matches 1998-2014. Replaces the previous hand-guessed 0.70 / 1.15.
+RED_CARD_OWN_MULT = 0.67   # carded team's rate: x ~2/3
+RED_CARD_OPP_MULT = 1.25   # opponent's rate:    x ~5/4
+
 
 class MatchSimulator:
     def __init__(self, n_simulations: int | None = None, seed: int | None = None):
@@ -47,11 +58,11 @@ class MatchSimulator:
         if stage == "knockout":
             lam_home *= 0.85
             lam_away *= 0.85
-        # a red card costs the carded team ~30% of remaining xG and gifts ~15%
-        lam_home = np.where(red_home, lam_home * 0.70, lam_home)
-        lam_away = np.where(red_home, lam_away * 1.15, lam_away)
-        lam_away = np.where(red_away, lam_away * 0.70, lam_away)
-        lam_home = np.where(red_away, lam_home * 1.15, lam_home)
+        # Red card: sourced coefficients (see RED_CARD_* constants above)
+        lam_home = np.where(red_home, lam_home * RED_CARD_OWN_MULT, lam_home)
+        lam_away = np.where(red_home, lam_away * RED_CARD_OPP_MULT, lam_away)
+        lam_away = np.where(red_away, lam_away * RED_CARD_OWN_MULT, lam_away)
+        lam_home = np.where(red_away, lam_home * RED_CARD_OPP_MULT, lam_home)
 
         goals_home = self.rng.poisson(lam_home)
         goals_away = self.rng.poisson(lam_away)
@@ -179,9 +190,9 @@ class MatchSimulator:
             reflect FINAL totals automatically (e.g. at 1-0, over_0_5 is
             exactly 1.0 and btts is exactly P(away scores in remainder)).
           - Red cards are KNOWN boolean inputs (they happened or they
-            didn't), not sampled risks. Coefficients match the pre-match
-            model (carded side x0.70, opponent x1.15) pending Piece-3
-            literature verification.
+            didn't), not sampled risks. Coefficients are literature-sourced
+            (Vecer et al. 2009, WC 2006 + Euro 2008 in-play data: carded
+            side x~2/3, opponent x~5/4 — see RED_CARD_* constants).
 
         v1 limitations (documented, deliberate):
           - minutes_elapsed >= 90 treats regulation as complete (stoppage
@@ -212,11 +223,11 @@ class MatchSimulator:
             rate_home *= 0.85
             rate_away *= 0.85
         if red_home:                     # known state, applies to remainder
-            rate_home *= 0.70
-            rate_away *= 1.15
+            rate_home *= RED_CARD_OWN_MULT
+            rate_away *= RED_CARD_OPP_MULT
         if red_away:
-            rate_away *= 0.70
-            rate_home *= 1.15
+            rate_away *= RED_CARD_OWN_MULT
+            rate_home *= RED_CARD_OPP_MULT
         lam_home = rate_home * frac_remaining
         lam_away = rate_away * frac_remaining
 
