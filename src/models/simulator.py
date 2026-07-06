@@ -45,6 +45,19 @@ class MatchSimulator:
         goals_home = self.rng.poisson(lam_home)
         goals_away = self.rng.poisson(lam_away)
 
+        return self._aggregate_outcomes(goals_home, goals_away, stage,
+                                        xg_home, xg_away)
+
+    # ------------------------------------------------------------------
+    def _aggregate_outcomes(self, goals_home: np.ndarray, goals_away: np.ndarray,
+                            stage: str, xg_home: float, xg_away: float) -> dict:
+        """Shared tail of every simulation: per-sim FINAL scores in, the
+        outcome/props/scorelines/confidence dict out.
+
+        Used by both the pre-match simulate() and the live
+        simulate_remaining() so their return shapes structurally cannot
+        drift apart — prob_for_outcome_key() works on either result.
+        """
         # --- Aggregate outcomes
         p_home = float(np.mean(goals_home > goals_away))
         p_draw = float(np.mean(goals_home == goals_away))
@@ -96,6 +109,79 @@ class MatchSimulator:
             "scorelines": scorelines,
             "confidence": round(float(confidence), 4),
         }
+
+    # ------------------------------------------------------------------
+    def simulate_remaining(self, home_raw: dict, away_raw: dict,
+                           current_home: int, current_away: int,
+                           minutes_elapsed: float, stage: str = "group",
+                           red_home: bool = False, red_away: bool = False) -> dict:
+        """Live in-play core (Piece 1): simulate only the REMAINDER of a
+        match from a known state, seeded with the current score.
+
+        Answers "who wins from HERE?" instead of the pre-match "who wins
+        from 0-0?". Every input is checkable state, not a guess:
+          - Goal rates come from the same xG model, time-scaled by
+            (90 - minutes_elapsed) / 90. A Poisson process is memoryless,
+            so the remaining-interval rate scales linearly with time left.
+          - The current score seeds every simulation; remaining sampled
+            goals are added on top. Totals/BTTS/scorelines therefore
+            reflect FINAL totals automatically (e.g. at 1-0, over_0_5 is
+            exactly 1.0 and btts is exactly P(away scores in remainder)).
+          - Red cards are KNOWN boolean inputs (they happened or they
+            didn't), not sampled risks. Coefficients match the pre-match
+            model (carded side x0.70, opponent x1.15) pending Piece-3
+            literature verification.
+
+        v1 limitations (documented, deliberate):
+          - minutes_elapsed >= 90 treats regulation as complete (stoppage
+            time is not modeled); the current score is returned as final.
+          - Knockout ET/penalties are NOT simulated; `home_advance` via
+            prob_for_outcome_key() still uses the 0.5-of-draws coin-flip
+            approximation. Piece 2 replaces that with a real continuation.
+          - The knockout x0.85 goal damping is inherited from the
+            pre-match model (known hand-tuned debt) for consistency.
+
+        Returns the exact same shape as simulate(), plus a "live_state"
+        block, so prob_for_outcome_key() works on either result unchanged.
+        """
+        if minutes_elapsed < 0:
+            raise ValueError("minutes_elapsed cannot be negative")
+        if current_home < 0 or current_away < 0:
+            raise ValueError("current score cannot be negative")
+
+        xg_home, xg_away = predict_xg(home_raw, away_raw)
+        frac_remaining = max(0.0, (90.0 - float(minutes_elapsed)) / 90.0)
+
+        lam_home, lam_away = xg_home, xg_away
+        if stage == "knockout":          # same damping as pre-match (debt)
+            lam_home *= 0.85
+            lam_away *= 0.85
+        if red_home:                     # known state, applies to remainder
+            lam_home *= 0.70
+            lam_away *= 1.15
+        if red_away:
+            lam_away *= 0.70
+            lam_home *= 1.15
+        lam_home *= frac_remaining
+        lam_away *= frac_remaining
+
+        rem_home = self.rng.poisson(lam_home, self.n)
+        rem_away = self.rng.poisson(lam_away, self.n)
+        goals_home = current_home + rem_home
+        goals_away = current_away + rem_away
+
+        result = self._aggregate_outcomes(goals_home, goals_away, stage,
+                                          xg_home, xg_away)
+        result["live_state"] = {
+            "score": f"{current_home}-{current_away}",
+            "minutes_elapsed": round(float(minutes_elapsed), 1),
+            "minutes_remaining": round(90.0 * frac_remaining, 1),
+            "red_home": bool(red_home),
+            "red_away": bool(red_away),
+            "lambda_remaining": {"home": round(lam_home, 3),
+                                 "away": round(lam_away, 3)},
+        }
+        return result
 
     # ------------------------------------------------------------------
     def prob_for_outcome_key(self, sim: dict, outcome_key: str) -> float | None:
