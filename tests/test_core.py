@@ -133,10 +133,10 @@ class TestDedupeMarkets:
 
     def test_tie_breaks_to_higher_volume(self):
         from src.suggester import SuggesterEngine
-        mkts = [self._mkt("A", "away_win", 0.30, 500),
-                self._mkt("B", "away_win", 0.30, 8000)]
+        mkts = [self._mkt("KXWCGAME-X-NOR", "away_win", 0.30, 500),
+                self._mkt("KXWCMOV-X-NORREG", "away_win", 0.30, 8000)]
         out = SuggesterEngine._dedupe_markets(mkts)
-        assert len(out) == 1 and out[0]["market_id"] == "B"
+        assert len(out) == 1 and out[0]["market_id"] == "KXWCMOV-X-NORREG"
 
     def test_distinct_keys_untouched(self):
         from src.suggester import SuggesterEngine
@@ -259,3 +259,45 @@ class TestLikelihoodBoard:
         data = self.client.get("/api/suggestions").json()
         assert data["suggestions"] == []
         assert data["tier_used"] is None
+
+
+class TestFirstGoalHotfix:
+    """Regression: KXWCTEAMFIRSTGOAL player props must never classify as
+    win markets, scorer language must never map via fallback, and dedup
+    must never let an unverified family replace a real moneyline."""
+
+    def _match(self):
+        from src.schedule_data import load_schedule
+        return [m for m in load_schedule() if m.match_id == "MEX_ENG"][0]
+
+    def test_teamfirstgoal_family_skipped(self):
+        from src.kalshi_client import _classify_outcome
+        mkt = {"ticker": "KXWCTEAMFIRSTGOAL-26JUL05MEXENG-MEX-ELIRA6",
+               "title": "Mexico First Goalscorer",
+               "yes_sub_title": "E. Lira"}
+        assert _classify_outcome(
+            self._match(), mkt,
+            "KXWCTEAMFIRSTGOAL-26JUL05MEXENG") is None
+
+    def test_scorer_language_blocked_in_fallback(self):
+        from src.kalshi_client import _classify_outcome
+        # Unknown family + prop language: guard must return None even
+        # though exactly one team is named.
+        mkt = {"ticker": "KXWCNEWPROP-26JUL05MEXENG-MEX",
+               "title": "Mexico to score the first goal"}
+        assert _classify_outcome(
+            self._match(), mkt, "KXWCNEWPROP-26JUL05MEXENG") is None
+
+    def test_dedup_never_collapses_unverified_families(self):
+        from src.suggester import SuggesterEngine
+        real = {"market_id": "KXWCGAME-26JUL05MEXENG-MEX",
+                "outcome_key": "home_win", "yes_price": 0.34,
+                "volume_24h": 9000, "decimal_odds": 2.94,
+                "title": "Mexico to win (90 min)"}
+        prop = {"market_id": "KXWCXX-26JUL05MEXENG-MEX-PLAYER1",
+                "outcome_key": "home_win", "yes_price": 0.01,
+                "volume_24h": 40, "decimal_odds": 100.0,
+                "title": "mislabeled prop"}
+        out = SuggesterEngine._dedupe_markets([real, prop])
+        ids = {m["market_id"] for m in out}
+        assert len(out) == 2 and real["market_id"] in ids  # moneyline survives

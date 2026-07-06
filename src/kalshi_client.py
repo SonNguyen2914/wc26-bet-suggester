@@ -180,6 +180,12 @@ SKIP_FAMILIES = (
     # the text fallback was mislabeling it as home/away_win. Our 90-min sim
     # doesn't model goal order, so skip until a real first-goal model exists.
     "KXWCFTTS",
+    # KXWCTEAMFIRSTGOAL = per-PLAYER first-goalscorer props (e.g.
+    # ...-MEX-ELIRA6 = "E. Lira scores first"). Their titles name one team,
+    # so the text fallback labeled them home/away_win — and dedup then let a
+    # 1-cent player prop silently replace the real moneyline (the
+    # MEX_ENG 16.67x incident). No player model here; skip the family.
+    "KXWCTEAMFIRSTGOAL",
 )
 
 
@@ -256,7 +262,10 @@ def _classify_outcome(match: Match, market: dict,
     if any(bad in text for bad in ("corner", "1st half", "2nd half",
                                    "first half", "second half", "wins by",
                                    "score over", "card", "announcer",
-                                   "half score", "halftime", "half-time")):
+                                   "half score", "halftime", "half-time",
+                                   "first goal", "goalscorer", "goal scorer",
+                                   "score first", "scores first",
+                                   "first to score")):
         return None
 
     # For winner-style events the market title names BOTH teams

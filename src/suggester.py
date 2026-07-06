@@ -14,6 +14,14 @@ from src.kalshi_client import KalshiClient
 from src.models.simulator import MatchSimulator
 from src.schedule_data import Match, get_team_stats
 
+# Families verified to list the SAME real bet (the 90-minute winner) on two
+# tickers. ONLY these may collapse in dedup. Expanding this set requires
+# reading Kalshi's settlement rules for the new family first — never add a
+# family just because its rows LOOK like duplicates (see the
+# KXWCTEAMFIRSTGOAL incident: a misclassified 1c player prop nearly
+# replaced the real moneyline).
+_INTERCHANGEABLE_FAMILIES = frozenset({"KXWCGAME", "KXWCMOV"})
+
 
 @dataclass
 class BetSuggestion:
@@ -130,20 +138,24 @@ class SuggesterEngine:
     def _dedupe_markets(markets: list[dict]) -> list[dict]:
         """Collapse Kalshi contracts that represent the same real bet.
 
-        Kalshi lists several ticker families for one outcome — e.g.
-        KXWCGAME (moneyline) and KXWCMOV-...REG (regulation win) both
-        resolve as "team wins in 90 minutes" and both classify to the
-        same outcome_key. Keep the buyer-favorable contract per key:
-        LOWEST yes_price (= highest decimal odds). Ties break to the
-        higher 24h volume. Markets without an outcome_key pass through
-        untouched — we can't assert two unclassified contracts are the
-        same bet.
+        ONLY families verified to be the identical bet may collapse:
+        KXWCGAME (moneyline) and KXWCMOV-...REG (regulation win) both list
+        the 90-minute winner. Within that pair, keep the buyer-favorable
+        contract per outcome_key: LOWEST yes_price (= highest decimal
+        odds), ties to higher 24h volume.
+
+        Everything else passes through untouched even when outcome_keys
+        collide — a visible duplicate is diagnosable, a silently replaced
+        real price is not. (Lesson learned: a misclassified 1-cent
+        KXWCTEAMFIRSTGOAL player prop once landed in home_win and dedup
+        discarded the actual moneyline in its favor.)
         """
         best: dict[str, dict] = {}
         passthrough: list[dict] = []
         for mkt in markets:
             key = mkt.get("outcome_key")
-            if not key:
+            family = str(mkt.get("market_id", "")).split("-")[0].upper()
+            if not key or family not in _INTERCHANGEABLE_FAMILIES:
                 passthrough.append(mkt)
                 continue
             cur = best.get(key)
