@@ -12,6 +12,17 @@ import config
 from src.models.features import stage_uncertainty
 from src.models.xg_model import MODEL_VERSION, predict_xg
 
+# --- Knockout continuation (Piece 2) ---------------------------------------
+# Extra time = 30 more minutes of the same Poisson process, so each team's ET
+# rate is its effective per-90 rate x (30/90). Real ET scoring behavior may
+# differ (tired legs, caution), but quantifying that would be a hand-guess;
+# linear time-scaling is the guess-free default (Poisson is memoryless).
+ET_MINUTES = 30
+# Penalty shootouts are empirically near coin flips — only mildly
+# skill-influenced. Any tilt we invented would be an ungrounded number,
+# so the continuation resolves unbroken ties at exactly 50/50.
+PENALTY_HOME_WIN_P = 0.5
+
 
 class MatchSimulator:
     def __init__(self, n_simulations: int | None = None, seed: int | None = None):
@@ -46,17 +57,26 @@ class MatchSimulator:
         goals_away = self.rng.poisson(lam_away)
 
         return self._aggregate_outcomes(goals_home, goals_away, stage,
-                                        xg_home, xg_away)
+                                        xg_home, xg_away,
+                                        lam90_home=lam_home,
+                                        lam90_away=lam_away)
 
     # ------------------------------------------------------------------
     def _aggregate_outcomes(self, goals_home: np.ndarray, goals_away: np.ndarray,
-                            stage: str, xg_home: float, xg_away: float) -> dict:
+                            stage: str, xg_home: float, xg_away: float,
+                            lam90_home=None, lam90_away=None) -> dict:
         """Shared tail of every simulation: per-sim FINAL scores in, the
         outcome/props/scorelines/confidence dict out.
 
         Used by both the pre-match simulate() and the live
         simulate_remaining() so their return shapes structurally cannot
         drift apart — prob_for_outcome_key() works on either result.
+
+        lam90_home/lam90_away are each team's effective per-90 goal rate
+        (scalar, or a per-sim array so red-card handicaps carry into the
+        continuation). When provided for a knockout, level regulations
+        continue into a simulated ET + penalties (Piece 2); otherwise
+        advancement falls back to the half-the-draws approximation.
         """
         # --- Aggregate outcomes
         p_home = float(np.mean(goals_home > goals_away))
@@ -96,6 +116,36 @@ class MatchSimulator:
         confidence = 0.5 + 0.5 * confidence                       # floor at 0.5
         confidence /= stage_uncertainty(stage)                    # knockout haircut
 
+        # --- Knockout advancement (Piece 2): real ET + penalties continuation.
+        # Regulation W/D/L, props, and scorelines above stay REGULATION-final
+        # (that's what the Kalshi market families settle on); only "who
+        # advances" continues past 90 minutes.
+        if stage == "knockout" and lam90_home is not None and lam90_away is not None:
+            level = goals_home == goals_away
+            et_scale = ET_MINUTES / 90.0
+            et_home = self.rng.poisson(np.asarray(lam90_home) * et_scale, self.n)
+            et_away = self.rng.poisson(np.asarray(lam90_away) * et_scale, self.n)
+            still_level = level & (et_home == et_away)
+            pens_home = self.rng.random(self.n) < PENALTY_HOME_WIN_P
+            home_adv = (goals_home > goals_away) \
+                | (level & (et_home > et_away)) \
+                | (still_level & pens_home)
+            advance = {
+                "home": round(float(np.mean(home_adv)), 4),
+                "away": round(float(np.mean(~home_adv)), 4),
+                "p_reach_et": round(float(np.mean(level)), 4),
+                "p_reach_pens": round(float(np.mean(still_level)), 4),
+                "method": "simulated_et_pens",
+            }
+        else:
+            advance = {
+                "home": round(p_home + 0.5 * p_draw, 4),
+                "away": round(p_away + 0.5 * p_draw, 4),
+                "p_reach_et": round(p_draw, 4),
+                "p_reach_pens": None,
+                "method": "half_draw_approx",
+            }
+
         return {
             "model_version": MODEL_VERSION,
             "n_simulations": self.n,
@@ -105,6 +155,7 @@ class MatchSimulator:
                 "draw": round(p_draw, 4),
                 "away_win": round(p_away, 4),
             },
+            "advance": advance,
             "props": props,
             "scorelines": scorelines,
             "confidence": round(float(confidence), 4),
@@ -135,9 +186,11 @@ class MatchSimulator:
         v1 limitations (documented, deliberate):
           - minutes_elapsed >= 90 treats regulation as complete (stoppage
             time is not modeled); the current score is returned as final.
-          - Knockout ET/penalties are NOT simulated; `home_advance` via
-            prob_for_outcome_key() still uses the 0.5-of-draws coin-flip
-            approximation. Piece 2 replaces that with a real continuation.
+          - Knockout advancement DOES include the Piece-2 continuation
+            (simulated 30-min ET at time-scaled rates, then 50/50
+            penalties — see the "advance" block). What is still NOT
+            representable is a live state *inside* extra time (a minute
+            past 90 clamps to "regulation over").
           - The knockout x0.85 goal damping is inherited from the
             pre-match model (known hand-tuned debt) for consistency.
 
@@ -152,18 +205,20 @@ class MatchSimulator:
         xg_home, xg_away = predict_xg(home_raw, away_raw)
         frac_remaining = max(0.0, (90.0 - float(minutes_elapsed)) / 90.0)
 
-        lam_home, lam_away = xg_home, xg_away
+        # Effective per-90 rates: damping + KNOWN cards applied BEFORE time
+        # scaling — the ET continuation reuses these at 30/90.
+        rate_home, rate_away = xg_home, xg_away
         if stage == "knockout":          # same damping as pre-match (debt)
-            lam_home *= 0.85
-            lam_away *= 0.85
+            rate_home *= 0.85
+            rate_away *= 0.85
         if red_home:                     # known state, applies to remainder
-            lam_home *= 0.70
-            lam_away *= 1.15
+            rate_home *= 0.70
+            rate_away *= 1.15
         if red_away:
-            lam_away *= 0.70
-            lam_home *= 1.15
-        lam_home *= frac_remaining
-        lam_away *= frac_remaining
+            rate_away *= 0.70
+            rate_home *= 1.15
+        lam_home = rate_home * frac_remaining
+        lam_away = rate_away * frac_remaining
 
         rem_home = self.rng.poisson(lam_home, self.n)
         rem_away = self.rng.poisson(lam_away, self.n)
@@ -171,7 +226,9 @@ class MatchSimulator:
         goals_away = current_away + rem_away
 
         result = self._aggregate_outcomes(goals_home, goals_away, stage,
-                                          xg_home, xg_away)
+                                          xg_home, xg_away,
+                                          lam90_home=rate_home,
+                                          lam90_away=rate_away)
         result["live_state"] = {
             "score": f"{current_home}-{current_away}",
             "minutes_elapsed": round(float(minutes_elapsed), 1),
@@ -190,11 +247,18 @@ class MatchSimulator:
             return sim["outcomes"][outcome_key]
         if outcome_key in sim["props"]:
             return sim["props"][outcome_key]
-        # Knockout "to advance" markets: win in 90 + roughly half of the
-        # draws (extra time / penalties treated as a coin flip).
+        # Knockout "to advance" markets. Piece 2: prefer the simulated
+        # ET + penalties continuation when present; fall back to the old
+        # half-the-draws coin-flip approximation for legacy sim dicts.
         if outcome_key == "home_advance":
+            adv = sim.get("advance")
+            if adv is not None:
+                return adv["home"]
             return round(sim["outcomes"]["home_win"] + 0.5 * sim["outcomes"]["draw"], 4)
         if outcome_key == "away_advance":
+            adv = sim.get("advance")
+            if adv is not None:
+                return adv["away"]
             return round(sim["outcomes"]["away_win"] + 0.5 * sim["outcomes"]["draw"], 4)
         # Exact final scores: score_2_0 → "2-0" (from Kalshi KXWCSCORE).
         # Only priced when the scoreline appears in our top-10 distribution;

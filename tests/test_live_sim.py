@@ -126,9 +126,9 @@ class TestOutcomeKeyCompatibility:
         assert sim.prob_for_outcome_key(live, "over_1_5") == \
             live["props"]["over_1_5"]
         adv = sim.prob_for_outcome_key(live, "home_advance")
-        expected = round(live["outcomes"]["home_win"]
-                         + 0.5 * live["outcomes"]["draw"], 4)
-        assert adv == expected
+        assert adv == live["advance"]["home"]
+        assert live["advance"]["method"] == "simulated_et_pens"
+        assert adv >= live["outcomes"]["home_win"]  # continuation only adds
         # current score late should dominate the scoreline distribution
         s10 = sim.prob_for_outcome_key(live, "score_1_0")
         assert s10 is not None and s10 > 0.3
@@ -138,7 +138,7 @@ class TestOutcomeKeyCompatibility:
         exact key set the rest of the system consumes."""
         pre = MatchSimulator(seed=15).simulate(HOME, AWAY, stage="knockout")
         assert set(pre.keys()) == {"model_version", "n_simulations", "xg",
-                                   "outcomes", "props", "scorelines",
-                                   "confidence"}
+                                   "outcomes", "advance", "props",
+                                   "scorelines", "confidence"}
         assert set(pre["outcomes"].keys()) == {"home_win", "draw", "away_win"}
         assert "over_2_5" in pre["props"] and "btts" in pre["props"]
