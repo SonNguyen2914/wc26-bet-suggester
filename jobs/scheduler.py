@@ -23,6 +23,7 @@ from src.db import SessionLocal, WatchlistItem, utcnow
 from src.kalshi_client import KalshiClient
 from src.model_cache import get_model_prob, refresh_model_cache
 from src.schedule_data import is_trackable, load_schedule
+from src import spike_detector
 from src.suggester import SuggesterEngine
 from src.timing import compute_timing, record_reading, save_alert, should_alert
 
@@ -67,7 +68,16 @@ def poll_odds() -> None:
 
     for match in matches:
         try:
-            for mkt in kalshi.get_markets_for_match(match):
+            mkts = kalshi.get_markets_for_match(match)
+            # Layer 1 (LOG-ONLY): infer goals from the scoreline
+            # distribution. Wrapped separately so a detector hiccup can
+            # never disturb polling, and it touches nothing downstream.
+            try:
+                spike_detector.inspect(match.match_id, mkts)
+            except Exception as exc:
+                print(f"[spike] {match.match_id} detector error: {exc}")
+
+            for mkt in mkts:
                 record_reading(match.match_id, mkt,
                                get_model_prob(mkt["market_id"]))
 

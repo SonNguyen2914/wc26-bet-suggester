@@ -33,6 +33,7 @@ from src.live_feed import budget_status, live_state_for
 from src.model_cache import refresh_model_cache
 from src.schedule_data import get_match, is_trackable, load_schedule
 from src.suggester import SuggesterEngine
+from src import spike_detector
 
 app = FastAPI(title="Kalshi WC26 Bet Suggester", version="0.1.0")
 app.add_middleware(
@@ -231,6 +232,26 @@ def fetch_live_state(match_id: str):
 def live_feed_budget():
     """How many API-Football calls remain today (transparency + debugging)."""
     return budget_status()
+
+
+@app.get("/api/spike-detector/state")
+def spike_detector_state():
+    """LOG-ONLY Layer 1: the scoreline the detector currently infers per
+    trackable match, from Kalshi's score markets. Read-only, drives nothing —
+    it's here so the detector can be eyeballed live while its thresholds are
+    still being tuned."""
+    now = utcnow()
+    out = []
+    for m in load_schedule():
+        if not is_trackable(m, now, config.HOURLY_PREDICTION_WINDOW_HOURS,
+                            config.TRACK_HOURS_AFTER_KICKOFF):
+            continue
+        leader = spike_detector.current_leader(m.match_id)
+        out.append({
+            "match_id": m.match_id,
+            "inferred_score": f"{leader[0]}-{leader[1]}" if leader else None,
+        })
+    return {"matches": out, "note": "log-only; does not affect predictions"}
 
 
 @app.get("/api/prediction/{match_id}/timeline")
