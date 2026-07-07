@@ -31,9 +31,11 @@ from src.db import (SessionLocal, get_setting, init_db,
                     set_setting, utcnow)
 from src.live_feed import budget_status, live_state_for
 from src.model_cache import refresh_model_cache
-from src.schedule_data import get_match, is_trackable, load_schedule
+from src.schedule_data import (get_match, has_sourced_stats, is_trackable,
+                               load_schedule, provisional_teams)
 from src.suggester import SuggesterEngine
 from src import spike_detector
+from src.bracket import bracket_status
 
 app = FastAPI(title="Kalshi WC26 Bet Suggester", version="0.1.0")
 app.add_middleware(
@@ -66,6 +68,15 @@ def upcoming_matches(hours_ahead: int = Query(48, ge=1, le=720)):
         if not (now < m.kickoff <= horizon):
             continue
         cached = latest_for_match(m.match_id)
+        # A QF slot whose feeder hasn't finished yet is a placeholder ("USA/BEL
+        # winner"); the UI shows it as TBD and skips the prediction link. A
+        # resolved team with no sourced TEAM_STATS runs on _DEFAULT — flagged
+        # provisional so the model's humility is visible, never hidden.
+        tbd = not m.fully_resolved
+        prov = [t for t in (m.home, m.away)
+                if (t == m.home and m.home_resolved or
+                    t == m.away and m.away_resolved)
+                and not has_sourced_stats(t)]
         out.append({
             "match_id": m.match_id,
             "home": m.home,
@@ -78,6 +89,10 @@ def upcoming_matches(hours_ahead: int = Query(48, ge=1, le=720)):
             "has_prediction": cached is not None,
             "is_final": bool(cached and cached["is_final"]),
             "confidence": cached["confidence"] if cached else None,
+            "tbd": tbd,
+            "home_resolved": m.home_resolved,
+            "away_resolved": m.away_resolved,
+            "provisional_stats": prov,
         })
     out.sort(key=lambda x: x["seconds_to_kickoff"])
     return {"matches": out, "generated_at": now.isoformat()}
@@ -259,6 +274,17 @@ def live_scores():
         })
     return {"live": out, "budget": budget_status(),
             "generated_at": now.isoformat()}
+
+
+@app.get("/api/bracket")
+def bracket():
+    """Current knockout bracket: which QF sides are known vs still placeholders,
+    plus the list of resolved teams running on provisional (unsourced) stats.
+    Read-only — the resolver job does the feed work on its own schedule."""
+    status = bracket_status()
+    status["provisional_teams"] = provisional_teams()
+    status["generated_at"] = utcnow().isoformat()
+    return status
 
 
 @app.get("/api/live-feed/budget")

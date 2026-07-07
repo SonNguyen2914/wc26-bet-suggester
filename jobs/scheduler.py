@@ -18,7 +18,8 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from sqlalchemy import select
 
 import config
-from src.alerts import alert_final_lock, alert_new_take, alert_ripe
+from src.alerts import alert_final_lock, alert_new_take, alert_ripe, send_discord
+from src.bracket import resolve_bracket
 from src.db import SessionLocal, WatchlistItem, utcnow
 from src.kalshi_client import KalshiClient
 from src.model_cache import get_model_prob, refresh_model_cache
@@ -118,15 +119,37 @@ def final_lock_check() -> None:
             print(f"[FINAL LOCK] {match.match_id} locked at T-{time_left}")
 
 
+def resolve_bracket_job() -> None:
+    """Fill QF placeholder slots as R16 results land (fixtures only; team
+    stats stay hand-sourced). Cheap and idempotent: does nothing once the
+    bracket is fully known, so this can run often without burning feed budget.
+    Announces each newly-decided matchup to Discord once."""
+    try:
+        changed = resolve_bracket()
+    except Exception as exc:  # never let bracket work disturb the scheduler
+        print(f"[bracket] resolve FAILED: {exc}")
+        return
+    for c in changed:
+        send_discord(
+            f"🗓️ Quarter-final set: **{c['team']}** advances into "
+            f"{c['qf']} ({c['side']}).")
+
+
 def start_scheduler() -> BackgroundScheduler:
     scheduler = BackgroundScheduler(timezone="UTC")
     scheduler.add_job(hourly_predictions, "cron", minute=0, id="hourly")
     scheduler.add_job(final_lock_check, "cron", second=0, id="final_lock")
     scheduler.add_job(poll_odds, "interval",
                       seconds=config.ODDS_POLL_SECONDS, id="odds_poll")
+    # Bracket resolution: low frequency (the bracket changes at most a handful
+    # of times all tournament) and self-skipping once fully known, so it's
+    # nearly free. Interval, not cron, so it also runs shortly after boot.
+    scheduler.add_job(resolve_bracket_job, "interval",
+                      minutes=config.BRACKET_RESOLVE_MINUTES, id="bracket")
     scheduler.start()
     # Prime the cache immediately on boot so the dashboard isn't empty
     # and the poller has model probabilities to compute edge with.
     scheduler.add_job(hourly_predictions, "date", id="prime_predictions")
     scheduler.add_job(poll_odds, "date", id="prime_poll")
+    scheduler.add_job(resolve_bracket_job, "date", id="prime_bracket")
     return scheduler

@@ -48,6 +48,29 @@ class Match:
     kickoff: datetime
     stage: str = "group"  # group | knockout
     venue: str = ""
+    # --- bracket auto-resolution (QF+ only) ------------------------------
+    # A QF slot is created with placeholder team names ("FRA/PAR winner")
+    # BEFORE its feeder matches finish. `home_feeders`/`away_feeders` name
+    # the match_ids whose winner fills each side; the bracket resolver swaps
+    # in the real team the moment that feeder is decided. `home_resolved`/
+    # `away_resolved` track which sides are still placeholders.
+    home_feeders: tuple[str, ...] = ()
+    away_feeders: tuple[str, ...] = ()
+    home_resolved: bool = True
+    away_resolved: bool = True
+
+    @property
+    def fully_resolved(self) -> bool:
+        return self.home_resolved and self.away_resolved
+
+    @property
+    def display_home(self) -> str:
+        """Real team once known, else the human placeholder label."""
+        return self.home
+
+    @property
+    def display_away(self) -> str:
+        return self.away
 
 
 def _utc(y, mo, d, h, mi=0) -> datetime:
@@ -77,20 +100,88 @@ def load_schedule() -> list[Match]:
                   stage="knockout", venue="Mercedes-Benz Stadium, Atlanta"),
             Match("SUI_COL", "Switzerland", "Colombia", "R16", _utc(2026, 7, 7, 20),
                   stage="knockout", venue="BC Place, Vancouver"),
-            # --- Quarterfinals: slots known, add winners as R16 resolves ---
-            # Thu Jul 9  ~20:00 UTC  Morocco vs FRA/PAR winner   (Gillette, Boston)
-            # Fri Jul 10 ~19:00 UTC  USA/BEL w. vs POR/ESP w.    (SoFi, Inglewood)
-            # Sat Jul 11 ~21:00 UTC  BRA/NOR w. vs MEX/ENG w.    (Hard Rock, Miami)
-            # Sun Jul 12 ~01:00 UTC  ARG/EGY w. vs SUI/COL w.    (Arrowhead, KC)
+            # --- Quarterfinals: slots seeded with placeholders --------------
+            # These exist BEFORE their feeders finish so the bracket shows
+            # immediately; the bracket resolver (jobs.scheduler.resolve_bracket)
+            # swaps placeholders for real teams as R16 results land. Feeder
+            # match_ids map each side to the R16 fixture whose winner fills it.
+            # QF1 fully known: Morocco beat Canada, France beat Paraguay 1-0
+            # (Jul 4) — both feeders already resolved before this schedule was
+            # seeded, so no placeholders here.
+            Match("MAR_FRA", "Morocco", "France", "QF",
+                  _utc(2026, 7, 9, 20), stage="knockout",
+                  venue="Gillette Stadium, Boston"),
+            Match("QF2", "USA/BEL winner", "POR/ESP winner", "QF",
+                  _utc(2026, 7, 10, 19), stage="knockout",
+                  venue="SoFi Stadium, Inglewood",
+                  home_feeders=("USA_BEL",), away_feeders=("POR_ESP",),
+                  home_resolved=False, away_resolved=False),
+            Match("QF3", "BRA/NOR winner", "MEX/ENG winner", "QF",
+                  _utc(2026, 7, 11, 21), stage="knockout",
+                  venue="Hard Rock Stadium, Miami",
+                  home_feeders=("BRA_NOR",), away_feeders=("MEX_ENG",),
+                  home_resolved=False, away_resolved=False),
+            Match("QF4", "ARG/EGY winner", "SUI/COL winner", "QF",
+                  _utc(2026, 7, 12, 1), stage="knockout",
+                  venue="Arrowhead Stadium, Kansas City",
+                  home_feeders=("ARG_EGY",), away_feeders=("SUI_COL",),
+                  home_resolved=False, away_resolved=False),
         ]
     return _SCHEDULE
+
+
+def resolve_side(match_id: str, side: str, team: str) -> bool:
+    """Fill one side ('home'/'away') of a QF slot with a real team once its
+    feeder is decided. Idempotent: returns True only if this call actually
+    changed something (so the caller can log/alert exactly once). Also
+    rewrites the match_id from placeholder to real codes once BOTH sides are
+    known, keeping ids stable and readable (e.g. QF1 -> MAR_FRA).
+    """
+    for m in load_schedule():
+        if m.match_id != match_id:
+            continue
+        if side == "home":
+            if m.home_resolved and m.home == team:
+                return False
+            m.home, m.home_resolved = team, True
+        elif side == "away":
+            if m.away_resolved and m.away == team:
+                return False
+            m.away, m.away_resolved = team, True
+        else:
+            return False
+        return True
+    return False
+
+
+def provisional_teams() -> list[str]:
+    """Resolved QF teams that have NO sourced TEAM_STATS entry yet — the model
+    is running them on _DEFAULT, which the UI should flag as provisional."""
+    out: list[str] = []
+    for m in load_schedule():
+        for resolved, name in ((m.home_resolved, m.home),
+                               (m.away_resolved, m.away)):
+            if resolved and name not in TEAM_STATS and name not in out:
+                out.append(name)
+    return out
+
+
+def has_sourced_stats(team: str) -> bool:
+    return team in TEAM_STATS
 
 
 def is_trackable(match: Match, now: datetime,
                  hours_ahead: float, hours_after: float) -> bool:
     """A match is trackable from `hours_ahead` before kickoff until
     `hours_after` past kickoff (live odds keep moving on goals; Kalshi
-    books settle within a few hours of the final whistle)."""
+    books settle within a few hours of the final whistle).
+
+    A placeholder QF slot (one side still "X/Y winner") is NOT trackable:
+    there's no real team to simulate or price markets for. It becomes
+    trackable automatically once the bracket resolver fills both sides.
+    """
+    if not match.fully_resolved:
+        return False
     return (match.kickoff <= now + timedelta(hours=hours_ahead)
             and now < match.kickoff + timedelta(hours=hours_after))
 

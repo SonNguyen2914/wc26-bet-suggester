@@ -230,7 +230,15 @@ class TestLikelihoodBoard:
     def test_refresh_all_shape(self):
         data = self.client.post("/api/refresh-all").json()
         assert data["failed"] == []
-        assert len(data["refreshed"]) == 6          # all R16 matches
+        # Every FULLY-RESOLVED match refreshes; placeholder QF slots (a side
+        # still "X/Y winner") are not trackable, so they're excluded. With the
+        # window forced open above, that's the 6 R16 fixtures + any QF whose
+        # teams are already known (MAR_FRA), and never an unresolved slot.
+        from src.schedule_data import load_schedule
+        expected = [m.match_id for m in load_schedule() if m.fully_resolved]
+        assert sorted(data["refreshed"]) == sorted(expected)
+        assert all(m.match_id in data["refreshed"] or not m.fully_resolved
+                   for m in load_schedule())
         assert isinstance(data["duration_ms"], int)
         assert "generated_at" in data
 

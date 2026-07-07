@@ -79,3 +79,10 @@ API_FOOTBALL_LEAGUE_ID = int(os.getenv("API_FOOTBALL_LEAGUE_ID", "1"))
 API_FOOTBALL_SEASON = int(os.getenv("API_FOOTBALL_SEASON", "2026"))
 API_FOOTBALL_DAILY_CAP = int(os.getenv("API_FOOTBALL_DAILY_CAP", "90"))  # < 100
 API_FOOTBALL_CACHE_SECONDS = int(os.getenv("API_FOOTBALL_CACHE_SECONDS", "20"))
+
+# --- Bracket auto-resolution ---------------------------------------------
+# How often to check finished R16 (then QF, SF) results and fill the next
+# round's placeholder slots. Low frequency by design: the bracket changes at
+# most a handful of times all tournament, and the job self-skips (zero feed
+# calls) once every slot is resolved, so this is nearly free.
+BRACKET_RESOLVE_MINUTES = int(os.getenv("BRACKET_RESOLVE_MINUTES", "30"))
