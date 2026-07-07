@@ -54,6 +54,14 @@ class TestParsingAndMatching:
         _patch(monkeypatch, [_fixture("Côte d'Ivoire", "Norway", 0, 0, 5)])
         assert lf.live_state_for("Cote dIvoire", "Norway") is not None
 
+    def test_united_states_alias(self, monkeypatch):
+        """Confirmed live 2026-07-06: our 'United States' is API-Football's
+        'USA'. The alias must connect them."""
+        _patch(monkeypatch, [_fixture("USA", "Belgium", 1, 2, 43)])
+        s = lf.live_state_for("United States", "Belgium")
+        assert s is not None
+        assert s["home_goals"] == 1 and s["away_goals"] == 2
+
     def test_red_card_detection(self, monkeypatch):
         events = [{"type": "Card", "detail": "Red Card",
                    "team": {"id": 100}}]

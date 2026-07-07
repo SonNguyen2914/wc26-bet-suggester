@@ -38,14 +38,30 @@ _cache: dict[str, tuple[float, dict | None]] = {}
 _LIVE_STATUSES = {"1H", "2H", "HT", "ET", "BT", "P", "SUSP", "INT", "LIVE"}
 _FINISHED_STATUSES = {"FT", "AET", "PEN"}
 
+# Our schedule's team names -> the name API-Football uses, when they differ.
+# National-team naming is mostly identical, but a few diverge. Confirmed
+# live: our "United States" is their "USA". Add here as new mismatches are
+# found (matching is normalized, so only real spelling differences matter).
+_TEAM_ALIASES = {
+    "united states": "usa",
+    "south korea": "korea republic",
+    "north korea": "korea dpr",
+    "ivory coast": "cote divoire",
+    "czech republic": "czechia",
+}
+
 
 def _norm(name: str) -> str:
     """Fold accents/case/punctuation so 'Côte d'Ivoire' matches 'Cote
-    dIvoire' etc. National-team names are usually identical across sources,
-    but this makes the match robust to diacritics and spacing."""
+    dIvoire' etc., then apply any known alias (our name -> API-Football's).
+    National-team names are usually identical across sources; this handles
+    the accents, spacing, and the handful of genuine spelling differences."""
     n = unicodedata.normalize("NFKD", name)
     n = "".join(c for c in n if not unicodedata.combining(c))
-    return "".join(c for c in n.lower() if c.isalnum())
+    n = "".join(c for c in n.lower() if c.isalnum() or c == " ").strip()
+    # alias check on the human-readable lowercased form, before stripping spaces
+    aliased = _TEAM_ALIASES.get(n, n)
+    return "".join(c for c in aliased if c.isalnum())
 
 
 def budget_status() -> dict:
