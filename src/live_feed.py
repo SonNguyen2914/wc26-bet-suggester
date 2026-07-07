@@ -121,15 +121,26 @@ def _parse_fixture(fix: dict) -> dict:
     if elapsed is not None:
         minutes = float(elapsed) + (float(extra) if extra else 0.0)
 
-    # red cards from the events list (type == "Card", detail contains "Red")
+    # red cards + goal scorers from the events list (already in the payload,
+    # so surfacing them costs no extra API call).
     red_home = red_away = False
+    goals_list: list[dict] = []
     home_id = fix["teams"]["home"]["id"]
     for ev in fix.get("events", []) or []:
-        if ev.get("type") == "Card" and "Red" in (ev.get("detail") or ""):
-            if (ev.get("team") or {}).get("id") == home_id:
+        etype = ev.get("type")
+        team_is_home = (ev.get("team") or {}).get("id") == home_id
+        if etype == "Card" and "Red" in (ev.get("detail") or ""):
+            if team_is_home:
                 red_home = True
             else:
                 red_away = True
+        elif etype == "Goal":
+            goals_list.append({
+                "team": "home" if team_is_home else "away",
+                "player": (ev.get("player") or {}).get("name"),
+                "minute": (ev.get("time") or {}).get("elapsed"),
+                "detail": ev.get("detail"),  # "Normal Goal" / "Penalty" / etc.
+            })
 
     return {
         "fixture_id": fix["fixture"]["id"],
@@ -139,10 +150,12 @@ def _parse_fixture(fix: dict) -> dict:
         "away_goals": (fix.get("goals") or {}).get("away") or 0,
         "minutes_elapsed": minutes,
         "status_short": short,
+        "status_long": status.get("long"),
         "is_live": short in _LIVE_STATUSES,
         "is_finished": short in _FINISHED_STATUSES,
         "red_home": red_home,
         "red_away": red_away,
+        "goals_list": goals_list,
     }
 
 
@@ -191,4 +204,8 @@ def _flip(state: dict) -> dict:
         "home_name": state["away_name"], "away_name": state["home_name"],
         "home_goals": state["away_goals"], "away_goals": state["home_goals"],
         "red_home": state["red_away"], "red_away": state["red_home"],
+        "goals_list": [
+            {**g, "team": "away" if g["team"] == "home" else "home"}
+            for g in state.get("goals_list", [])
+        ],
     }

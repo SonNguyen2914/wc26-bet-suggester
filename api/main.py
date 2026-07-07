@@ -224,8 +224,41 @@ def fetch_live_state(match_id: str):
         "status_short": state["status_short"],
         "is_live": state["is_live"],
         "is_finished": state["is_finished"],
+        "goals_list": state.get("goals_list", []),
         "budget": budget_status(),
     }
+
+
+@app.get("/api/live-scores")
+def live_scores():
+    """Live scoreboard for the landing page: current score/minute/scorers for
+    every trackable match that's in progress. Uses ONE feed call (the shared
+    /fixtures?live=all) regardless of how many matches are live, so a whole
+    board refresh costs a single request. Returns [] gracefully when the feed
+    is off or nothing is live."""
+    now = utcnow()
+    out = []
+    for m in load_schedule():
+        if not is_trackable(m, now, config.HOURLY_PREDICTION_WINDOW_HOURS,
+                            config.TRACK_HOURS_AFTER_KICKOFF):
+            continue
+        state = live_state_for(m.home, m.away)  # cached; shared live pull
+        if state is None or not state.get("is_live"):
+            continue
+        out.append({
+            "match_id": m.match_id,
+            "home": m.home,
+            "away": m.away,
+            "home_goals": state["home_goals"],
+            "away_goals": state["away_goals"],
+            "minutes_elapsed": state["minutes_elapsed"],
+            "status_short": state["status_short"],
+            "red_home": state["red_home"],
+            "red_away": state["red_away"],
+            "goals_list": state.get("goals_list", []),
+        })
+    return {"live": out, "budget": budget_status(),
+            "generated_at": now.isoformat()}
 
 
 @app.get("/api/live-feed/budget")
