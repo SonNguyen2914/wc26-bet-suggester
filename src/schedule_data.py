@@ -88,6 +88,9 @@ class Match:
     away_feeders: tuple[str, ...] = ()
     home_resolved: bool = True
     away_resolved: bool = True
+    # 3rd-place match: sides are filled by the LOSERS of the feeder matches,
+    # not the winners (the only slot in the bracket that tracks losers).
+    loser_feed: bool = False
 
     @property
     def fully_resolved(self) -> bool:
@@ -164,6 +167,20 @@ def load_schedule() -> list[Match]:
                   venue="Mercedes-Benz Stadium, Atlanta",
                   home_feeders=("NOR_ENG",), away_feeders=("ARG_SUI",),
                   home_resolved=False, away_resolved=False),
+            # --- Third-place + Final: fed by the SEMIFINALS ------------------
+            # 3rd-place = the two SF LOSERS (unusual: tracks losers, handled by
+            # loser_feeders). Final = the two SF winners.
+            Match("THIRD", "SF1 loser", "SF2 loser", "3P",
+                  _utc(2026, 7, 18, 21), stage="knockout",
+                  venue="Hard Rock Stadium, Miami",
+                  home_feeders=("SF1",), away_feeders=("SF2",),
+                  home_resolved=False, away_resolved=False,
+                  loser_feed=True),
+            Match("FINAL", "SF1 winner", "SF2 winner", "F",
+                  _utc(2026, 7, 19, 19), stage="knockout",
+                  venue="MetLife Stadium, East Rutherford",
+                  home_feeders=("SF1",), away_feeders=("SF2",),
+                  home_resolved=False, away_resolved=False),
         ]
     return _SCHEDULE
 
@@ -179,11 +196,11 @@ def resolve_side(match_id: str, side: str, team: str) -> bool:
         if m.match_id != match_id:
             continue
         if side == "home":
-            if m.home_resolved and m.home == team:
-                return False
+            if m.home_resolved:
+                return False  # already resolved — a resolved side is final
             m.home, m.home_resolved = team, True
         elif side == "away":
-            if m.away_resolved and m.away == team:
+            if m.away_resolved:
                 return False
             m.away, m.away_resolved = team, True
         else:

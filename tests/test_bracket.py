@@ -128,11 +128,21 @@ class TestProvisional:
 
 class TestBracketStatus:
     def setup_method(self):
+        from src.db import init_db
+        init_db()
         _reset_schedule()
 
     def test_status_shape(self):
         st = bracket.bracket_status()
         assert len(st["quarterfinals"]) == 4
+        assert len(st["semifinals"]) == 2
+        assert len(st["third_place"]) == 1
+        assert len(st["final"]) == 1
+        assert "champion" in st
         row = next(q for q in st["quarterfinals"] if q["match_id"] == "MAR_FRA")
         assert row["fully_resolved"] is True
         assert "kickoff" in row and "venue" in row
+
+    def test_third_place_is_loser_fed(self):
+        from src.schedule_data import get_match
+        assert get_match("THIRD").loser_feed is True

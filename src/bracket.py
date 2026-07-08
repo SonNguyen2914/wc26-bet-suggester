@@ -27,20 +27,22 @@ from src import live_feed
 from src.schedule_data import Match, load_schedule, resolve_side
 
 
-def _feeder_slots() -> list[tuple[str, str, str]]:
-    """Every still-unresolved (feeder_match_id, qf_match_id, side) triple.
+def _feeder_slots() -> list[tuple[str, str, str, bool]]:
+    """Every still-unresolved (feeder_match_id, target_match_id, side,
+    loser_feed) tuple. loser_feed=True means the slot is filled by the feeder's
+    LOSER (the 3rd-place match) rather than its winner.
 
     Empty once the bracket is fully known — the caller uses that to skip all
     feed work, so a resolved bracket costs zero API calls.
     """
-    out: list[tuple[str, str, str]] = []
+    out: list[tuple[str, str, str, bool]] = []
     for m in load_schedule():
         if not m.home_resolved:
             for f in m.home_feeders:
-                out.append((f, m.match_id, "home"))
+                out.append((f, m.match_id, "home", m.loser_feed))
         if not m.away_resolved:
             for f in m.away_feeders:
-                out.append((f, m.match_id, "away"))
+                out.append((f, m.match_id, "away", m.loser_feed))
     return out
 
 
@@ -61,6 +63,19 @@ def _winner_of(feeder: Match, state: dict) -> str | None:
     # usually already reflect ET; a true tie here means penalties decided it
     # and we can't read the shootout from the goals field alone -> defer to
     # the next run (the feed's status/score settles shortly after).
+    return None
+
+
+def _loser_of(feeder: Match, state: dict) -> str | None:
+    """The losing team (for the 3rd-place slot). Mirror of _winner_of."""
+    if not state.get("is_finished"):
+        return None
+    hg = state.get("home_goals") or 0
+    ag = state.get("away_goals") or 0
+    if hg > ag:
+        return feeder.away
+    if ag > hg:
+        return feeder.home
     return None
 
 
@@ -103,7 +118,7 @@ def resolve_bracket() -> list[dict]:
     # De-dupe feeder lookups: several slots can't share a feeder, but a feeder
     # appears once per unresolved side it feeds — look each up at most once.
     seen_state: dict[str, dict | None] = {}
-    for feeder_id, qf_id, side in slots:
+    for feeder_id, qf_id, side, loser_feed in slots:
         feeder = schedule.get(feeder_id)
         if feeder is None:
             continue
@@ -118,6 +133,18 @@ def resolve_bracket() -> list[dict]:
             # are what actually unstick the bracket after the fact.
             seen_state[feeder_id] = _feeder_result(feeder)
         state = seen_state[feeder_id]
+        if not state:
+            continue
+        # 3rd-place slots take the LOSER; everything else the winner.
+        team = (_loser_of(feeder, state) if loser_feed
+                else _winner_of(feeder, state))
+        if not team:
+            continue
+        if resolve_side(qf_id, side, team):
+            changed.append({"qf": qf_id, "side": side, "team": team,
+                            "feeder": feeder_id})
+            verb = "lost" if loser_feed else "won"
+            print(f"[bracket] {qf_id} {side} = {team} ({verb} {feeder_id})")
         if not state:
             continue
         winner = _winner_of(feeder, state)
@@ -164,6 +191,29 @@ def _win_probs(m) -> dict | None:
 
 
 def _bracket_match(m) -> dict:
+    # If the match has finished, attach the final score + winner side so the
+    # card can show the result (winner white, loser grey) instead of probs.
+    result = None
+    if m.fully_resolved:
+        try:
+            from src.db import MatchResult, SessionLocal
+            with SessionLocal() as s:
+                res = s.get(MatchResult, m.match_id)
+                if res is not None:
+                    if res.home_goals > res.away_goals:
+                        winner = "home"
+                    elif res.away_goals > res.home_goals:
+                        winner = "away"
+                    else:
+                        winner = None
+                    result = {
+                        "home_goals": res.home_goals,
+                        "away_goals": res.away_goals,
+                        "status_short": res.status_short,
+                        "winner": winner,
+                    }
+        except Exception:
+            result = None  # DB not ready / no table — show as upcoming
     return {
         "match_id": m.match_id,
         "home": m.home, "home_resolved": m.home_resolved,
@@ -172,23 +222,32 @@ def _bracket_match(m) -> dict:
         "kickoff": m.kickoff.astimezone(timezone.utc).isoformat(),
         "venue": m.venue,
         "stage": m.group,
-        "probs": _win_probs(m),
+        # probs only for resolved-but-unfinished matches; finished shows score.
+        "probs": _win_probs(m) if result is None else None,
+        "result": result,
     }
 
 
 def bracket_status() -> dict:
-    """Full knockout bracket for the UI: quarterfinals, semifinals, and (if
-    seeded) the final, each with model win probabilities for resolved matches.
-    Read-only, no feed calls (probs come from cache or a quick local sim)."""
-    by_stage = {"QF": [], "SF": [], "F": []}
+    """Full knockout bracket for the UI: quarterfinals, semifinals, 3rd-place,
+    and final, each with model win probabilities (resolved-unfinished) or the
+    final score (finished). Read-only, no feed calls."""
+    by_stage = {"QF": [], "SF": [], "3P": [], "F": []}
     for m in load_schedule():
         if m.group in by_stage:
             by_stage[m.group].append(_bracket_match(m))
-    # stable order by kickoff within each round
     for k in by_stage:
         by_stage[k].sort(key=lambda x: x["kickoff"])
+    # Champion: the winner of the FINAL, once it's finished.
+    champion = None
+    for fm in by_stage["F"]:
+        r = fm.get("result")
+        if r and r.get("winner"):
+            champion = fm["home"] if r["winner"] == "home" else fm["away"]
     return {
         "quarterfinals": by_stage["QF"],
         "semifinals": by_stage["SF"],
+        "third_place": by_stage["3P"],
         "final": by_stage["F"],
+        "champion": champion,
     }
