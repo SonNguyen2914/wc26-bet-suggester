@@ -31,8 +31,8 @@ from src.db import (SessionLocal, get_setting, init_db,
                     set_setting, utcnow)
 from src.live_feed import budget_status, live_state_for
 from src.model_cache import refresh_model_cache
-from src.schedule_data import (get_match, has_sourced_stats, is_trackable,
-                               load_schedule, provisional_teams)
+from src.schedule_data import (get_match, get_team_stats, has_sourced_stats,
+                               is_trackable, load_schedule, provisional_teams)
 from src.suggester import SuggesterEngine
 from src import spike_detector
 from src.bracket import bracket_status
@@ -274,6 +274,37 @@ def live_scores():
         })
     return {"live": out, "budget": budget_status(),
             "generated_at": now.isoformat()}
+
+
+@app.get("/api/team-info/{match_id}")
+def team_info(match_id: str):
+    """Both teams' scouting blurbs + headline stats for the match page's
+    "How they play" cards. A READ AID for the bettor — these blurbs never
+    touch probabilities. Team names resolved from the schedule; a placeholder
+    QF slot returns empty blurbs until the bracket fills in."""
+    m = get_match(match_id)
+    if not m:
+        raise HTTPException(404, f"Unknown match_id '{match_id}'")
+
+    def blurb(team: str, resolved: bool) -> dict:
+        if not resolved:
+            return {"team": team, "scouting": "", "resolved": False,
+                    "provisional": False}
+        s = get_team_stats(team)
+        return {
+            "team": team,
+            "scouting": s.get("scouting", ""),
+            "resolved": True,
+            "provisional": not has_sourced_stats(team),
+            "attack": s["attack"], "defence": s["defence"],
+            "form": s["form"], "fatigue": s["fatigue"],
+        }
+
+    return {
+        "match_id": match_id,
+        "home": blurb(m.home, m.home_resolved),
+        "away": blurb(m.away, m.away_resolved),
+    }
 
 
 @app.get("/api/bracket")
