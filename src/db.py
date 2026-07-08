@@ -132,6 +132,63 @@ class Setting(Base):
     value = Column(String(256))
 
 
+class MatchResult(Base):
+    """A finished match, frozen at the moment the live feed stopped showing it
+    in progress. We snapshot the final score/scorers here because a finished
+    fixture drops out of API-Football's /fixtures?live=all response within a
+    minute or two of the whistle — so if we don't capture it live, re-reading
+    it later would cost a per-match feed call. One row per match, upserted.
+
+    Drives two things: the ranking board excludes a match the instant a row
+    exists here (bets stop persisting when the game ends, not 4h later), and
+    the landing page keeps the match on the live scoreboard as an "FT" card
+    for a grace window past finished_at, then moves it to Past matches.
+    """
+    __tablename__ = "match_results"
+
+    match_id = Column(String(64), primary_key=True)
+    home = Column(String(64))
+    away = Column(String(64))
+    home_goals = Column(Integer, default=0)
+    away_goals = Column(Integer, default=0)
+    status_short = Column(String(8))                  # FT | AET | PEN
+    red_home = Column(Boolean, default=False)
+    red_away = Column(Boolean, default=False)
+    goals_json = Column(Text)                          # scorers snapshot as JSON
+    finished_at = Column(DateTime(timezone=True), default=utcnow)
+
+    __table_args__ = (Index("ix_result_finished", "finished_at"),)
+
+
+class MatchLiveSnapshot(Base):
+    """Last-seen-LIVE state per match, refreshed every poll while the match is
+    in progress. The scoreboard reads from HERE, not directly from the feed,
+    so it's robust to API-Football's /fixtures?live=all dropping a match during
+    between-periods breaks (the 90'->ET gap, the ET->penalties gap). Without
+    this, a match in extra time briefly vanishes from live=all and the card
+    disappears — the bug this fixes.
+
+    One row per match, upserted. `last_seen_at` lets the scoreboard hold a
+    match through short feed gaps (grace window) and lets the poller detect a
+    real finish (was live, now gone past the grace window -> freeze result).
+    """
+    __tablename__ = "match_live_snapshots"
+
+    match_id = Column(String(64), primary_key=True)
+    home = Column(String(64))
+    away = Column(String(64))
+    home_goals = Column(Integer, default=0)
+    away_goals = Column(Integer, default=0)
+    minutes_elapsed = Column(Float, nullable=True)
+    status_short = Column(String(8))
+    red_home = Column(Boolean, default=False)
+    red_away = Column(Boolean, default=False)
+    goals_json = Column(Text)
+    last_seen_at = Column(DateTime(timezone=True), default=utcnow)
+
+    __table_args__ = (Index("ix_snap_seen", "last_seen_at"),)
+
+
 engine = create_engine(config.DATABASE_URL, future=True)
 SessionLocal = sessionmaker(bind=engine, expire_on_commit=False, future=True)
 

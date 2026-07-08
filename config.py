@@ -80,6 +80,16 @@ API_FOOTBALL_SEASON = int(os.getenv("API_FOOTBALL_SEASON", "2026"))
 API_FOOTBALL_DAILY_CAP = int(os.getenv("API_FOOTBALL_DAILY_CAP", "90"))  # < 100
 API_FOOTBALL_CACHE_SECONDS = int(os.getenv("API_FOOTBALL_CACHE_SECONDS", "20"))
 
+# --- Live-state tracking (scoreboard robustness + finished-match handling) --
+# A live match briefly disappears from API-Football's live=all during
+# between-periods breaks (90'->ET, ET->penalties). The scoreboard holds a
+# match through gaps up to this long before treating it as finished; must
+# exceed the longest break (halftime-before-ET + ET->pens can be ~20 min).
+LIVE_GAP_GRACE_MINUTES = int(os.getenv("LIVE_GAP_GRACE_MINUTES", "25"))
+# How long a finished match stays on the live scoreboard as an FT card before
+# dropping to the Past-matches section only.
+LIVE_FT_WINDOW_MINUTES = int(os.getenv("LIVE_FT_WINDOW_MINUTES", "60"))
+
 # --- Bracket auto-resolution ---------------------------------------------
 # How often to check finished R16 (then QF, SF) results and fill the next
 # round's placeholder slots. Low frequency by design: the bracket changes at

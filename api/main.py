@@ -35,6 +35,7 @@ from src.schedule_data import (get_match, get_team_stats, has_sourced_stats,
                                is_trackable, load_schedule, provisional_teams)
 from src.suggester import SuggesterEngine
 from src import spike_detector
+from src import live_state as live_state_svc
 from src.bracket import bracket_status
 
 app = FastAPI(title="Kalshi WC26 Bet Suggester", version="0.1.0")
@@ -116,6 +117,10 @@ def suggestions(limit: int = Query(50, ge=1, le=200)):
     for m in load_schedule():
         if not is_trackable(m, now, config.HOURLY_PREDICTION_WINDOW_HOURS,
                             config.TRACK_HOURS_AFTER_KICKOFF):
+            continue
+        # Drop a match's bets the INSTANT it ends (a frozen result exists),
+        # not 4h later — separate from the scoreboard's FT grace window.
+        if live_state_svc.is_finished(m.match_id):
             continue
         snap = latest_for_match(m.match_id)
         if not snap:
@@ -246,34 +251,21 @@ def fetch_live_state(match_id: str):
 
 @app.get("/api/live-scores")
 def live_scores():
-    """Live scoreboard for the landing page: current score/minute/scorers for
-    every trackable match that's in progress. Uses ONE feed call (the shared
-    /fixtures?live=all) regardless of how many matches are live, so a whole
-    board refresh costs a single request. Returns [] gracefully when the feed
-    is off or nothing is live."""
-    now = utcnow()
-    out = []
-    for m in load_schedule():
-        if not is_trackable(m, now, config.HOURLY_PREDICTION_WINDOW_HOURS,
-                            config.TRACK_HOURS_AFTER_KICKOFF):
-            continue
-        state = live_state_for(m.home, m.away)  # cached; shared live pull
-        if state is None or not state.get("is_live"):
-            continue
-        out.append({
-            "match_id": m.match_id,
-            "home": m.home,
-            "away": m.away,
-            "home_goals": state["home_goals"],
-            "away_goals": state["away_goals"],
-            "minutes_elapsed": state["minutes_elapsed"],
-            "status_short": state["status_short"],
-            "red_home": state["red_home"],
-            "red_away": state["red_away"],
-            "goals_list": state.get("goals_list", []),
-        })
-    return {"live": out, "budget": budget_status(),
-            "generated_at": now.isoformat()}
+    """Live scoreboard for the landing page. Served from the live-state
+    snapshot store (refreshed every poll), NOT directly from the feed — so a
+    match in a between-periods break (90'->ET, ET->penalties) doesn't vanish,
+    and just-finished matches show as FT cards for a grace window. Costs no
+    feed call itself (the poller does the fetching)."""
+    return {"live": live_state_svc.scoreboard_entries(),
+            "budget": budget_status(),
+            "generated_at": utcnow().isoformat()}
+
+
+@app.get("/api/past-matches")
+def past_matches():
+    """Finished matches, most-recent first, for the Past matches section."""
+    return {"past": live_state_svc.past_matches(),
+            "generated_at": utcnow().isoformat()}
 
 
 @app.get("/api/team-info/{match_id}")

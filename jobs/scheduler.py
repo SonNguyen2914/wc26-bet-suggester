@@ -25,6 +25,7 @@ from src.kalshi_client import KalshiClient
 from src.model_cache import get_model_prob, refresh_model_cache
 from src.schedule_data import is_trackable, load_schedule
 from src import spike_detector
+from src import live_state
 from src.suggester import SuggesterEngine
 from src.timing import compute_timing, record_reading, save_alert, should_alert
 
@@ -56,6 +57,16 @@ def hourly_predictions() -> None:
 def poll_odds() -> None:
     """The always-on heartbeat: record every market's price, then check
     whether any watched bet just became ripe."""
+    # First, refresh live match-state snapshots and freeze any finished
+    # matches. Shares the cached live feed pull, so no extra API budget.
+    # Wrapped so a tracking hiccup can never disturb odds polling.
+    try:
+        r = live_state.poll_live_state()
+        if r["frozen"]:
+            print(f"[live-state] froze {r['frozen']} finished match(es)")
+    except Exception as exc:
+        print(f"[live-state] poll error: {exc}")
+
     now = utcnow()
     matches = [m for m in load_schedule()
                if is_trackable(m, now, config.HOURLY_PREDICTION_WINDOW_HOURS,
