@@ -196,6 +196,55 @@ def live_state_for(home: str, away: str) -> dict | None:
     return parsed
 
 
+_finished_cache: dict[str, tuple[float, dict | None]] = {}
+
+
+def finished_state_for(home: str, away: str) -> dict | None:
+    """Find a FINISHED World Cup fixture for these two teams and return its
+    final state, or None. Unlike live_state_for (which reads /fixtures?live=all
+    and only sees in-progress matches), this queries the season fixtures by
+    team+season, so it can read a match that finished days ago — which is how
+    the bracket resolver reads R16/QF winners after the fact.
+
+    Costs one API call per distinct matchup (cached for the day, since a
+    finished result never changes). Used only for bracket resolution, which
+    runs rarely, so it's budget-safe.
+    """
+    if not config.API_FOOTBALL_KEY:
+        return None
+
+    cache_key = f"fin|{_norm(home)}|{_norm(away)}"
+    hit = _finished_cache.get(cache_key)
+    # finished results are immutable — cache for a long time (1 day)
+    if hit and (time.time() - hit[0]) < 86400:
+        return hit[1]
+
+    # Query the season's fixtures involving one of the teams, then match the
+    # pair. API-Football's team search needs an id; simplest robust path is to
+    # pull the league+season fixtures and filter locally (one call, cached).
+    data = _request("/fixtures", {
+        "league": config.API_FOOTBALL_LEAGUE_ID,
+        "season": config.API_FOOTBALL_SEASON,
+    })
+    parsed: dict | None = None
+    if data and data.get("response"):
+        want = {_norm(home), _norm(away)}
+        for fix in data["response"]:
+            status = (fix.get("fixture", {}).get("status") or {}).get("short")
+            if status not in _FINISHED_STATUSES:
+                continue
+            names = {_norm(fix["teams"]["home"]["name"]),
+                     _norm(fix["teams"]["away"]["name"])}
+            if want == names:
+                parsed = _parse_fixture(fix)
+                if _norm(parsed["home_name"]) != _norm(home):
+                    parsed = _flip(parsed)
+                break
+
+    _finished_cache[cache_key] = (time.time(), parsed)
+    return parsed
+
+
 def _flip(state: dict) -> dict:
     """API-Football listed the teams in the opposite home/away order from our
     schedule — swap so the state matches OUR home/away convention."""

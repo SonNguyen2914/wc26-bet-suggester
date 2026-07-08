@@ -64,6 +64,27 @@ def _winner_of(feeder: Match, state: dict) -> str | None:
     return None
 
 
+def _feeder_result(feeder) -> dict | None:
+    """The feeder's finished state, from the cheapest available source.
+    Returns a state dict with home_goals/away_goals/is_finished, oriented to
+    the feeder's home/away order, or None if we can't determine a result yet.
+    """
+    # 1. Frozen MatchResult (written by the live-state poller — no API cost).
+    from src.db import MatchResult, SessionLocal
+    with SessionLocal() as s:
+        res = s.get(MatchResult, feeder.match_id)
+        if res is not None:
+            return {"home_name": res.home, "away_name": res.away,
+                    "home_goals": res.home_goals, "away_goals": res.away_goals,
+                    "is_finished": True, "status_short": res.status_short}
+    # 2. Live feed — the match is finishing right now.
+    state = live_feed.live_state_for(feeder.home, feeder.away)
+    if state and state.get("is_finished"):
+        return state
+    # 3. Finished-fetch — the match finished in the past (days ago).
+    return live_feed.finished_state_for(feeder.home, feeder.away)
+
+
 def resolve_bracket() -> list[dict]:
     """Resolve every QF placeholder whose feeder has finished. Returns a list
     of {qf, side, team} dicts for what actually changed this run (so the caller
@@ -87,11 +108,15 @@ def resolve_bracket() -> list[dict]:
         if feeder is None:
             continue
         if feeder_id not in seen_state:
-            # live_state_for pulls the shared cached /fixtures?live=all; a
-            # just-finished match still appears there briefly, and the feed's
-            # own cache means this is usually free.
-            seen_state[feeder_id] = live_feed.live_state_for(
-                feeder.home, feeder.away)
+            # Read the feeder's result from the best available source:
+            #  1. MatchResult (frozen by the live-state poller — free, no API)
+            #  2. live feed (the match is finishing right now)
+            #  3. finished-fetch (the match finished in the past — one API
+            #     call, cached for the day)
+            # This makes resolution robust to WHEN it runs: a match that
+            # finished days ago is long gone from live=all, so (1) and (3)
+            # are what actually unstick the bracket after the fact.
+            seen_state[feeder_id] = _feeder_result(feeder)
         state = seen_state[feeder_id]
         if not state:
             continue
@@ -107,19 +132,63 @@ def resolve_bracket() -> list[dict]:
     return changed
 
 
+def _win_probs(m) -> dict | None:
+    """Model home/draw/away win probabilities for a resolved match, for the
+    bracket view. Uses cached predictions if present, else runs a quick sim.
+    Returns None for placeholder matches (no real teams yet)."""
+    if not m.fully_resolved:
+        return None
+    try:
+        from src.cache import latest_for_match
+        snap = latest_for_match(m.match_id)
+        if snap:
+            probs = {}
+            for mkt in snap.get("markets", []):
+                k = mkt.get("outcome_key")
+                if k in ("home_win", "draw", "away_win"):
+                    probs[k] = mkt["model_probability"]
+            if "home_win" in probs and "away_win" in probs:
+                return probs
+        # no cache — quick direct simulation
+        from src.models.simulator import MatchSimulator
+        from src.schedule_data import get_team_stats
+        sim = MatchSimulator(n_simulations=8000, seed=7)
+        r = sim.simulate(get_team_stats(m.home), get_team_stats(m.away),
+                         stage="knockout")
+        o = r["outcomes"]
+        return {"home_win": o.get("home_win", 0.0),
+                "draw": o.get("draw", 0.0),
+                "away_win": o.get("away_win", 0.0)}
+    except Exception:
+        return None
+
+
+def _bracket_match(m) -> dict:
+    return {
+        "match_id": m.match_id,
+        "home": m.home, "home_resolved": m.home_resolved,
+        "away": m.away, "away_resolved": m.away_resolved,
+        "fully_resolved": m.fully_resolved,
+        "kickoff": m.kickoff.astimezone(timezone.utc).isoformat(),
+        "venue": m.venue,
+        "stage": m.group,
+        "probs": _win_probs(m),
+    }
+
+
 def bracket_status() -> dict:
-    """Snapshot of the bracket for the API/UI: which QF sides are known and
-    which are still placeholders. Read-only, no feed calls."""
-    qfs = []
+    """Full knockout bracket for the UI: quarterfinals, semifinals, and (if
+    seeded) the final, each with model win probabilities for resolved matches.
+    Read-only, no feed calls (probs come from cache or a quick local sim)."""
+    by_stage = {"QF": [], "SF": [], "F": []}
     for m in load_schedule():
-        if m.group != "QF":
-            continue
-        qfs.append({
-            "match_id": m.match_id,
-            "home": m.home, "home_resolved": m.home_resolved,
-            "away": m.away, "away_resolved": m.away_resolved,
-            "fully_resolved": m.fully_resolved,
-            "kickoff": m.kickoff.astimezone(timezone.utc).isoformat(),
-            "venue": m.venue,
-        })
-    return {"quarterfinals": qfs}
+        if m.group in by_stage:
+            by_stage[m.group].append(_bracket_match(m))
+    # stable order by kickoff within each round
+    for k in by_stage:
+        by_stage[k].sort(key=lambda x: x["kickoff"])
+    return {
+        "quarterfinals": by_stage["QF"],
+        "semifinals": by_stage["SF"],
+        "final": by_stage["F"],
+    }

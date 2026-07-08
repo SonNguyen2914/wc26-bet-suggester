@@ -58,8 +58,15 @@ it never touches probabilities.
 """
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+
+# How far ahead of kickoff a KNOCKOUT match becomes trackable. Kalshi opens
+# knockout markets days early (once the bracket resolves), so we track them
+# well before the group-stage default (6h) to surface prices/edge right away.
+# 96h covers the ~3-4 day gap between a bracket resolving and the match.
+KNOCKOUT_TRACK_HOURS_AHEAD = float(os.getenv("KNOCKOUT_TRACK_HOURS_AHEAD", "96"))
 
 
 @dataclass
@@ -123,31 +130,39 @@ def load_schedule() -> list[Match]:
                   stage="knockout", venue="Mercedes-Benz Stadium, Atlanta"),
             Match("SUI_COL", "Switzerland", "Colombia", "R16", _utc(2026, 7, 7, 20),
                   stage="knockout", venue="BC Place, Vancouver"),
-            # --- Quarterfinals: slots seeded with placeholders --------------
-            # These exist BEFORE their feeders finish so the bracket shows
-            # immediately; the bracket resolver (jobs.scheduler.resolve_bracket)
-            # swaps placeholders for real teams as R16 results land. Feeder
-            # match_ids map each side to the R16 fixture whose winner fills it.
-            # QF1 fully known: Morocco beat Canada, France beat Paraguay 1-0
-            # (Jul 4) — both feeders already resolved before this schedule was
-            # seeded, so no placeholders here.
+            # --- Quarterfinals: RESOLVED (seeded from confirmed R16 results,
+            # July 7). All four matchups are known:
+            #   Spain 1-0 Portugal, Belgium 4-1 USA  -> Spain vs Belgium
+            #   Norway 2-1 Brazil, England 3-2 Mexico -> Norway vs England
+            #   Argentina 3-2 Egypt, Switzerland 0-0 Colombia (pens 4-3)
+            #                                         -> Argentina vs Switzerland
+            # Seeded directly (zero-API) so the bracket is correct immediately;
+            # the feed-fetch resolver (bracket.resolve_bracket) handles future
+            # rounds (SF, final) automatically as QFs finish.
             Match("MAR_FRA", "Morocco", "France", "QF",
                   _utc(2026, 7, 9, 20), stage="knockout",
                   venue="Gillette Stadium, Boston"),
-            Match("QF2", "USA/BEL winner", "POR/ESP winner", "QF",
+            Match("ESP_BEL", "Spain", "Belgium", "QF",
                   _utc(2026, 7, 10, 19), stage="knockout",
-                  venue="SoFi Stadium, Inglewood",
-                  home_feeders=("USA_BEL",), away_feeders=("POR_ESP",),
-                  home_resolved=False, away_resolved=False),
-            Match("QF3", "BRA/NOR winner", "MEX/ENG winner", "QF",
+                  venue="SoFi Stadium, Inglewood"),
+            Match("NOR_ENG", "Norway", "England", "QF",
                   _utc(2026, 7, 11, 21), stage="knockout",
-                  venue="Hard Rock Stadium, Miami",
-                  home_feeders=("BRA_NOR",), away_feeders=("MEX_ENG",),
-                  home_resolved=False, away_resolved=False),
-            Match("QF4", "ARG/EGY winner", "SUI/COL winner", "QF",
+                  venue="Hard Rock Stadium, Miami"),
+            Match("ARG_SUI", "Argentina", "Switzerland", "QF",
                   _utc(2026, 7, 12, 1), stage="knockout",
-                  venue="Arrowhead Stadium, Kansas City",
-                  home_feeders=("ARG_EGY",), away_feeders=("SUI_COL",),
+                  venue="Arrowhead Stadium, Kansas City"),
+            # --- Semifinals: seeded as placeholders, resolve as QFs finish ----
+            # SF1 = winner(MAR_FRA) vs winner(ESP_BEL), Jul 14, AT&T Dallas
+            # SF2 = winner(NOR_ENG) vs winner(ARG_SUI), Jul 15, Atlanta
+            Match("SF1", "MAR/FRA winner", "ESP/BEL winner", "SF",
+                  _utc(2026, 7, 14, 19), stage="knockout",
+                  venue="AT&T Stadium, Arlington",
+                  home_feeders=("MAR_FRA",), away_feeders=("ESP_BEL",),
+                  home_resolved=False, away_resolved=False),
+            Match("SF2", "NOR/ENG winner", "ARG/SUI winner", "SF",
+                  _utc(2026, 7, 15, 19), stage="knockout",
+                  venue="Mercedes-Benz Stadium, Atlanta",
+                  home_feeders=("NOR_ENG",), away_feeders=("ARG_SUI",),
                   home_resolved=False, away_resolved=False),
         ]
     return _SCHEDULE
@@ -199,12 +214,20 @@ def is_trackable(match: Match, now: datetime,
     `hours_after` past kickoff (live odds keep moving on goals; Kalshi
     books settle within a few hours of the final whistle).
 
-    A placeholder QF slot (one side still "X/Y winner") is NOT trackable:
-    there's no real team to simulate or price markets for. It becomes
-    trackable automatically once the bracket resolver fills both sides.
+    KNOCKOUT matches get a much wider pre-kickoff window: Kalshi opens
+    knockout markets days in advance (as soon as the bracket resolves), so we
+    start tracking them early to surface prices and edge right away instead of
+    waiting until `hours_ahead` before kickoff. Group-stage matches keep the
+    tighter default window.
+
+    A placeholder slot (one side still "X/Y winner") is NOT trackable: there's
+    no real team to simulate or price markets for. It becomes trackable
+    automatically once the bracket resolver fills both sides.
     """
     if not match.fully_resolved:
         return False
+    if match.stage == "knockout":
+        hours_ahead = max(hours_ahead, KNOCKOUT_TRACK_HOURS_AHEAD)
     return (match.kickoff <= now + timedelta(hours=hours_ahead)
             and now < match.kickoff + timedelta(hours=hours_after))
 
