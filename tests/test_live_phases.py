@@ -210,3 +210,13 @@ class TestTournamentModelGuard:
         # team outside the bracket: must not raise
         join_markets("Future SF Winner", players)
         assert players[0]["tournament_anytime"] is None
+
+
+class TestLiquidityGate:
+    def test_dead_book_is_not_a_market(self):
+        from src.player_props import _is_tradeable
+        assert not _is_tradeable(0.95, 0.05)   # the Upamecano case
+        assert not _is_tradeable(0.95, None)
+        assert _is_tradeable(0.08, 0.04)       # Tielemans 1+ style — real
+        assert _is_tradeable(0.02, 0.01)       # cheap but two-sided
+        assert not _is_tradeable(0.30, 0.05)   # 25c spread — no market

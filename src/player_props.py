@@ -180,6 +180,28 @@ from src.kalshi_client import (FIFA_CODES, _get_with_backoff,
 _pg_cache: dict = {}
 _PG_TTL = 120
 
+# A quote is only a MARKET if someone is meaningfully on both sides. Kalshi's
+# dead player books sit at ~5c bid / 95c ask — pricing that ask produced
+# absurd rows ("Upamecano 40% likely, -55% edge, 1.05x"). Wide spread = no
+# market: show the model, not a fictional price.
+MAX_TRADEABLE_SPREAD = 0.15
+
+
+def _to_float_or_none(v):
+    try:
+        f = float(v)
+        return f if f == f else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _is_tradeable(ask, bid) -> bool:
+    if ask is None or not (0.005 < ask < 0.97):
+        return False
+    if bid is None:
+        return False
+    return (ask - bid) <= MAX_TRADEABLE_SPREAD
+
 
 def _norm_name(s: str) -> str:
     n = unicodedata.normalize("NFKD", s or "")
@@ -210,6 +232,7 @@ def kalshi_player_markets(team: str) -> list[dict]:
                 "sub": m.get("yes_sub_title") or "",
                 "norm": _norm_name(m.get("yes_sub_title") or ""),
                 "yes_price": price,
+                "yes_bid": _to_float_or_none(m.get("yes_bid_dollars")),
             })
     except Exception as exc:                       # graceful: model-only
         print(f"[player-markets] {team} fetch failed: {exc}")
@@ -232,9 +255,13 @@ def join_markets(team: str, players: list[dict]) -> None:
         implied = mk["yes_price"]
         p["market_id"] = mk["market_id"]
         p["implied"] = round(implied, 4)
-        p["multiplier"] = round(1.0 / implied, 2) if implied > 0.005 else None
-        if p["already_scored"] or p["tournament_anytime"] is None:
-            continue  # settles Yes / no tournament model — price display only
+        p["bid"] = mk.get("yes_bid")
+        p["tradeable"] = _is_tradeable(implied, mk.get("yes_bid"))
+        p["multiplier"] = (round(1.0 / implied, 2)
+                           if p["tradeable"] else None)
+        if (p["already_scored"] or p["tournament_anytime"] is None
+                or not p["tradeable"]):
+            continue  # settled / no model / dead book — never fake a price
         anchored = (config.MODEL_WEIGHT * p["tournament_anytime"]
                     + (1 - config.MODEL_WEIGHT) * implied)
         p["likelihood"] = round(anchored, 4)
@@ -305,6 +332,9 @@ def join_match_markets(home: str, away: str, props: dict) -> None:
             price = _market_yes_price(mk)
             if price is None:
                 continue
+            bid = _to_float_or_none(mk.get("yes_bid_dollars"))
+            if not _is_tradeable(price, bid):
+                continue          # dead book — model stands alone
             row = {"n": n, "market_id": mk.get("ticker"),
                    "implied": round(price, 4),
                    "multiplier": round(1.0 / price, 2) if price > 0.005 else None}
