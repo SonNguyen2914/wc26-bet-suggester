@@ -398,11 +398,38 @@ ESPN_SUMMARY = ("https://site.api.espn.com/apis/site/v2/sports/soccer/"
                 "fifa.world/summary")
 
 
-def _espn_event_id(home: str, away: str) -> str | None:
+def _espn_event_id(home: str, away: str,
+                   on_date: str | None = None) -> str | None:
+    """ESPN event id for a fixture. The default scoreboard covers TODAY's
+    matches only (all lineups needs); pass on_date='YYYYMMDD' to look up a
+    fixture on another day (the reference-odds fallback prices matches 1-2
+    days out). Dated scoreboards are cached for an hour."""
     want = {_norm(home), _norm(away)}
-    for stt in _espn_states():          # includes pre-match fixtures
+    for stt in _espn_states():          # today, includes pre-match fixtures
         if want == {_norm(stt["home_name"]), _norm(stt["away_name"])}:
             return str(stt["fixture_id"])
+    if not on_date:
+        return None
+    key = f"__espnday__{on_date}"
+    hit = _cache.get(key)
+    if hit and (time.time() - hit[0]) < 3600:
+        events = hit[1]
+    else:
+        try:
+            r = requests.get(ESPN_URL, params={"dates": on_date}, timeout=8,
+                             headers={"User-Agent": "wc26-suggester/0.3"})
+            r.raise_for_status()
+            events = r.json().get("events", [])
+            _cache[key] = (time.time(), events)
+        except Exception as exc:
+            print(f"[live_feed] espn dated scoreboard failed: {exc}")
+            return None
+    for ev in events:
+        comp = (ev.get("competitions") or [{}])[0]
+        names = {_norm((c.get("team") or {}).get("displayName") or "")
+                 for c in comp.get("competitors", [])}
+        if want == names:
+            return str(ev.get("id"))
     return None
 
 

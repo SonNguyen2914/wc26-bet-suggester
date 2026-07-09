@@ -151,7 +151,9 @@ def _espn_reference(match: Match, prediction: dict | None) -> dict | None:
         try:
             import requests
             from src.live_feed import ESPN_SUMMARY, _espn_event_id
-            ev = _espn_event_id(match.home, match.away)
+            # the match may be 1-2 days out — look it up on its own date
+            ev = _espn_event_id(match.home, match.away,
+                                on_date=match.kickoff.strftime("%Y%m%d"))
             if not ev:
                 return None
             d = requests.get(ESPN_SUMMARY, params={"event": ev}, timeout=8,

@@ -516,3 +516,23 @@ class TestLiveFallthroughToEspn:
                                 AssertionError("ESPN must not be called")))
         out = lf.live_state_for("Morocco", "France")
         assert out["is_live"] and out["home_name"] == "Morocco"
+
+
+class TestEspnDatedEventLookup:
+    def test_finds_future_fixture_via_dated_scoreboard(self, monkeypatch):
+        """The default ESPN scoreboard is today-only; the reference-odds
+        fallback needs fixtures 1-2 days out, looked up by kickoff date."""
+        import time as _t
+
+        import src.live_feed as lf
+        monkeypatch.setattr(lf, "_espn_states", lambda: [])
+        lf._cache["__espnday__20260711"] = (_t.time(), [
+            {"id": 760512, "competitions": [{"competitors": [
+                {"team": {"displayName": "Norway"}},
+                {"team": {"displayName": "England"}}]}]},
+        ])
+        assert lf._espn_event_id("Norway", "England",
+                                 on_date="20260711") == "760512"
+        assert lf._espn_event_id("Norway", "England") is None  # today-only
+        assert lf._espn_event_id("Argentina", "Switzerland",
+                                 on_date="20260711") is None
