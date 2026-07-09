@@ -50,9 +50,37 @@ ALIASES: dict[str, list[str]] = {
     "Switzerland": ["switzerland", "swiss"],
 }
 
+# FIFA three-letter codes as used inside Kalshi tickers (e.g. FRA1MAR0,
+# ESP2, SUIREG). Needed because several codes are NOT a prefix of the
+# team name (SUI/Switzerland, ESP/Spain, NED/Netherlands, GER/Germany...),
+# so prefix matching alone can't resolve which team a ticker code names.
+FIFA_CODES: dict[str, str] = {
+    "Morocco": "MAR", "France": "FRA", "Spain": "ESP", "Belgium": "BEL",
+    "Norway": "NOR", "England": "ENG", "Argentina": "ARG",
+    "Switzerland": "SUI", "Brazil": "BRA", "Portugal": "POR",
+    "Mexico": "MEX", "United States": "USA", "Egypt": "EGY",
+    "Colombia": "COL", "Netherlands": "NED", "Germany": "GER",
+    "Croatia": "CRO", "Italy": "ITA", "Japan": "JPN", "Senegal": "SEN",
+    "Uruguay": "URU", "Denmark": "DEN", "IR Iran": "IRN", "Austria": "AUT",
+    "Paraguay": "PAR", "Canada": "CAN",
+}
+
 
 def _name_variants(team: str) -> list[str]:
     return ALIASES.get(team, [team.lower()])
+
+
+def _code_is(code: str, team: str) -> bool:
+    """Does a ticker team-code (FRA, SUI, ESP...) name this team? Exact FIFA
+    code first, then name-prefix fallback for codes that ARE a prefix
+    (MAR->Morocco). Never guesses: an unrecognized code matches nothing."""
+    code = code.strip().upper()
+    if not code:
+        return False
+    if FIFA_CODES.get(team, "").upper() == code:
+        return True
+    return any(v.upper().startswith(code) for v in _name_variants(team)
+               if len(code) >= 3)
 
 
 def _get_with_backoff(session: requests.Session, url: str, params: dict,
@@ -227,31 +255,44 @@ def _classify_outcome(match: Match, market: dict,
         margin = int(m.group(2))
         if margin not in (2, 3):
             return None
-        side_text = m.group(1).lower()
-        if any(v[:3] in side_text or side_text in v for v in _name_variants(match.home)):
+        # Side codes are FIFA codes (FRA2, SUI3...) — resolve via _code_is,
+        # which handles non-prefix codes (SUI/Switzerland, ESP/Spain) that the
+        # old prefix-fragment match silently dropped.
+        side_text = m.group(1)
+        if _code_is(side_text, match.home):
             return f"home_margin_{margin}"
-        if any(v[:3] in side_text or side_text in v for v in _name_variants(match.away)):
+        if _code_is(side_text, match.away):
             return f"away_margin_{margin}"
         return None
 
     if family == "KXWCBTTS":
         return "btts"
 
-    # Exact final score: ticker suffix like "BRA2NOR0" (home goals, away goals)
+    # Exact final score: ticker suffix like "FRA1MAR0" = France 1, Morocco 0.
+    # The goals belong to the NAMED team codes — Kalshi's team order in the
+    # ticker is its own (often not our home/away order), so the codes must be
+    # resolved to our sides before building score_<home>_<away>. Mapping the
+    # digits positionally flipped every asymmetric score whenever Kalshi
+    # listed our away team first (e.g. FRAMAR with Morocco as our home).
     if family == "KXWCSCORE":
-        m = re.search(r"-[A-Z]+?(\d+)[A-Z]+?(\d+)$", ticker)
-        if m:
-            return f"score_{m.group(1)}_{m.group(2)}"
-        return None
+        m = re.search(r"-([A-Z]+?)(\d+)([A-Z]+?)(\d+)$", ticker)
+        if not m:
+            return None
+        c1, g1, c2, g2 = m.groups()
+        if _code_is(c1, match.home) or _code_is(c2, match.away):
+            return f"score_{g1}_{g2}"
+        if _code_is(c1, match.away) or _code_is(c2, match.home):
+            return f"score_{g2}_{g1}"
+        return None  # codes unrecognized — skip rather than misprice
 
     # Method of victory: REG = wins in regulation = our 90-min outcome.
     # ET/PEN (extra time / penalties) can't be priced by a 90-min sim: skip.
     if family == "KXWCMOV":
         if ticker.endswith("REG"):
-            side = ticker.rsplit("-", 1)[-1][:-3].lower()  # strip 'REG'
-            if any(v.startswith(side) for v in _name_variants(match.home)):
+            side = ticker.rsplit("-", 1)[-1][:-3]  # strip 'REG' -> FIFA code
+            if _code_is(side, match.home):
                 return "home_win"
-            if any(v.startswith(side) for v in _name_variants(match.away)):
+            if _code_is(side, match.away):
                 return "away_win"
         return None
 
