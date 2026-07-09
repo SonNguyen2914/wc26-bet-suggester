@@ -325,6 +325,19 @@ def team_news(match_id: str):
             "kickoff": m.kickoff.isoformat(), "venue": m.venue, **lu}
 
 
+@app.get("/api/reference-odds/{match_id}")
+def get_reference_odds(match_id: str):
+    """Sportsbook reference odds (API-Football, display-only). Fills the
+    gap while Kalshi hasn't listed a family yet (e.g. Correct Score opens
+    1-2 days out). NEVER feeds the board, the strategy engine, or any
+    edge gate — see src/reference_odds.py for the ground rules."""
+    m = get_match(match_id)
+    if not m:
+        raise HTTPException(404, f"Unknown match_id '{match_id}'")
+    from src.reference_odds import reference_odds
+    return reference_odds(m, latest_for_match(match_id))
+
+
 @app.get("/api/player-props/{match_id}")
 def player_props(match_id: str):
     """Per-player anytime / first-goalscorer probabilities for a match —

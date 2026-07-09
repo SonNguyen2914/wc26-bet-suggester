@@ -334,3 +334,77 @@ class TestFirstGoalMarkets:
         mk = {"ticker": "KXWCFIRSTGOAL-26JUL11NORENG-ENGHKANE9",
               "title": "", "yes_sub_title": "Harry Kane"}
         assert _classify_outcome(m, mk, "KXWCFIRSTGOAL-26JUL11NORENG") is None
+
+
+class TestReferenceOdds:
+    """Sportsbook reference layer (API-Football /odds) — display-only.
+    Canned payloads; no network. The one rule that matters most: these
+    numbers must be impossible to confuse with buyable Kalshi edge."""
+
+    def _match(self):
+        from src.schedule_data import get_match
+        return get_match("NOR_ENG")
+
+    def _payload(self):
+        return {"response": [{"bookmakers": [
+            {"name": "BookA", "bets": [
+                {"name": "Match Winner", "values": [
+                    {"value": "Home", "odd": "5.50"},
+                    {"value": "Draw", "odd": "4.20"},
+                    {"value": "Away", "odd": "1.60"}]},
+                {"name": "Exact Score", "values": [
+                    {"value": "0:1", "odd": "7.00"},
+                    {"value": "1:1", "odd": "6.50"}]},
+                {"name": "Man of the Match", "values": [   # not tracked
+                    {"value": "H. Kane", "odd": "4.00"}]},
+            ]},
+            {"name": "BookB", "bets": [
+                {"name": "Match Winner", "values": [
+                    {"value": "Home", "odd": "6.00"},
+                    {"value": "Draw", "odd": "4.00"},
+                    {"value": "Away", "odd": "1.66"}]},
+                {"name": "Correct Score", "values": [
+                    {"value": "0:1", "odd": "7.50"}]},
+            ]},
+        ]}]}
+
+    def test_groups_median_and_model_join(self, monkeypatch):
+        import src.reference_odds as ro
+        monkeypatch.setattr(ro, "_fixture_id", lambda h, a: 123)
+        monkeypatch.setattr(ro, "_request", lambda p, q: self._payload())
+        ro._cache.clear()
+        pred = {"summary": {"full_time": {"home_win": 0.14, "draw": 0.24,
+                                          "away_win": 0.62}},
+                "scorelines": [{"score": "0-1", "prob": 0.11}]}
+        out = ro.reference_odds(self._match(), pred)
+        assert out["available"] and out["bookmaker_count"] == 2
+        names = [g["name"] for g in out["groups"]]
+        assert names == ["Winner · 90 min", "Exact score · 90 min"]
+        winner = {r["label"]: r for r in out["groups"][0]["rows"]}
+        # median of 5.50/6.00 = 5.75; team names resolved from OUR match
+        assert winner["Norway"]["odd"] == 5.75 and winner["Norway"]["books"] == 2
+        assert winner["England"]["model"] == 0.62
+        score = {r["label"]: r for r in out["groups"][1]["rows"]}
+        # '0:1' normalised to our home-away '0-1'; model joined exactly;
+        # Exact Score + Correct Score are the same display group
+        assert score["0-1"]["books"] == 2 and score["0-1"]["model"] == 0.11
+        assert "1-1" in score and "model" not in score["1-1"]
+        # untracked bet types (Man of the Match) never leak through
+        assert all(g["name"] in ("Winner · 90 min", "Exact score · 90 min")
+                   for g in out["groups"])
+        assert "NOT Kalshi" in out["disclaimer"]
+
+    def test_degrades_without_provider(self, monkeypatch):
+        import src.reference_odds as ro
+        monkeypatch.setattr(ro, "_fixture_id", lambda h, a: 123)
+        monkeypatch.setattr(ro, "_request", lambda p, q: None)
+        ro._cache.clear()
+        out = ro.reference_odds(self._match(), None)
+        assert out["available"] is False and "reason" in out
+
+    def test_unknown_fixture_degrades(self, monkeypatch):
+        import src.reference_odds as ro
+        monkeypatch.setattr(ro, "_fixture_id", lambda h, a: None)
+        ro._cache.clear()
+        out = ro.reference_odds(self._match(), None)
+        assert out["available"] is False and "fixture" in out["reason"]
