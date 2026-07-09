@@ -77,3 +77,29 @@ class TestSideCodeResolution:
         assert _code_is("MAR", "Morocco")      # prefix fallback
         assert not _code_is("FRA", "Morocco")
         assert not _code_is("", "France")
+
+
+class TestFallbackHardening:
+    def test_tielemans_is_not_a_draw(self):
+        """Regression: KXWCGOAL/KXWCAST player props ('Youri TIElemans: 1+')
+        matched the 'tie' substring and were sold as Draw-after-90 at 93x."""
+        m = _match("Spain", "Belgium")
+        for tick, fam in (("KXWCGOAL-26JUL10ESPBEL-BELYTIELE8-2", "KXWCGOAL-26JUL10ESPBEL"),
+                          ("KXWCAST-26JUL10ESPBEL-BELYTIELE8-1", "KXWCAST-26JUL10ESPBEL")):
+            mk = {"ticker": tick, "title": "", "yes_sub_title": "Youri Tielemans: 1+"}
+            assert _classify_outcome(m, mk, fam) is None
+
+    def test_unknown_kxwc_family_denied(self):
+        m = _match("Spain", "Belgium")
+        mk = {"ticker": "KXWCMYSTERY-26JUL10ESPBEL-DRAWX",
+              "title": "Draw something", "yes_sub_title": "Draw"}
+        assert _classify_outcome(m, mk, "KXWCMYSTERY-26JUL10ESPBEL") is None
+
+    def test_explicit_game_and_advance(self):
+        m = _match("Spain", "Belgium")
+        assert _classify_outcome(m, _mkt("KXWCGAME-26JUL10ESPBEL-TIE"),
+                                 "KXWCGAME-26JUL10ESPBEL") == "draw"
+        assert _classify_outcome(m, _mkt("KXWCGAME-26JUL10ESPBEL-ESP"),
+                                 "KXWCGAME-26JUL10ESPBEL") == "home_win"
+        assert _classify_outcome(m, _mkt("KXWCADVANCE-26JUL10ESPBEL-BEL"),
+                                 "KXWCADVANCE-26JUL10ESPBEL") == "away_advance"

@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from functools import lru_cache
 from pathlib import Path
 
@@ -234,3 +235,96 @@ def join_markets(team: str, players: list[dict]) -> None:
                     + (1 - config.MODEL_WEIGHT) * implied)
         p["likelihood"] = round(anchored, 4)
         p["edge"] = round(anchored - implied, 4)
+
+
+# ---------------------------------------------------------------------------
+# Per-match player markets — KXWCGOAL ("Player: 1+/2+/3+ goals") and
+# KXWCAST ("Player: 1+ assists"), discovered live 2026-07-09. Goals are
+# priced with the exact per-match Poisson tails; assists are DISPLAY-ONLY
+# (FIFA publishes no assist data — no model, no invented numbers).
+# ---------------------------------------------------------------------------
+_pm_cache: dict = {}
+
+_PM_TICK = re.compile(r"-([A-Z]{3})([A-Z]+?)(\d+)-(\d+)$")
+
+
+def _match_event_markets(series: str, home: str, away: str) -> list[dict]:
+    """Markets of a per-match player series for this fixture. The event
+    ticker embeds Kalshi's own team order, so events are discovered by
+    series and matched by 'contains both FIFA codes'."""
+    if config.DEMO_MODE:
+        return []
+    ch, ca = FIFA_CODES.get(home), FIFA_CODES.get(away)
+    if not ch or not ca:
+        return []
+    key = (series, ch, ca)
+    hit = _pm_cache.get(key)
+    if hit and time.time() - hit[0] < _PG_TTL:
+        return hit[1]
+    out: list[dict] = []
+    try:
+        s = _rq.Session()
+        evs = _get_with_backoff(
+            s, f"{config.KALSHI_BASE_URL}/events",
+            {"series_ticker": series, "status": "open", "limit": 200}
+        ).json().get("events", [])
+        ev = next((e["event_ticker"] for e in evs
+                   if ch in e["event_ticker"] and ca in e["event_ticker"]), None)
+        if ev:
+            out = _get_with_backoff(
+                s, f"{config.KALSHI_BASE_URL}/markets",
+                {"event_ticker": ev, "limit": 200}).json().get("markets", [])
+    except Exception as exc:
+        print(f"[player-markets] {series} {home}-{away} fetch failed: {exc}")
+    _pm_cache[key] = (time.time(), out)
+    return out
+
+
+def join_match_markets(home: str, away: str, props: dict) -> None:
+    """Attach per-match goal/assist markets to each player row, keyed by the
+    shirt number in the ticker (…-BELYTIELE8-2 = Belgium #8, 2+ goals)."""
+    rosters = {"home": {p["shirt"]: p for p in props["home"]},
+               "away": {p["shirt"]: p for p in props["away"]}}
+    codes = {"home": FIFA_CODES.get(home), "away": FIFA_CODES.get(away)}
+
+    def place(series: str, field: str, priced: bool) -> None:
+        for mk in _match_event_markets(series, home, away):
+            t = _PM_TICK.search(mk.get("ticker") or "")
+            if not t:
+                continue
+            team_code, _, shirt, n = (t.group(1), t.group(2),
+                                      int(t.group(3)), int(t.group(4)))
+            side = next((sd for sd, c in codes.items() if c == team_code), None)
+            player = rosters.get(side, {}).get(shirt) if side else None
+            if player is None:
+                continue
+            price = _market_yes_price(mk)
+            if price is None:
+                continue
+            row = {"n": n, "market_id": mk.get("ticker"),
+                   "implied": round(price, 4),
+                   "multiplier": round(1.0 / price, 2) if price > 0.005 else None}
+            if priced:
+                model = {1: player.get("anytime"), 2: player.get("p2"),
+                         3: player.get("p3")}.get(n)
+                if model is not None:
+                    anchored = (config.MODEL_WEIGHT * model
+                                + (1 - config.MODEL_WEIGHT) * price)
+                    row["likelihood"] = round(anchored, 4)
+                    row["edge"] = round(anchored - price, 4)
+            player.setdefault(field, []).append(row)
+
+    place("KXWCGOAL", "match_goal_markets", priced=True)
+    place("KXWCAST", "assist_markets", priced=False)
+    # Kalshi lists threshold variants; keep ONE row per n — the cheapest ask
+    # (buyer-favorable), consistent with the moneyline dedup rule.
+    for side in ("home", "away"):
+        for p in props[side]:
+            for f in ("match_goal_markets", "assist_markets"):
+                if f in p:
+                    best: dict[int, dict] = {}
+                    for r in p[f]:
+                        cur = best.get(r["n"])
+                        if cur is None or r["implied"] < cur["implied"]:
+                            best[r["n"]] = r
+                    p[f] = sorted(best.values(), key=lambda r: r["n"])

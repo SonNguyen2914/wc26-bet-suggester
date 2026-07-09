@@ -213,6 +213,14 @@ SKIP_FAMILIES = (
     # 1-cent player prop silently replace the real moneyline (the
     # MEX_ENG 16.67x incident). No player model here; skip the family.
     "KXWCTEAMFIRSTGOAL",
+    # Per-match player props (KXWCGOAL = "Player: 1+/2+ goals",
+    # KXWCAST = "Player: 1+ assists") are priced/displayed by the
+    # player-props endpoint, not the match pipeline. Their subtitles are
+    # PLAYER NAMES — the free-text fallback once matched the "tie" inside
+    # "TIElemans" and sold them as 'Draw after 90 min' at 93x.
+    "KXWCGOAL", "KXWCAST",
+    # Observed but unmodelled: man/method-of-... + half-winner families.
+    "KXWCMOF", "KXWC1H", "KXWC2H",
 )
 
 
@@ -267,6 +275,26 @@ def _classify_outcome(match: Match, market: dict,
     if family == "KXWCBTTS":
         return "btts"
 
+    # Moneyline: suffix TIE, or the winning team's FIFA code.
+    if family == "KXWCGAME":
+        side = ticker.rsplit("-", 1)[-1]
+        if side in ("TIE", "DRAW"):
+            return "draw"
+        if _code_is(side, match.home):
+            return "home_win"
+        if _code_is(side, match.away):
+            return "away_win"
+        return None
+
+    # To advance: suffix is the advancing team's FIFA code.
+    if family == "KXWCADVANCE":
+        side = ticker.rsplit("-", 1)[-1]
+        if _code_is(side, match.home):
+            return "home_advance"
+        if _code_is(side, match.away):
+            return "away_advance"
+        return None
+
     # First team to score: suffix is a FIFA team code, or NONE for "no goal".
     if family == "KXWCFTTS":
         side = ticker.rsplit("-", 1)[-1]
@@ -310,7 +338,14 @@ def _classify_outcome(match: Match, market: dict,
                         "PEN": f"{key}_win_pens"}[mode]
         return None
 
-    # ---- Fallback for unknown families (moneyline / draw / advance) ----
+    # ---- Unknown KXWC families: DENY. Every family we price has an
+    # explicit branch above; free-text guessing on unknown families is how
+    # a player prop became 'Draw after 90 min' (TIElemans) and a 1c player
+    # prop once replaced the real moneyline (the 16.67x incident). ----
+    if family.startswith("KXWC"):
+        return None
+
+    # ---- Fallback for non-KXWC events only ----
     # Guards FIRST: never map partial-match or prop language via fallback,
     # no matter what the subtitle says (a "1st half Draw 2-2" market must
     # not become our full-match draw).
@@ -329,7 +364,7 @@ def _classify_outcome(match: Match, market: dict,
     sub = (market.get("yes_sub_title") or market.get("subtitle") or "").lower()
     suffix = ticker.rsplit("-", 1)[-1].lower() if "-" in ticker else ""
 
-    if "draw" in sub or "tie" in sub or suffix in ("tie", "draw"):
+    if re.search(r"\b(draw|tie)\b", sub) or suffix in ("tie", "draw"):
         return "draw"
 
     home_sub = any(v in sub for v in _name_variants(match.home)) or \
@@ -340,7 +375,7 @@ def _classify_outcome(match: Match, market: dict,
     home_hit = any(v in text for v in _name_variants(match.home))
     away_hit = any(v in text for v in _name_variants(match.away))
 
-    if "draw" in text and not (home_sub or away_sub):
+    if re.search(r"\bdraw\b", text) and not (home_sub or away_sub):
         return "draw"
 
     is_advance = "advance" in text or "qualify" in text

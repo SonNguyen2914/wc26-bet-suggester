@@ -330,10 +330,11 @@ def player_props(match_id: str):
     else:  # no cached sim yet — derive from the same xG model directly
         from src.models.xg_model import predict_xg
         xgh, xga = predict_xg(get_team_stats(m.home), get_team_stats(m.away))
-    from src.player_props import props_for, join_markets
+    from src.player_props import props_for, join_markets, join_match_markets
     props = props_for(m.home, m.away, m.stage, xgh, xga)
     join_markets(m.home, props["home"])     # tournament-anytime + Kalshi rows
     join_markets(m.away, props["away"])
+    join_match_markets(m.home, m.away, props)   # per-match 1+/2+/3+ + assists
     return {
         "available": True,
         "match_id": match_id,
