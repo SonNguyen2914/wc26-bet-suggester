@@ -482,3 +482,37 @@ class TestEspnFallbackOdds:
         monkeypatch.setattr(ro, "_espn_reference", lambda match, pred: None)
         out = ro._unavailable({"match_id": m.match_id}, "plan blocked", m, None)
         assert out["available"] is False and out["reason"] == "plan blocked"
+
+
+class TestLiveFallthroughToEspn:
+    def test_empty_primary_feed_still_finds_the_match_via_espn(self, monkeypatch):
+        """Regression: MAR-FRA at 45' with live=[] on the site. With a key
+        configured, an empty API-Football pull (free plan excludes season
+        2026; budget exhaustion looks identical) must fall through to ESPN
+        instead of returning None."""
+        import config
+        import src.live_feed as lf
+        monkeypatch.setattr(config, "API_FOOTBALL_KEY", "some-key")
+        monkeypatch.setattr(lf, "_fetch_live_fixtures", lambda: [])
+        sentinel = {"home_name": "Morocco", "away_name": "France",
+                    "is_live": True, "status_short": "1H"}
+        monkeypatch.setattr(lf, "_espn_state_for",
+                            lambda h, a, want_finished=False: sentinel)
+        assert lf.live_state_for("Morocco", "France") is sentinel
+
+    def test_primary_hit_still_wins_over_espn(self, monkeypatch):
+        import config
+        import src.live_feed as lf
+        monkeypatch.setattr(config, "API_FOOTBALL_KEY", "some-key")
+        fix = {"league": {"id": config.API_FOOTBALL_LEAGUE_ID},
+               "teams": {"home": {"id": 1, "name": "Morocco"},
+                         "away": {"id": 2, "name": "France"}},
+               "fixture": {"id": 9, "status": {"short": "1H", "elapsed": 44,
+                                               "extra": None, "long": ""}},
+               "goals": {"home": 0, "away": 0}, "events": []}
+        monkeypatch.setattr(lf, "_fetch_live_fixtures", lambda: [fix])
+        monkeypatch.setattr(lf, "_espn_state_for",
+                            lambda *a, **k: (_ for _ in ()).throw(
+                                AssertionError("ESPN must not be called")))
+        out = lf.live_state_for("Morocco", "France")
+        assert out["is_live"] and out["home_name"] == "Morocco"

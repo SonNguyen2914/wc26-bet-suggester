@@ -208,7 +208,13 @@ def live_state_for(home: str, away: str) -> dict | None:
             if _norm(parsed["home_name"]) != _norm(home):
                 parsed = _flip(parsed)
             return parsed
-    return None
+    # API-Football answered but had nothing for this pair. That is NOT proof
+    # the match isn't live: the free plan excludes season-2026 fixtures from
+    # its responses (found 2026-07-09, MAR-FRA at 45' with an empty live=all),
+    # budget exhaustion returns [] too, and the fallback banner below always
+    # promised ESPN on "a feed error". Fall through — _espn_states() is
+    # cached like the primary pull, so this costs one keyless call per cycle.
+    return _espn_state_for(home, away)
 
 
 _finished_cache: dict[str, tuple[float, dict | None]] = {}
