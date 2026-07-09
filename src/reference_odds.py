@@ -25,6 +25,7 @@ from src.live_feed import _norm, _request
 from src.schedule_data import Match
 
 _FIXTURES_KEY = "ref_fixtures"
+_FIXTURES_ERR_KEY = "ref_fixtures_err"
 _FIXTURES_TTL = 6 * 3600
 _ODDS_TTL = 30 * 60
 _cache: dict = {}
@@ -45,6 +46,20 @@ _BET_NAME_TO_GROUP = {api: (disp, strat) for api, disp, strat in _BET_GROUPS}
 _GROUP_ORDER = list(dict.fromkeys(disp for _, disp, _ in _BET_GROUPS))
 
 
+def _provider_error(data) -> str | None:
+    """API-Football reports problems as HTTP 200 + an 'errors' field (plan
+    restrictions, bad params). Surface that text — a silently empty
+    response hides the real cause behind 'fixture not found'."""
+    errs = (data or {}).get("errors")
+    if not errs:
+        return None
+    if isinstance(errs, dict):
+        return "; ".join(f"{k}: {v}" for k, v in errs.items())
+    if isinstance(errs, list):
+        return "; ".join(str(e) for e in errs)
+    return str(errs)
+
+
 def _season_fixtures() -> list:
     """All WC fixtures (id + team names), one budgeted call, cached 6h."""
     hit = _cache.get(_FIXTURES_KEY)
@@ -53,6 +68,10 @@ def _season_fixtures() -> list:
     data = _request("/fixtures", {"league": config.API_FOOTBALL_LEAGUE_ID,
                                   "season": config.API_FOOTBALL_SEASON})
     fixtures = data.get("response", []) if data else []
+    err = _provider_error(data)
+    if err is None and not fixtures and data is None:
+        err = "request failed or budget exhausted"
+    _cache[_FIXTURES_ERR_KEY] = err
     if fixtures:                      # never cache a failed/empty fetch
         _cache[_FIXTURES_KEY] = (time.time(), fixtures)
     return fixtures
@@ -120,16 +139,24 @@ def reference_odds(match: Match, prediction: dict | None) -> dict:
     else:
         fid = _fixture_id(match.home, match.away)
         if fid is None:
-            return {**base, "available": False,
-                    "reason": "fixture not found at the odds provider"}
+            reason = "fixture not found at the odds provider"
+            err = _cache.get(_FIXTURES_ERR_KEY)
+            if err:
+                reason += f" — provider says: {err}"
+            return {**base, "available": False, "reason": reason}
         payload = _request("/odds", {"fixture": fid})
         if payload is not None:
             _cache[match.match_id] = (time.time(), payload)
 
     entries = (payload or {}).get("response", [])
     if not entries:
-        return {**base, "available": False,
-                "reason": "provider lists no pre-match odds yet"}
+        reason = ("odds request failed or budget exhausted"
+                  if payload is None
+                  else "provider lists no pre-match odds yet")
+        err = _provider_error(payload)
+        if err:
+            reason += f" — provider says: {err}"
+        return {**base, "available": False, "reason": reason}
 
     # odds[(group, label)] -> list of decimal odds across bookmakers
     collected: dict[tuple[str, str, str], list[float]] = {}
