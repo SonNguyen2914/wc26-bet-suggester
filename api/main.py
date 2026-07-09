@@ -211,6 +211,8 @@ def live_prediction(match_id: str, state: LiveStateIn):
         raise HTTPException(422, "minutes_elapsed out of range")
     if state.phase not in ("auto", "regulation", "et", "pens"):
         raise HTTPException(422, "phase must be auto|regulation|et|pens")
+    if state.phase in ("et", "pens") and match.stage != "knockout":
+        raise HTTPException(422, "extra time/penalties only exist in knockouts")
     for r in (state.red_home, state.red_away):
         if not (0 <= r <= 3):
             raise HTTPException(422, "red cards out of range (0-3)")

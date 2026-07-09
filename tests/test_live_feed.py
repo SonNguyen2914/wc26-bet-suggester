@@ -68,7 +68,7 @@ class TestParsingAndMatching:
         _patch(monkeypatch, [_fixture("Brazil", "Norway", 0, 0, 40,
                                       events=events)])
         s = lf.live_state_for("Brazil", "Norway")
-        assert s["red_home"] is True and s["red_away"] is False
+        assert s["red_home"] == 1 and s["red_away"] == 0  # counts now
 
     def test_stoppage_time_added(self, monkeypatch):
         fx = _fixture("Brazil", "Norway", 1, 1, 45)

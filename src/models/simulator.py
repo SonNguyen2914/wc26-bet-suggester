@@ -60,12 +60,13 @@ class MatchSimulator:
         lam_home = np.full(self.n, xg_home)
         lam_away = np.full(self.n, xg_away)
         # Knockout football is cagier than raw team ratings imply: teams
-        # protect leads and avoid risks with elimination on the line.
-        # Historical WC knockout matches average ~15% fewer goals than an
-        # equivalent group fixture, so damp both lambdas accordingly.
+        # protect leads and avoid risks with elimination on the line. The
+        # DIRECTION is well documented (group stages out-score knockouts,
+        # e.g. WC2018 group 2.54 goals/match vs lower knockout 90' averages);
+        # the exact magnitude is an estimate, tunable via KNOCKOUT_DAMPING.
         if stage == "knockout":
-            lam_home *= 0.85
-            lam_away *= 0.85
+            lam_home *= config.KNOCKOUT_DAMPING
+            lam_away *= config.KNOCKOUT_DAMPING
         # Red card: sourced coefficients (see RED_CARD_* constants above)
         lam_home = np.where(red_home, lam_home * RED_CARD_OWN_MULT, lam_home)
         lam_away = np.where(red_home, lam_away * RED_CARD_OPP_MULT, lam_away)
@@ -268,9 +269,9 @@ class MatchSimulator:
         # scaling — the ET continuation reuses these at 30/90. Card counts
         # apply the sourced multiplier once per red (0.67^n / 1.25^n).
         rate_home, rate_away = xg_home, xg_away
-        if stage == "knockout":          # same damping as pre-match (debt)
-            rate_home *= 0.85
-            rate_away *= 0.85
+        if stage == "knockout":          # same damping as pre-match
+            rate_home *= config.KNOCKOUT_DAMPING
+            rate_away *= config.KNOCKOUT_DAMPING
         rate_home *= (RED_CARD_OWN_MULT ** red_home) * (RED_CARD_OPP_MULT ** red_away)
         rate_away *= (RED_CARD_OWN_MULT ** red_away) * (RED_CARD_OPP_MULT ** red_home)
 

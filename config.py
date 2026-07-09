@@ -28,7 +28,12 @@ FINAL_LOCK_MINUTES_BEFORE_KICKOFF = int(os.getenv("FINAL_LOCK_MINUTES", "10"))
 
 # --- Suggestion filters (defaults; editable via /api/settings) ----------
 MIN_EDGE = float(os.getenv("MIN_EDGE", "0.05"))          # 5%
-MIN_CONFIDENCE = float(os.getenv("MIN_CONFIDENCE", "0.60"))
+# 0.45 matches the value production always ran with (the old 0.60 default
+# forced a manual settings re-POST after every deploy, since the SQLite
+# settings row is wiped with the DB). Now a redeploy needs no manual step:
+# the boot-time prime job repopulates predictions and this default is
+# already the operating value.
+MIN_CONFIDENCE = float(os.getenv("MIN_CONFIDENCE", "0.45"))
 MIN_VOLUME_24H = float(os.getenv("MIN_VOLUME_24H", "10000"))
 
 # --- Timing / ripeness alerts --------------------------------------------
@@ -44,6 +49,14 @@ DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", "")
 API_HOST = os.getenv("API_HOST", "0.0.0.0")
 API_PORT = int(os.getenv("API_PORT", "8000"))
 CORS_ORIGINS = os.getenv("CORS_ORIGINS", "http://localhost:3000,https://namson.dev").split(",")
+
+# --- Knockout goal damping -------------------------------------------------
+# Knockout matches score fewer goals than group matches (well documented:
+# e.g. WC2018 group stage averaged 2.54 goals/match with knockout 90-minute
+# averages lower — teams protect leads with elimination on the line). The
+# DIRECTION is sourced; the exact 0.85 per-team multiplier remains an
+# estimate, kept configurable so it can be tuned against data without code.
+KNOCKOUT_DAMPING = float(os.getenv("KNOCKOUT_DAMPING", "0.85"))
 
 # --- Model humility (market anchoring) -----------------------------------
 # Final probability = MODEL_WEIGHT * model + (1-MODEL_WEIGHT) * market-implied.

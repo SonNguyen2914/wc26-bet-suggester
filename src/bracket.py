@@ -179,9 +179,16 @@ def _win_probs(m) -> dict | None:
                 k = mkt.get("outcome_key")
                 if k in ("home_win", "draw", "away_win"):
                     probs[k] = mkt["model_probability"]
+                    # ship the edge alongside so the bracket UI can show it
+                    # without fetching each match's full prediction (that
+                    # per-viewer polling triggered fresh sims every 5 min).
+                    if k == "home_win":
+                        probs["home_edge"] = mkt.get("edge")
+                    elif k == "away_win":
+                        probs["away_edge"] = mkt.get("edge")
             if "home_win" in probs and "away_win" in probs:
                 return probs
-        # no cache — quick direct simulation
+        # no cache — quick direct simulation (no market, so no edge)
         from src.models.simulator import MatchSimulator
         from src.schedule_data import get_team_stats
         sim = MatchSimulator(n_simulations=8000, seed=7)

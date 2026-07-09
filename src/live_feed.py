@@ -127,8 +127,10 @@ def _parse_fixture(fix: dict) -> dict:
         minutes = float(elapsed) + (float(extra) if extra else 0.0)
 
     # red cards + goal scorers from the events list (already in the payload,
-    # so surfacing them costs no extra API call).
-    red_home = red_away = False
+    # so surfacing them costs no extra API call). Red cards are COUNTED per
+    # side (two sendings-off are twice the handicap, and the live sim takes
+    # counts) — bool(count) keeps every legacy truthiness check working.
+    red_home = red_away = 0
     goals_list: list[dict] = []
     home_id = fix["teams"]["home"]["id"]
     for ev in fix.get("events", []) or []:
@@ -136,9 +138,9 @@ def _parse_fixture(fix: dict) -> dict:
         team_is_home = (ev.get("team") or {}).get("id") == home_id
         if etype == "Card" and "Red" in (ev.get("detail") or ""):
             if team_is_home:
-                red_home = True
+                red_home += 1
             else:
-                red_away = True
+                red_away += 1
         elif etype == "Goal":
             goals_list.append({
                 "team": "home" if team_is_home else "away",

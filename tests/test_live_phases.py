@@ -117,3 +117,55 @@ class TestContinuationMarketFilter:
         out_reg = eng.price_live(m, 1, 1, 60, phase="regulation")
         assert any((r["outcome_key"] or "").startswith("over_")
                    for r in out_reg["markets"])
+
+
+class TestAuditFixes:
+    def test_two_reds_counted_from_feed(self, monkeypatch):
+        import config
+        import src.live_feed as lf
+        from tests.test_live_feed import _fixture, _patch
+        events = [
+            {"type": "Card", "detail": "Red Card", "team": {"id": 100}},
+            {"type": "Card", "detail": "Red Card", "team": {"id": 100}},
+            {"type": "Card", "detail": "Red Card", "team": {"id": 200}},
+        ]
+        _patch(monkeypatch, [_fixture("Brazil", "Norway", 0, 0, 60,
+                                      events=events)])
+        s = lf.live_state_for("Brazil", "Norway")
+        assert s["red_home"] == 2 and s["red_away"] == 1
+
+    def test_group_match_rejects_et_phase(self):
+        from fastapi.testclient import TestClient
+        import src.schedule_data as sd
+        from api.main import app
+        m = sd.load_schedule()[0]
+        orig = m.stage
+        m.stage = "group"           # force a group match temporarily
+        try:
+            client = TestClient(app)
+            r = client.post(f"/api/prediction/{m.match_id}/live",
+                            json={"minutes_elapsed": 100, "phase": "et"})
+            assert r.status_code == 422
+        finally:
+            m.stage = orig
+
+    def test_bracket_probs_carry_edges_from_cache(self):
+        from src.bracket import _win_probs
+        import src.bracket as br
+        class M:  # minimal resolved-match stand-in
+            fully_resolved = True
+            match_id = "TST_EDGE"
+            home, away = "Morocco", "France"
+        import src.cache as cache
+        orig = cache.latest_for_match
+        cache.latest_for_match = lambda mid: {
+            "markets": [
+                {"outcome_key": "home_win", "model_probability": 0.28, "edge": 0.07},
+                {"outcome_key": "draw", "model_probability": 0.25, "edge": 0.01},
+                {"outcome_key": "away_win", "model_probability": 0.52, "edge": -0.08},
+            ]}
+        try:
+            p = _win_probs(M())
+            assert p["home_edge"] == 0.07 and p["away_edge"] == -0.08
+        finally:
+            cache.latest_for_match = orig
