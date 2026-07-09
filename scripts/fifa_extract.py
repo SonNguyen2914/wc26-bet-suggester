@@ -179,7 +179,12 @@ def title_team(page: str, home_name: str, away_name: str) -> str | None:
     by accident ("Mexico City Stadium" ⊃ "Mexico"), which mis-attributed
     England's shots to Mexico until this was title-line-scoped."""
     for ln in page.splitlines()[:6]:
-        if "Attempts at Goal" in ln:
+        if any(t in ln for t in ("Attempts at Goal", "Set Plays",
+                                 "Goal Prevention", "Aerial Control",
+                                 "Distributions", "Offers & Receptions",
+                                 "Out of Possession", "Physical Data",
+                                 "Goalkeeping Distribution", "Line Breaks",
+                                 "Crosses (Open Play)")):
             if home_name and home_name in ln:
                 return "home"
             if away_name and away_name in ln:
@@ -192,6 +197,98 @@ def title_team(page: str, home_name: str, away_name: str) -> str | None:
         if st == away_name:
             return "away"
     return None
+
+
+_PLAYER_ROW = re.compile(r"^\s*(\d+)\s+([A-Za-z][A-Za-z'’ .\-]*[A-Za-z.])\s{2,}(\S.*)$")
+
+# column names per individual-data table, in on-page order
+_DIST_COLS = ["passes_att", "passes_comp", "pass_pct", "switches",
+              "crosses_att", "crosses_comp", "lb_att", "lb_comp", "lb_pct",
+              "ball_progressions", "take_ons", "step_ins", "attempts", "goals"]
+_OOP_COLS = ["tackles", "blocks", "interceptions", "press_direct",
+             "press_indirect", "duels_aerial", "duels_physical",
+             "possession_contests_won", "clearances", "loose_ball_receptions",
+             "pushing_on", "pushing_on_into_pressing", "possession_regains",
+             "possession_interrupted"]
+_PHYS_COLS = ["distance_m", "z1_m", "z2_m", "z3_m", "z4_m", "z5_m",
+              "high_speed_runs", "sprints", "top_speed_kmh"]
+
+
+def parse_player_table(page: str, cols: list[str]) -> list[dict]:
+    """Individual-data tables: '#  PLAYER   v1 v2 v3 ...' — one row per
+    player, values matched positionally to the section's known columns."""
+    out = []
+    for ln in page.splitlines():
+        m = _PLAYER_ROW.match(ln)
+        if not m:
+            continue
+        vals = m.group(3).split()
+        if len(vals) != len(cols):
+            continue  # header/graphic debris — real rows match exactly
+        row = {"shirt": int(m.group(1)), "player": m.group(2).strip()}
+        for c, v in zip(cols, vals):
+            row[c] = v.rstrip("%")
+        out.append(row)
+    return out
+
+
+def parse_set_plays(page: str) -> dict:
+    """Team set-play totals. The page lays 'NN / Total X' tiles side-by-side
+    with an unrelated table to the right, so pairing is by COLUMN OFFSET:
+    each 'Total <name>' label takes the nearest number centred above it."""
+    out = {}
+    lines = page.splitlines()
+    for i, ln in enumerate(lines):
+        for m in re.finditer(r"Total (Set Plays|Free Kicks|Corners"
+                             r"|Penalties|Throw Ins)", ln):
+            label_c = (m.start() + m.end()) / 2
+            # the tile's number sits 1-4 lines ABOVE its label, with the
+            # unrelated right-hand table interleaved — nearest row that has
+            # a column-aligned number wins
+            for j in range(i - 1, max(i - 5, -1), -1):
+                best = None
+                for nm in re.finditer(r"\d+", lines[j]):
+                    num_c = (nm.start() + nm.end()) / 2
+                    d = abs(num_c - label_c)
+                    if best is None or d < best[0]:
+                        best = (d, nm.group())
+                if best and best[0] < 12:
+                    key = m.group(1).lower().replace(" ", "_")
+                    out.setdefault(key, int(best[1]))
+                    break
+    return out
+
+
+def parse_gk_involvement(page: str) -> dict:
+    """Both keepers' total involvements sit on one page."""
+    nums = re.findall(r"^\s*(\d+)\s*$", page, re.M)
+    # the two standalone big numbers are the home/away totals, in order
+    return ({"home_total_involvements": int(nums[0]),
+             "away_total_involvements": int(nums[1])} if len(nums) >= 2 else {})
+
+
+_LINEUP_LEFT = re.compile(r"^\s{0,6}(\d{1,2})\s+(GK|DF|MF|FW)\s+([A-Za-z'’ .\-]+?)(?:\s+\d|\s*$)")
+_LINEUP_RIGHT = re.compile(r"([A-Za-z'’ .\-]+?)\s+(GK|DF|MF|FW)\s+(\d{1,2})\s*$")
+
+
+def parse_lineups(page: str) -> dict:
+    """Match Summary - Teams: home roster runs down the left margin,
+    away roster down the right margin. STARTING/SUBSTITUTES markers split
+    starters from bench on both sides."""
+    home, away = [], []
+    section = "starting"
+    for ln in page.splitlines():
+        if "SUBSTITUTES" in ln:
+            section = "sub"
+        lm = _LINEUP_LEFT.match(ln)
+        if lm:
+            home.append({"shirt": int(lm.group(1)), "pos": lm.group(2),
+                         "player": lm.group(3).strip(), "role": section})
+        rm = _LINEUP_RIGHT.search(ln)
+        if rm and not (lm and lm.group(3).strip() == rm.group(1).strip()):
+            away.append({"shirt": int(rm.group(3)), "pos": rm.group(2),
+                         "player": rm.group(1).strip(), "role": section})
+    return {"home": home, "away": away}
 
 
 def parse_match(pdf: Path, meta: dict) -> dict:
@@ -217,6 +314,8 @@ def parse_match(pdf: Path, meta: dict) -> dict:
         "date": date_m.group(1) if date_m else None,
         "key_stats": {}, "phases": {},
         "shots": [],
+        "lineups": {}, "set_plays": {}, "gk_involvement": {},
+        "player_distributions": {}, "player_defensive": {}, "player_physical": {},
         "raw_sections": {},          # lossless: every page's text by title
     }
 
@@ -235,6 +334,24 @@ def parse_match(pdf: Path, meta: dict) -> dict:
             side = title_team(page, home_name, away_name)
             team = home_name if side == "home" else away_name if side == "away" else "?"
             out["shots"].extend(parse_shots(page, team))
+        elif t.startswith("Match Summary - Teams"):
+            out["lineups"] = parse_lineups(page)
+        elif "In Possession - Distributions" in t:
+            side = title_team(page, home_name, away_name) or "?"
+            out["player_distributions"][side] = parse_player_table(page, _DIST_COLS)
+        elif t.startswith("Out of Possession"):
+            side = title_team(page, home_name, away_name) or "?"
+            out["player_defensive"][side] = parse_player_table(page, _OOP_COLS)
+        elif t.startswith("Physical Data"):
+            side = title_team(page, home_name, away_name) or "?"
+            out["player_physical"][side] = parse_player_table(page, _PHYS_COLS)
+        elif t.startswith("Set Plays"):
+            side = title_team(page, home_name, away_name) or "?"
+            sp = parse_set_plays(page)
+            if sp:
+                out["set_plays"][side] = sp
+        elif t.startswith("Goalkeeping Involvement"):
+            out["gk_involvement"] = parse_gk_involvement(page)
 
     # derived: first goal + halves split (Game Props feed)
     goals = sorted([s for s in out["shots"] if s["is_goal"]],
@@ -275,6 +392,43 @@ def write_csvs(extracted: list[dict], outdir: Path) -> None:
                 for lbl in stat_labels:
                     row.append((e["key_stats"].get(lbl) or {}).get(side, ""))
                 w.writerow(row)
+
+    # player-level: distributions + defensive + physical merged per player
+    pcols = (["match_no", "stage", "team", "opponent", "shirt", "player", "role", "pos"]
+             + _DIST_COLS + _OOP_COLS + _PHYS_COLS)
+    with open(outdir / "player_match_stats.csv", "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(pcols)
+        for e in extracted:
+            names = {"home": e["home_name"], "away": e["away_name"]}
+            for side in ("home", "away"):
+                dist = {r["shirt"]: r for r in e.get("player_distributions", {}).get(side, [])}
+                dfn = {r["shirt"]: r for r in e.get("player_defensive", {}).get(side, [])}
+                phy = {r["shirt"]: r for r in e.get("player_physical", {}).get(side, [])}
+                roster = {r["shirt"]: r for r in e.get("lineups", {}).get(side, [])}
+                for shirt in sorted(set(dist) | set(dfn) | set(phy)):
+                    base = dist.get(shirt) or dfn.get(shirt) or phy.get(shirt)
+                    lu = roster.get(shirt, {})
+                    row = [e["match_no"], e["stage"], names[side],
+                           names["away" if side == "home" else "home"],
+                           shirt, base["player"], lu.get("role", ""),
+                           lu.get("pos", "")]
+                    row += [dist.get(shirt, {}).get(c, "") for c in _DIST_COLS]
+                    row += [dfn.get(shirt, {}).get(c, "") for c in _OOP_COLS]
+                    row += [phy.get(shirt, {}).get(c, "") for c in _PHYS_COLS]
+                    w.writerow(row)
+
+    # set plays per team
+    with open(outdir / "set_plays.csv", "w", newline="") as f:
+        w = csv.writer(f)
+        keys = ["set_plays", "free_kicks", "corners", "penalties", "throw_ins"]
+        w.writerow(["match_no", "team"] + keys)
+        for e in extracted:
+            names = {"home": e["home_name"], "away": e["away_name"]}
+            for side, sp in e.get("set_plays", {}).items():
+                if side in names:
+                    w.writerow([e["match_no"], names[side]]
+                               + [sp.get(k, "") for k in keys])
 
     # shot-level: one row per attempt
     with open(outdir / "shots.csv", "w", newline="") as f:
