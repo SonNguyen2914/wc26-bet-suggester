@@ -78,6 +78,9 @@ def budget_status() -> dict:
         "daily_cap": config.API_FOOTBALL_DAILY_CAP,
         "remaining": max(0, config.API_FOOTBALL_DAILY_CAP - _calls_today),
         "key_configured": bool(config.API_FOOTBALL_KEY),
+        # keyless ESPN failover keeps live state flowing when the budget is
+        # gone — the cap can no longer blind the app mid-match.
+        "fallback": "espn",
     }
 
 
@@ -190,7 +193,7 @@ def live_state_for(home: str, away: str) -> dict | None:
     ONE request (not one per pair).
     """
     if not config.API_FOOTBALL_KEY:
-        return None
+        return _espn_state_for(home, away)
 
     want = {_norm(home), _norm(away)}
     for fix in _fetch_live_fixtures():
@@ -252,6 +255,8 @@ def finished_state_for(home: str, away: str) -> dict | None:
                     parsed = _flip(parsed)
                 break
 
+    if parsed is None:
+        parsed = _espn_state_for(home, away, want_finished=True)
     _finished_cache[cache_key] = (time.time(), parsed)
     return parsed
 
@@ -269,3 +274,107 @@ def _flip(state: dict) -> dict:
             for g in state.get("goals_list", [])
         ],
     }
+
+
+# ---------------------------------------------------------------------------
+# ESPN fallback (keyless, no practical rate limit) — kicks in whenever the
+# budgeted API-Football path can't answer: no key, daily cap exhausted, or a
+# feed error. Maps ESPN's public scoreboard into the exact same state shape,
+# so every consumer (scoreboard, live panel, freeze logic, bracket resolver)
+# works unchanged. API-Football stays primary because its events are richer;
+# ESPN means a burned budget can no longer blind the app mid-match.
+# ---------------------------------------------------------------------------
+ESPN_URL = ("https://site.api.espn.com/apis/site/v2/sports/soccer/"
+            "fifa.world/scoreboard")
+_ESPN_KEY = "__espn__"
+
+
+def _espn_minute(clock: str) -> float | None:
+    m = re.match(r"(\d+)'(?:\s*\+\s*(\d+))?", clock or "")
+    if not m:
+        return None
+    return float(m.group(1)) + (float(m.group(2)) if m.group(2) else 0.0)
+
+
+def _espn_states() -> list[dict]:
+    """All of today's WC fixtures from ESPN, parsed to our state shape."""
+    hit = _cache.get(_ESPN_KEY)
+    if hit and (time.time() - hit[0]) < config.API_FOOTBALL_CACHE_SECONDS:
+        return hit[1]
+    out: list[dict] = []
+    try:
+        r = requests.get(ESPN_URL, timeout=8,
+                         headers={"User-Agent": "wc26-suggester/0.3"})
+        r.raise_for_status()
+        for ev in r.json().get("events", []):
+            comp = (ev.get("competitions") or [{}])[0]
+            sides = {c.get("homeAway"): c for c in comp.get("competitors", [])}
+            if "home" not in sides or "away" not in sides:
+                continue
+            st = ev.get("status", {})
+            state = (st.get("type") or {}).get("state")   # pre | in | post
+            period = st.get("period") or 0
+            detail = ((st.get("type") or {}).get("detail") or "").lower()
+            if state == "in":
+                short = ("HT" if "half" in detail and "time" in detail
+                         else "ET" if period >= 3 else f"{min(period, 2)}H")
+            elif state == "post":
+                short = ("PEN" if "pen" in detail
+                         else "AET" if period >= 3 else "FT")
+            else:
+                short = "NS"
+            hid = (sides["home"].get("team") or {}).get("id")
+            red_home = red_away = 0
+            goals_list: list[dict] = []
+            for d in comp.get("details", []) or []:
+                ttext = ((d.get("type") or {}).get("text") or "")
+                is_home = (d.get("team") or {}).get("id") == hid
+                if "red card" in ttext.lower():
+                    if is_home:
+                        red_home += 1
+                    else:
+                        red_away += 1
+                elif d.get("scoringPlay"):
+                    ath = d.get("athletesInvolved") or [{}]
+                    goals_list.append({
+                        "team": "home" if is_home else "away",
+                        "player": ath[0].get("displayName"),
+                        "minute": (lambda mm: int(mm) if mm else None)(
+                            _espn_minute((d.get("clock") or {})
+                                         .get("displayValue", ""))),
+                        "detail": ttext or None,
+                    })
+            out.append({
+                "fixture_id": ev.get("id"),
+                "home_name": (sides["home"].get("team") or {}).get("displayName", ""),
+                "away_name": (sides["away"].get("team") or {}).get("displayName", ""),
+                "home_goals": int(sides["home"].get("score") or 0),
+                "away_goals": int(sides["away"].get("score") or 0),
+                "minutes_elapsed": _espn_minute(st.get("displayClock", "")),
+                "status_short": short,
+                "status_long": (st.get("type") or {}).get("detail"),
+                "is_live": state == "in",
+                "is_finished": state == "post",
+                "red_home": red_home,
+                "red_away": red_away,
+                "goals_list": goals_list,
+                "source": "espn",
+            })
+    except Exception as exc:
+        print(f"[live_feed] espn fallback failed: {exc}")
+    _cache[_ESPN_KEY] = (time.time(), out)
+    return out
+
+
+def _espn_state_for(home: str, away: str,
+                    want_finished: bool = False) -> dict | None:
+    want = {_norm(home), _norm(away)}
+    for stt in _espn_states():
+        names = {_norm(stt["home_name"]), _norm(stt["away_name"])}
+        if want == names and (stt["is_live"] or stt["is_finished"]):
+            if want_finished and not stt["is_finished"]:
+                continue
+            if _norm(stt["home_name"]) != _norm(home):
+                stt = _flip(stt)
+            return stt
+    return None

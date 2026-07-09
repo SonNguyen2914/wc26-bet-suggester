@@ -136,3 +136,65 @@ class TestCaching:
         lf.live_state_for("Spain", "Portugal")
         lf.live_state_for("Morocco", "France")
         assert calls["n"] == 1                  # one shared pull, not three
+
+
+class TestEspnFallback:
+    ESPN_EVENT = {
+        "id": "1", "name": "Morocco at France",
+        "competitions": [{
+            "competitors": [
+                {"homeAway": "home", "score": "2",
+                 "team": {"id": "9", "displayName": "France"}},
+                {"homeAway": "away", "score": "1",
+                 "team": {"id": "5", "displayName": "Morocco"}},
+            ],
+            "details": [
+                {"type": {"text": "Goal"}, "scoringPlay": True,
+                 "clock": {"displayValue": "23'"},
+                 "team": {"id": "9"},
+                 "athletesInvolved": [{"displayName": "Kylian Mbappe"}]},
+                {"type": {"text": "Red Card"}, "clock": {"displayValue": "60'"},
+                 "team": {"id": "5"}},
+            ],
+        }],
+        "status": {"type": {"state": "in", "detail": "2nd Half"},
+                   "period": 2, "displayClock": "67'+2"},
+    }
+
+    def _patch_espn(self, monkeypatch, event):
+        import src.live_feed as lf
+        lf._cache.pop(lf._ESPN_KEY, None)
+        class R:
+            status_code = 200
+            def raise_for_status(self): pass
+            def json(self): return {"events": [event]}
+        monkeypatch.setattr(lf.requests, "get", lambda *a, **k: R())
+
+    def test_orientation_flip_minute_and_reds(self, monkeypatch):
+        import src.live_feed as lf
+        self._patch_espn(monkeypatch, self.ESPN_EVENT)
+        # OUR schedule has Morocco home — ESPN lists France home -> must flip
+        s = lf._espn_state_for("Morocco", "France")
+        assert s is not None and s["source"] == "espn"
+        assert (s["home_goals"], s["away_goals"]) == (1, 2)   # Morocco 1-2
+        assert s["minutes_elapsed"] == 69.0                    # 67'+2
+        assert s["red_home"] == 1 and s["red_away"] == 0       # Morocco red
+        assert s["goals_list"][0]["team"] == "away"            # Mbappe -> away
+        assert s["is_live"] and not s["is_finished"]
+
+    def test_post_maps_to_finished_aet(self, monkeypatch):
+        import copy
+        import src.live_feed as lf
+        ev = copy.deepcopy(self.ESPN_EVENT)
+        ev["status"] = {"type": {"state": "post", "detail": "Final/ET"},
+                        "period": 4, "displayClock": "120'"}
+        self._patch_espn(monkeypatch, ev)
+        s = lf._espn_state_for("Morocco", "France", want_finished=True)
+        assert s["is_finished"] and s["status_short"] == "AET"
+
+    def test_no_key_budget_paths_use_espn(self, monkeypatch):
+        import src.live_feed as lf
+        config.API_FOOTBALL_KEY = ""
+        self._patch_espn(monkeypatch, self.ESPN_EVENT)
+        s = lf.live_state_for("Morocco", "France")
+        assert s is not None and s["source"] == "espn"
