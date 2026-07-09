@@ -92,6 +92,11 @@ def _feeder_result(feeder) -> dict | None:
             return {"home_name": res.home, "away_name": res.away,
                     "home_goals": res.home_goals, "away_goals": res.away_goals,
                     "is_finished": True, "status_short": res.status_short}
+    # A feeder that hasn't kicked off yet can't have a result — skip the feed
+    # entirely so the resolver spends zero budget before the match is played.
+    from datetime import datetime, timezone
+    if feeder.kickoff > datetime.now(timezone.utc):
+        return None
     # 2. Live feed — the match is finishing right now.
     state = live_feed.live_state_for(feeder.home, feeder.away)
     if state and state.get("is_finished"):

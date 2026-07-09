@@ -120,3 +120,19 @@ class TestCaching:
         lf.live_state_for("Brazil", "Norway")
         lf.live_state_for("Brazil", "Norway")   # within cache window
         assert calls["n"] == 1                  # only one real fetch
+
+    def test_different_pairs_share_one_pull(self, monkeypatch):
+        """Budget-drain regression: several DIFFERENT team-pairs looked up in
+        one poll cycle must share a SINGLE /fixtures?live=all call, not one
+        per pair (the bug that exhausted the daily budget before kickoff)."""
+        config.API_FOOTBALL_KEY = "k"
+        lf._cache.clear(); lf._calls_today = 0; lf._call_date = None
+        calls = {"n": 0}
+        def counting_request(path, params):
+            calls["n"] += 1
+            return {"response": [_fixture("Brazil", "Norway", 1, 0, 55)]}
+        monkeypatch.setattr(lf, "_request", counting_request)
+        lf.live_state_for("Brazil", "Norway")
+        lf.live_state_for("Spain", "Portugal")
+        lf.live_state_for("Morocco", "France")
+        assert calls["n"] == 1                  # one shared pull, not three

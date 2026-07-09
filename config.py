@@ -89,6 +89,11 @@ LIVE_GAP_GRACE_MINUTES = int(os.getenv("LIVE_GAP_GRACE_MINUTES", "25"))
 # How long a finished match stays on the live scoreboard as an FT card before
 # dropping to the Past-matches section only.
 LIVE_FT_WINDOW_MINUTES = int(os.getenv("LIVE_FT_WINDOW_MINUTES", "60"))
+# How early before kickoff the live feed starts being polled for a match (the
+# poll trails until TRACK_HOURS_AFTER_KICKOFF past kickoff). Kept tight so the
+# daily API-Football budget is spent near/during matches, not days ahead on
+# knockout fixtures that are "trackable" 96h out only for Kalshi market pricing.
+LIVE_POLL_LEAD_MINUTES = int(os.getenv("LIVE_POLL_LEAD_MINUTES", "15"))
 
 # --- Bracket auto-resolution ---------------------------------------------
 # How often to check finished R16 (then QF, SF) results and fill the next

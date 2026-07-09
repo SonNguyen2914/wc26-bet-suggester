@@ -29,14 +29,14 @@ class TestETDisappearance:
             s.query(MatchResult).delete()
             s.commit()
         sd._SCHEDULE = None
-        self._orig = sd.is_trackable
-        sd.is_trackable = lambda m, n, a, b: m.match_id == "MAR_FRA"
-        ls.is_trackable = sd.is_trackable
+        # poll_live_state gates on should_poll_live (a tight kickoff window);
+        # force MAR_FRA "pollable" regardless of the real clock for these tests.
+        self._orig = ls.should_poll_live
+        ls.should_poll_live = lambda m, n: m.match_id == "MAR_FRA"
         self._origfeed = lf.live_state_for
 
     def teardown_method(self):
-        sd.is_trackable = self._orig
-        ls.is_trackable = self._orig
+        ls.should_poll_live = self._orig
         lf.live_state_for = self._origfeed
 
     def _feed(self, state):
@@ -100,3 +100,28 @@ class TestETDisappearance:
         e = ls.past_matches()[0]
         assert (e["home_goals"], e["away_goals"]) == (2, 1)
         assert e["status_short"] == "AET"
+
+
+class TestLivePollWindow:
+    """Budget-drain regression: the live feed is polled only within a tight
+    window around kickoff, NOT across the full 96h knockout tracking window."""
+
+    def test_far_future_match_not_polled(self):
+        from datetime import datetime, timezone, timedelta
+        now = datetime.now(timezone.utc)
+        far = type("M", (), {"fully_resolved": True,
+                             "kickoff": now + timedelta(hours=48)})()
+        assert ls.should_poll_live(far, now) is False
+
+    def test_in_progress_match_polled(self):
+        from datetime import datetime, timezone, timedelta
+        now = datetime.now(timezone.utc)
+        inplay = type("M", (), {"fully_resolved": True,
+                                "kickoff": now - timedelta(minutes=30)})()
+        assert ls.should_poll_live(inplay, now) is True
+
+    def test_unresolved_placeholder_not_polled(self):
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc)
+        unresolved = type("M", (), {"fully_resolved": False, "kickoff": now})()
+        assert ls.should_poll_live(unresolved, now) is False

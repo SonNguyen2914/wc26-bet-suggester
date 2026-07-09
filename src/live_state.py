@@ -25,7 +25,7 @@ from datetime import timedelta
 import config
 from src import live_feed
 from src.db import (MatchLiveSnapshot, MatchResult, SessionLocal, utcnow)
-from src.schedule_data import is_trackable, load_schedule
+from src.schedule_data import load_schedule
 
 # --- grace windows -------------------------------------------------------
 # How long the scoreboard keeps showing a match that's temporarily gone from
@@ -40,6 +40,23 @@ GAP_GRACE = timedelta(minutes=config.LIVE_GAP_GRACE_MINUTES)
 FT_WINDOW = timedelta(minutes=config.LIVE_FT_WINDOW_MINUTES)
 
 _FINISHED_STATUSES = {"FT", "AET", "PEN"}
+
+# The live feed is polled for a match only within a tight window around
+# kickoff, NOT across the full 96h knockout tracking window. This keeps the
+# daily API-Football budget for when a match is actually live instead of
+# draining it days ahead (a knockout match is "trackable" 96h out for Kalshi
+# market pricing, but there's nothing live to fetch until it's about to start).
+LIVE_POLL_LEAD = timedelta(minutes=config.LIVE_POLL_LEAD_MINUTES)
+LIVE_POLL_TRAIL = timedelta(hours=config.TRACK_HOURS_AFTER_KICKOFF)
+
+
+def should_poll_live(m, now) -> bool:
+    """True only when a match is near kickoff or plausibly in progress — the
+    gate for hitting the live feed. Separate from is_trackable (which spans the
+    full knockout window for market tracking) so the feed poll stays tight."""
+    if not m.fully_resolved:
+        return False
+    return m.kickoff - LIVE_POLL_LEAD <= now < m.kickoff + LIVE_POLL_TRAIL
 
 
 def poll_live_state() -> dict:
@@ -59,10 +76,7 @@ def poll_live_state() -> dict:
     now = utcnow()
     with SessionLocal() as s:
         for m in load_schedule():
-            if not m.fully_resolved:
-                continue
-            if not is_trackable(m, now, config.HOURLY_PREDICTION_WINDOW_HOURS,
-                                config.TRACK_HOURS_AFTER_KICKOFF):
+            if not should_poll_live(m, now):
                 continue
             # already frozen? nothing to do.
             if s.get(MatchResult, m.match_id):

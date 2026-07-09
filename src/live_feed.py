@@ -31,8 +31,13 @@ import config
 _call_date: date | None = None
 _calls_today = 0
 
-# --- tiny response cache: fixture_key -> (fetched_at, parsed_state) ---------
-_cache: dict[str, tuple[float, dict | None]] = {}
+# --- shared response cache --------------------------------------------------
+# Holds the raw /fixtures?live=all list under ONE key (_LIVE_ALL_KEY) so every
+# live_state_for() lookup in a poll cycle reuses a SINGLE API call. (Previously
+# this cached per team-pair and each pair made its own call, so a poll cycle
+# with N matches cost N calls and drained the daily budget before kickoff.)
+_cache: dict[str, tuple[float, list]] = {}
+_LIVE_ALL_KEY = "__live_all__"
 
 # Statuses API-Football reports for an in-progress match.
 _LIVE_STATUSES = {"1H", "2H", "HT", "ET", "BT", "P", "SUSP", "INT", "LIVE"}
@@ -159,41 +164,45 @@ def _parse_fixture(fix: dict) -> dict:
     }
 
 
+def _fetch_live_fixtures() -> list:
+    """The raw list of all currently-live fixtures, cached under one shared key
+    so every live_state_for() lookup in a poll cycle reuses a SINGLE
+    /fixtures?live=all call. Returns [] on no-key / over-budget / error, so
+    callers degrade gracefully to 'no live match'."""
+    hit = _cache.get(_LIVE_ALL_KEY)
+    if hit and (time.time() - hit[0]) < config.API_FOOTBALL_CACHE_SECONDS:
+        return hit[1]
+    data = _request("/fixtures", {"live": "all"})
+    fixtures = data.get("response", []) if data else []
+    _cache[_LIVE_ALL_KEY] = (time.time(), fixtures)
+    return fixtures
+
+
 def live_state_for(home: str, away: str) -> dict | None:
     """Find the live World Cup fixture for these two teams and return its
     current state, or None if the feed is unavailable/no match is found.
 
     Matching is name-based (normalized) against the WC fixtures list; national
     team names are stable across sources, and _norm() absorbs accents/spacing.
-    Cached briefly so repeated reads cost one request.
+    Reads the shared cached fixtures pull, so N lookups in a poll cycle cost
+    ONE request (not one per pair).
     """
     if not config.API_FOOTBALL_KEY:
         return None
 
-    cache_key = f"{_norm(home)}|{_norm(away)}"
-    hit = _cache.get(cache_key)
-    if hit and (time.time() - hit[0]) < config.API_FOOTBALL_CACHE_SECONDS:
-        return hit[1]
-
-    # Pull all live fixtures (cheap: one call covers every live match at once).
-    data = _request("/fixtures", {"live": "all"})
-    parsed: dict | None = None
-    if data and data.get("response"):
-        want = {_norm(home), _norm(away)}
-        for fix in data["response"]:
-            if fix.get("league", {}).get("id") != config.API_FOOTBALL_LEAGUE_ID:
-                continue
-            names = {_norm(fix["teams"]["home"]["name"]),
-                     _norm(fix["teams"]["away"]["name"])}
-            if want == names:
-                parsed = _parse_fixture(fix)
-                # normalize home/away orientation to OUR schedule's order
-                if _norm(parsed["home_name"]) != _norm(home):
-                    parsed = _flip(parsed)
-                break
-
-    _cache[cache_key] = (time.time(), parsed)
-    return parsed
+    want = {_norm(home), _norm(away)}
+    for fix in _fetch_live_fixtures():
+        if fix.get("league", {}).get("id") != config.API_FOOTBALL_LEAGUE_ID:
+            continue
+        names = {_norm(fix["teams"]["home"]["name"]),
+                 _norm(fix["teams"]["away"]["name"])}
+        if want == names:
+            parsed = _parse_fixture(fix)
+            # normalize home/away orientation to OUR schedule's order
+            if _norm(parsed["home_name"]) != _norm(home):
+                parsed = _flip(parsed)
+            return parsed
+    return None
 
 
 _finished_cache: dict[str, tuple[float, dict | None]] = {}
