@@ -408,3 +408,77 @@ class TestReferenceOdds:
         ro._cache.clear()
         out = ro.reference_odds(self._match(), None)
         assert out["available"] is False and "fixture" in out["reason"]
+
+
+class TestEspnFallbackOdds:
+    """Keyless DraftKings-via-ESPN fallback for the reference layer."""
+
+    def _summary(self, espn_home_is_england: bool):
+        # ESPN block with the odds carrying team names — the parser must
+        # orient by NAME even when ESPN's home/away disagrees with ours.
+        h_name = "England" if espn_home_is_england else "Norway"
+        a_name = "Norway" if espn_home_is_england else "England"
+        return {"pickcenter": [{
+            "provider": {"name": "DraftKings"},
+            "homeTeamOdds": {"moneyLine": -115 if espn_home_is_england else 310,
+                             "team": {"displayName": h_name}},
+            "awayTeamOdds": {"moneyLine": 310 if espn_home_is_england else -115,
+                             "team": {"displayName": a_name}},
+            "drawOdds": {"moneyLine": 270.0},
+            "overUnder": 2.5, "overOdds": -135.0, "underOdds": 110.0,
+        }]}
+
+    def _run(self, summary):
+        import time as _t
+
+        import src.reference_odds as ro
+        from src.schedule_data import get_match
+        m = get_match("NOR_ENG")
+        ro._cache.clear()
+        ro._cache[f"espn|{m.match_id}"] = (_t.time(), summary)
+        pred = {"summary": {"full_time": {"home_win": 0.18, "draw": 0.26,
+                                          "away_win": 0.56}}}
+        return ro._espn_reference(m, pred)
+
+    def test_american_conversion(self):
+        from src.reference_odds import _american_to_decimal
+        assert _american_to_decimal("+310") == 4.1
+        assert _american_to_decimal(-115) == 1.87
+        assert _american_to_decimal(270.0) == 3.7
+        assert _american_to_decimal("junk") is None
+        assert _american_to_decimal(0) is None
+
+    def test_orientation_and_groups(self):
+        out = self._run(self._summary(espn_home_is_england=False))
+        assert out["available"] and out["source"] == "draftkings via espn"
+        winner = {r["label"]: r for r in out["groups"][0]["rows"]}
+        assert winner["Norway"]["odd"] == 4.1        # +310 underdog
+        assert winner["England"]["odd"] == 1.87      # -115 favourite
+        assert winner["Norway"]["model"] == 0.18     # OUR home = Norway
+        assert winner["Draw"]["model"] == 0.26
+        totals = {r["label"] for r in out["groups"][1]["rows"]}
+        assert totals == {"Over 2.5", "Under 2.5"}
+
+    def test_orientation_survives_flipped_espn_sides(self):
+        # ESPN home = England (disagrees with our NOR_ENG orientation):
+        # England must STILL get the -115 favourite line and Norway's model
+        # number must stay 0.18 — names win, positions lie.
+        out = self._run(self._summary(espn_home_is_england=True))
+        winner = {r["label"]: r for r in out["groups"][0]["rows"]}
+        assert winner["England"]["odd"] == 1.87
+        assert winner["Norway"]["odd"] == 4.1
+        assert winner["Norway"]["model"] == 0.18
+
+    def test_fallback_wired_into_unavailable_paths(self, monkeypatch):
+        import src.reference_odds as ro
+        from src.schedule_data import get_match
+        m = get_match("NOR_ENG")
+        monkeypatch.setattr(ro, "_espn_reference",
+                            lambda match, pred: {"available": True,
+                                                 "groups": [{"name": "x",
+                                                             "rows": []}]})
+        out = ro._unavailable({"match_id": m.match_id}, "plan blocked", m, None)
+        assert out["available"] and "plan blocked" in out["note"]
+        monkeypatch.setattr(ro, "_espn_reference", lambda match, pred: None)
+        out = ro._unavailable({"match_id": m.match_id}, "plan blocked", m, None)
+        assert out["available"] is False and out["reason"] == "plan blocked"

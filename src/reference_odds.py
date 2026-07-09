@@ -124,6 +124,117 @@ def _row_label(bet_name: str, value: str, match: Match) -> tuple[str, str]:
     return v, v
 
 
+_ESPN_TTL = 10 * 60
+
+
+def _american_to_decimal(a) -> float | None:
+    """'+310' / -115 / 270.0 -> decimal odds. None on junk or zero."""
+    try:
+        v = float(str(a).replace("+", ""))
+    except (TypeError, ValueError):
+        return None
+    if v == 0:
+        return None
+    return round(1 + (v / 100 if v > 0 else 100 / abs(v)), 3)
+
+
+def _espn_reference(match: Match, prediction: dict | None) -> dict | None:
+    """Keyless fallback: DraftKings' closing lines via ESPN's summary feed
+    (winner + total goals — ESPN carries no correct score). Used when the
+    primary odds provider is unavailable (e.g. the API-Football free plan
+    refuses season-2026 queries)."""
+    key = f"espn|{match.match_id}"
+    hit = _cache.get(key)
+    if hit and time.time() - hit[0] < _ESPN_TTL:
+        d = hit[1]
+    else:
+        try:
+            import requests
+            from src.live_feed import ESPN_SUMMARY, _espn_event_id
+            ev = _espn_event_id(match.home, match.away)
+            if not ev:
+                return None
+            d = requests.get(ESPN_SUMMARY, params={"event": ev}, timeout=8,
+                             headers={"User-Agent": "wc26-bet-suggester"}).json()
+            _cache[key] = (time.time(), d)
+        except Exception:
+            return None
+
+    pc = next((p for p in d.get("pickcenter") or []
+               if p.get("homeTeamOdds") or p.get("moneyline")), None)
+    if not pc:
+        return None
+    provider = ((pc.get("provider") or {}).get("name")) or "sportsbook"
+
+    # Winner rows — oriented by TEAM NAME carried in the odds block, never
+    # by ESPN's home/away designation (the venue-name lesson).
+    rows: list[dict] = []
+    for side_odds, espn_side in ((pc.get("homeTeamOdds"), "home"),
+                                 (pc.get("awayTeamOdds"), "away")):
+        if not side_odds:
+            continue
+        dec = _american_to_decimal(side_odds.get("moneyLine"))
+        if dec is None:
+            continue
+        name = ((side_odds.get("team") or {}).get("displayName")) or ""
+        ours = ("home" if _norm(name) == _norm(match.home)
+                else "away" if _norm(name) == _norm(match.away)
+                else espn_side)
+        row = {"label": match.home if ours == "home" else match.away,
+               "odd": dec, "implied": round(1.0 / dec, 4), "books": 1}
+        model = _model_lookup("full_time", ours, prediction)
+        if model is not None:
+            row["model"] = round(model, 4)
+        rows.append(row)
+    dec = _american_to_decimal((pc.get("drawOdds") or {}).get("moneyLine"))
+    if dec is not None:
+        row = {"label": "Draw", "odd": dec,
+               "implied": round(1.0 / dec, 4), "books": 1}
+        model = _model_lookup("full_time", "draw", prediction)
+        if model is not None:
+            row["model"] = round(model, 4)
+        rows.append(row)
+
+    groups: list[dict] = []
+    if rows:
+        rows.sort(key=lambda r: r["implied"], reverse=True)
+        groups.append({"name": "Winner · 90 min", "rows": rows})
+
+    line = pc.get("overUnder")
+    trows = []
+    for lbl, k in (("Over", "overOdds"), ("Under", "underOdds")):
+        dec = _american_to_decimal(pc.get(k))
+        if line is not None and dec is not None:
+            trows.append({"label": f"{lbl} {line}", "odd": dec,
+                          "implied": round(1.0 / dec, 4), "books": 1})
+    if trows:
+        groups.append({"name": "Total goals", "rows": trows})
+
+    if not groups:
+        return None
+    return {"match_id": match.match_id,
+            "source": f"{provider.lower()} via espn",
+            "home_team": match.home, "away_team": match.away,
+            "available": True, "bookmaker_count": 1, "groups": groups,
+            "disclaimer": (f"Sportsbook reference only — {provider} closing "
+                           "lines via ESPN, NOT Kalshi contracts; nothing "
+                           "here is buyable through this app. Implied "
+                           "probability includes the book's vig. This feed "
+                           "has no correct score — exact scorelines appear "
+                           "once Kalshi lists that book.")}
+
+
+def _unavailable(base: dict, reason: str, match: Match,
+                 prediction: dict | None) -> dict:
+    """Primary provider failed — try the keyless fallback before giving an
+    honest 'unavailable', and say why the primary is down either way."""
+    fb = _espn_reference(match, prediction)
+    if fb:
+        fb["note"] = f"primary odds provider unavailable — {reason}"
+        return fb
+    return {**base, "available": False, "reason": reason}
+
+
 def reference_odds(match: Match, prediction: dict | None) -> dict:
     """Aggregated pre-match sportsbook odds for one match. Median odd per
     outcome across every quoting bookmaker (robust to one book's outlier),
@@ -131,7 +242,7 @@ def reference_odds(match: Match, prediction: dict | None) -> dict:
     base = {"match_id": match.match_id, "source": "api-football",
             "home_team": match.home, "away_team": match.away}
     if not config.API_FOOTBALL_KEY:
-        return {**base, "available": False, "reason": "no API key configured"}
+        return _unavailable(base, "no API key configured", match, prediction)
 
     hit = _cache.get(match.match_id)
     if hit and time.time() - hit[0] < _ODDS_TTL:
@@ -143,7 +254,7 @@ def reference_odds(match: Match, prediction: dict | None) -> dict:
             err = _cache.get(_FIXTURES_ERR_KEY)
             if err:
                 reason += f" — provider says: {err}"
-            return {**base, "available": False, "reason": reason}
+            return _unavailable(base, reason, match, prediction)
         payload = _request("/odds", {"fixture": fid})
         if payload is not None:
             _cache[match.match_id] = (time.time(), payload)
@@ -156,7 +267,7 @@ def reference_odds(match: Match, prediction: dict | None) -> dict:
         err = _provider_error(payload)
         if err:
             reason += f" — provider says: {err}"
-        return {**base, "available": False, "reason": reason}
+        return _unavailable(base, reason, match, prediction)
 
     # odds[(group, label)] -> list of decimal odds across bookmakers
     collected: dict[tuple[str, str, str], list[float]] = {}
@@ -201,8 +312,9 @@ def reference_odds(match: Match, prediction: dict | None) -> dict:
         out_groups.append({"name": name, "rows": rows})
 
     if not out_groups:
-        return {**base, "available": False,
-                "reason": "provider odds carry none of the tracked bet types"}
+        return _unavailable(base,
+                            "provider odds carry none of the tracked bet types",
+                            match, prediction)
     return {**base, "available": True, "bookmaker_count": len(book_names),
             "groups": out_groups,
             "disclaimer": ("Sportsbook reference only — these are NOT Kalshi "
