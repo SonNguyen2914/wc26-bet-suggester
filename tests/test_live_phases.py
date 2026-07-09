@@ -652,3 +652,56 @@ class TestKambiExactScore:
             {"available": True, "source": "api-football",
              "groups": [marker]}, m, None)
         assert out["groups"] == [marker] and out["source"] == "api-football"
+
+
+class TestLiveEmptyBackoff:
+    def test_empty_live_all_backs_off_instead_of_burning_budget(self, monkeypatch):
+        """The 15s live tick re-asks live=all every cache window; on the
+        season-blind free plan every answer is [] and would torch the daily
+        cap. Empty answers must be held for LIVE_EMPTY_BACKOFF_SECONDS."""
+        import config
+        import src.live_feed as lf
+        monkeypatch.setattr(config, "API_FOOTBALL_KEY", "some-key")
+        lf._cache.clear()
+        calls = {"n": 0}
+
+        def counting_request(path, params):
+            calls["n"] += 1
+            return {"response": []}
+
+        monkeypatch.setattr(lf, "_request", counting_request)
+        monkeypatch.setattr(lf, "_espn_state_for",
+                            lambda h, a, want_finished=False: None)
+        for _ in range(5):
+            lf.live_state_for("Morocco", "France")
+        assert calls["n"] == 1          # one real pull; backoff held the rest
+
+    def test_nonempty_uses_normal_cache_window(self, monkeypatch):
+        import time as _t
+
+        import config
+        import src.live_feed as lf
+        monkeypatch.setattr(config, "API_FOOTBALL_KEY", "some-key")
+        lf._cache.clear()
+        fix = {"league": {"id": config.API_FOOTBALL_LEAGUE_ID},
+               "teams": {"home": {"id": 1, "name": "Morocco"},
+                         "away": {"id": 2, "name": "France"}},
+               "fixture": {"id": 9, "status": {"short": "1H", "elapsed": 10,
+                                               "extra": None, "long": ""}},
+               "goals": {"home": 0, "away": 0}, "events": []}
+        calls = {"n": 0}
+
+        def counting_request(path, params):
+            calls["n"] += 1
+            return {"response": [fix]}
+
+        monkeypatch.setattr(lf, "_request", counting_request)
+        lf.live_state_for("Morocco", "France")
+        lf.live_state_for("Morocco", "France")
+        assert calls["n"] == 1          # inside the 20s window
+        # age the NON-empty cache past the normal window -> refetches
+        ts, val = lf._cache[lf._LIVE_ALL_KEY]
+        lf._cache[lf._LIVE_ALL_KEY] = (
+            _t.time() - config.API_FOOTBALL_CACHE_SECONDS - 1, val)
+        lf.live_state_for("Morocco", "France")
+        assert calls["n"] == 2

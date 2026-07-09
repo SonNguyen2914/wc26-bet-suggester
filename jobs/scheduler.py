@@ -54,12 +54,14 @@ def hourly_predictions() -> None:
                            s["market_title"], s["edge"], s["expected_value"])
 
 
-def poll_odds() -> None:
-    """The always-on heartbeat: record every market's price, then check
-    whether any watched bet just became ripe."""
-    # First, refresh live match-state snapshots and freeze any finished
-    # matches. Shares the cached live feed pull, so no extra API budget.
-    # Wrapped so a tracking hiccup can never disturb odds polling.
+def live_tick() -> None:
+    """Refresh live match-state snapshots and freeze finished matches.
+
+    Its OWN fast job, decoupled from poll_odds: that job spends minutes on
+    per-event Kalshi fetches, and while it runs APScheduler skips further
+    fires (max_instances=1) — riding inside it degraded the live scoreboard
+    to one update per ~2 minutes. This tick is one cached feed pull + a
+    snapshot upsert, so it comfortably runs every LIVE_TICK_SECONDS."""
     try:
         r = live_state.poll_live_state()
         if r["frozen"]:
@@ -67,6 +69,10 @@ def poll_odds() -> None:
     except Exception as exc:
         print(f"[live-state] poll error: {exc}")
 
+
+def poll_odds() -> None:
+    """The always-on heartbeat: record every market's price, then check
+    whether any watched bet just became ripe."""
     now = utcnow()
     matches = [m for m in load_schedule()
                if is_trackable(m, now, config.HOURLY_PREDICTION_WINDOW_HOURS,
@@ -152,6 +158,11 @@ def start_scheduler() -> BackgroundScheduler:
     scheduler.add_job(final_lock_check, "cron", second=0, id="final_lock")
     scheduler.add_job(poll_odds, "interval",
                       seconds=config.ODDS_POLL_SECONDS, id="odds_poll")
+    # Live scoreboard freshness: a fast, cheap tick of its own. coalesce
+    # collapses any missed fires into one; max_instances guards overlap.
+    scheduler.add_job(live_tick, "interval",
+                      seconds=config.LIVE_TICK_SECONDS, id="live_tick",
+                      coalesce=True, max_instances=1)
     # Bracket resolution: low frequency (the bracket changes at most a handful
     # of times all tournament) and self-skipping once fully known, so it's
     # nearly free. Interval, not cron, so it also runs shortly after boot.

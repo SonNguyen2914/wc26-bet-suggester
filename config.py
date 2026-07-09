@@ -92,6 +92,14 @@ API_FOOTBALL_LEAGUE_ID = int(os.getenv("API_FOOTBALL_LEAGUE_ID", "1"))
 API_FOOTBALL_SEASON = int(os.getenv("API_FOOTBALL_SEASON", "2026"))
 API_FOOTBALL_DAILY_CAP = int(os.getenv("API_FOOTBALL_DAILY_CAP", "90"))  # < 100
 API_FOOTBALL_CACHE_SECONDS = int(os.getenv("API_FOOTBALL_CACHE_SECONDS", "20"))
+# An EMPTY live=all answer (free-plan season blindness, or genuinely nothing
+# live) is re-checked gently instead of every cache window — the dedicated
+# live tick would otherwise burn the daily cap on calls that return nothing.
+# ESPN carries the live read during the backoff.
+LIVE_EMPTY_BACKOFF_SECONDS = int(os.getenv("LIVE_EMPTY_BACKOFF_SECONDS", "900"))
+# The live-state snapshot tick — decoupled from the (slow, minutes-long)
+# odds poll so the scoreboard tracks the real match closely.
+LIVE_TICK_SECONDS = int(os.getenv("LIVE_TICK_SECONDS", "15"))
 
 # --- Live-state tracking (scoreboard robustness + finished-match handling) --
 # A live match briefly disappears from API-Football's live=all during

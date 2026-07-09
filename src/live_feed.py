@@ -174,10 +174,19 @@ def _fetch_live_fixtures() -> list:
     """The raw list of all currently-live fixtures, cached under one shared key
     so every live_state_for() lookup in a poll cycle reuses a SINGLE
     /fixtures?live=all call. Returns [] on no-key / over-budget / error, so
-    callers degrade gracefully to 'no live match'."""
+    callers degrade gracefully to 'no live match'.
+
+    An EMPTY answer backs off for LIVE_EMPTY_BACKOFF_SECONDS instead of the
+    normal cache window: the free plan is season-blind for WC26 (every pull
+    returns []), and re-asking every 20s from a 15s live tick would torch
+    the daily cap on nothing. The ESPN fall-through carries the live read
+    during the backoff, so nothing is lost."""
     hit = _cache.get(_LIVE_ALL_KEY)
-    if hit and (time.time() - hit[0]) < config.API_FOOTBALL_CACHE_SECONDS:
-        return hit[1]
+    if hit:
+        ttl = (config.API_FOOTBALL_CACHE_SECONDS if hit[1]
+               else config.LIVE_EMPTY_BACKOFF_SECONDS)
+        if (time.time() - hit[0]) < ttl:
+            return hit[1]
     data = _request("/fixtures", {"live": "all"})
     fixtures = data.get("response", []) if data else []
     _cache[_LIVE_ALL_KEY] = (time.time(), fixtures)
