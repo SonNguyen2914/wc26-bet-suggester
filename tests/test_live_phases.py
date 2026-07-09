@@ -541,3 +541,43 @@ class TestEspnDatedEventLookup:
         assert lf._espn_event_id("Norway", "England") is None  # today-only
         assert lf._espn_event_id("Argentina", "Switzerland",
                                  on_date="20260711") is None
+
+
+class TestEspnSummaryCachePoisoning:
+    def test_oddsless_summary_is_not_cached(self, monkeypatch):
+        """Regression: ARG_SUI stuck 'unavailable' on prod — an ESPN summary
+        that arrived WITHOUT pickcenter was cached for 10 minutes, blinding
+        every retry. Empty answers must never be cached."""
+        import src.reference_odds as ro
+        from src.schedule_data import get_match
+        m = get_match("ARG_SUI")
+        ro._cache.clear()
+        calls = {"n": 0}
+
+        class _Resp:
+            def __init__(self, payload): self._p = payload
+            def json(self): return self._p
+
+        def fake_get(url, **kw):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                return _Resp({"pickcenter": []})          # odds not posted yet
+            return _Resp({"pickcenter": [{                # posted on retry
+                "provider": {"name": "DraftKings"},
+                "homeTeamOdds": {"moneyLine": -145,
+                                 "team": {"displayName": "Argentina"}},
+                "awayTeamOdds": {"moneyLine": 400,
+                                 "team": {"displayName": "Switzerland"}},
+                "drawOdds": {"moneyLine": 300.0},
+                "overUnder": 2.5, "overOdds": -120.0, "underOdds": 100.0}]})
+
+        import src.live_feed as lf
+        monkeypatch.setattr(lf, "_espn_event_id", lambda h, a, on_date=None: "760513")
+        monkeypatch.setattr(ro, "_model_lookup", lambda s, l, p: None)
+        import requests as _rq_mod
+        monkeypatch.setattr(_rq_mod, "get", fake_get)
+
+        assert ro._espn_reference(m, None) is None        # first: no odds
+        out = ro._espn_reference(m, None)                 # retry refetches
+        assert out is not None and out["available"]
+        assert calls["n"] == 2                            # empty wasn't cached

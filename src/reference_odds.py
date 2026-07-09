@@ -158,7 +158,11 @@ def _espn_reference(match: Match, prediction: dict | None) -> dict | None:
                 return None
             d = requests.get(ESPN_SUMMARY, params={"event": ev}, timeout=8,
                              headers={"User-Agent": "wc26-bet-suggester"}).json()
-            _cache[key] = (time.time(), d)
+            # never cache a summary without odds — ESPN omits pickcenter
+            # intermittently, and a cached empty poisons the next 10 min
+            if next((p for p in d.get("pickcenter") or []
+                     if p.get("homeTeamOdds") or p.get("moneyline")), None):
+                _cache[key] = (time.time(), d)
         except Exception:
             return None
 
