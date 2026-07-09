@@ -193,3 +193,20 @@ class TestPlayerProps:
         for t in ("France", "Morocco", "Spain", "Belgium",
                   "Norway", "England", "Argentina", "Switzerland"):
             assert len(team_players(t)) >= 8, t
+
+
+class TestTournamentModelGuard:
+    def test_unknown_team_returns_none_not_crash(self):
+        """Regression: once the QFs finish, SF teams aren't in the static
+        _QF_PAIRS table — the endpoint must degrade, not 500."""
+        from src.player_props import tournament_anytime
+        assert tournament_anytime("Future SF Winner", 0.4) is None
+
+    def test_join_markets_survives_missing_tournament_model(self):
+        from src.player_props import join_markets
+        players = [{"player": "Ghost", "shirt": 99, "share": 0.3, "goals": 0,
+                    "attempts": 3, "matches": 5, "starts": 5,
+                    "anytime": 0.2, "first_goal": 0.1}]
+        # team outside the bracket: must not raise
+        join_markets("Future SF Winner", players)
+        assert players[0]["tournament_anytime"] is None

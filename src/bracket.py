@@ -150,16 +150,6 @@ def resolve_bracket() -> list[dict]:
                             "feeder": feeder_id})
             verb = "lost" if loser_feed else "won"
             print(f"[bracket] {qf_id} {side} = {team} ({verb} {feeder_id})")
-        if not state:
-            continue
-        winner = _winner_of(feeder, state)
-        if not winner:
-            continue
-        if resolve_side(qf_id, side, winner):
-            changed.append({"qf": qf_id, "side": side, "team": winner,
-                            "feeder": feeder_id})
-            print(f"[bracket] {qf_id} {side} = {winner} "
-                  f"(won {feeder_id})")
 
     return changed
 

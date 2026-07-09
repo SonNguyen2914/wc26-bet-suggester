@@ -138,8 +138,12 @@ def _bracket_paths(team: str):
                            [my_qf_opp, sf_opp, f_opp])
 
 
-def tournament_anytime(team: str, share: float) -> float:
-    """P(player scores in his team's remaining tournament run)."""
+def tournament_anytime(team: str, share: float) -> float | None:
+    """P(player scores in his team's remaining tournament run). Returns None
+    for a team outside the (static, QF-stage) bracket table — e.g. once the
+    QFs finish — so callers degrade to market-price-only rather than 500."""
+    if not any(team in pair for pair in _QF_PAIRS):
+        return None
     p_score = 0.0
     total = 0.0
     for prob, opps in _bracket_paths(team):
@@ -229,8 +233,8 @@ def join_markets(team: str, players: list[dict]) -> None:
         p["market_id"] = mk["market_id"]
         p["implied"] = round(implied, 4)
         p["multiplier"] = round(1.0 / implied, 2) if implied > 0.005 else None
-        if p["already_scored"]:
-            continue  # settles Yes; an "edge" here is meaningless
+        if p["already_scored"] or p["tournament_anytime"] is None:
+            continue  # settles Yes / no tournament model — price display only
         anchored = (config.MODEL_WEIGHT * p["tournament_anytime"]
                     + (1 - config.MODEL_WEIGHT) * implied)
         p["likelihood"] = round(anchored, 4)
