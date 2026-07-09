@@ -311,6 +311,40 @@ def team_info(match_id: str):
     }
 
 
+@app.get("/api/player-props/{match_id}")
+def player_props(match_id: str):
+    """Per-player anytime / first-goalscorer probabilities for a match —
+    Poisson thinning of the match sim's team xG by each player's FIFA-PDF
+    scoring share (see src/player_props.py for the math + honest limits).
+    Model estimates only: Kalshi's player markets stay unpriced until their
+    settlement rules are verified."""
+    m = get_match(match_id)
+    if not m:
+        raise HTTPException(404, f"Unknown match_id '{match_id}'")
+    if not m.fully_resolved:
+        return {"available": False, "match_id": match_id,
+                "reason": "bracket not resolved"}
+    snap = latest_for_match(match_id)
+    if snap:
+        xgh, xga = snap["xg"]["home"], snap["xg"]["away"]
+    else:  # no cached sim yet — derive from the same xG model directly
+        from src.models.xg_model import predict_xg
+        xgh, xga = predict_xg(get_team_stats(m.home), get_team_stats(m.away))
+    from src.player_props import props_for
+    return {
+        "available": True,
+        "match_id": match_id,
+        "home_team": m.home, "away_team": m.away,
+        "stage": m.stage,
+        **props_for(m.home, m.away, m.stage, xgh, xga),
+        "generated_at": utcnow().isoformat(),
+        "disclaimer": ("Model estimates from 5-match FIFA data. Minutes and "
+                       "line-ups are not modelled; a substitute's share "
+                       "reflects his tournament so far. Kalshi player "
+                       "markets are not priced against these numbers."),
+    }
+
+
 @app.get("/api/bracket")
 def bracket():
     """Current knockout bracket: which QF sides are known vs still placeholders,

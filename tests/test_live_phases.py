@@ -169,3 +169,27 @@ class TestAuditFixes:
             assert p["home_edge"] == 0.07 and p["away_edge"] == -0.08
         finally:
             cache.latest_for_match = orig
+
+
+class TestPlayerProps:
+    def test_thinning_math_and_sanity(self):
+        from src.player_props import props_for
+        pp = props_for("Argentina", "Switzerland", "knockout", 1.85, 1.63)
+        h = pp["home"]
+        assert h, "Argentina roster missing from player_rates.json"
+        # Messi is Argentina's top share and therefore top anytime prob
+        assert h[0]["player"].upper().endswith("MESSI")
+        assert h[0]["anytime"] > h[-1]["anytime"] > 0
+        assert all(0 < p["anytime"] < 1 for p in h)
+        # first-goal probabilities + P(no goal) must not exceed 1 in total
+        # (they'd sum to exactly 1 with the FULL roster; top-N is a subset)
+        tot_first = sum(p["first_goal"] for p in pp["home"] + pp["away"])
+        assert tot_first + pp["p_no_goal"] <= 1.0 + 1e-6
+        # damping applied: knockout lambdas below the raw xg inputs
+        assert pp["lambda"]["home"] < 1.85
+
+    def test_all_eight_teams_have_rates(self):
+        from src.player_props import team_players
+        for t in ("France", "Morocco", "Spain", "Belgium",
+                  "Norway", "England", "Argentina", "Switzerland"):
+            assert len(team_players(t)) >= 8, t

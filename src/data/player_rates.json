@@ -1,0 +1,1772 @@
+{
+ "source": "FIFA Training Centre PMSR distributions tables (39 PDFs, validated)",
+ "share_model": "0.6*goal_share + 0.4*attempt_share, normalised per team",
+ "teams": {
+  "Morocco": [
+   {
+    "player": "Ismael SAIBARI",
+    "shirt": 11,
+    "matches": 5,
+    "starts": 5,
+    "attempts": 10,
+    "on_target": 3,
+    "goals": 3,
+    "share": 0.2425
+   },
+   {
+    "player": "Soufiane RAHIMI",
+    "shirt": 9,
+    "matches": 5,
+    "starts": 0,
+    "attempts": 6,
+    "on_target": 2,
+    "goals": 2,
+    "share": 0.1575
+   },
+   {
+    "player": "Azzedine OUNAHI",
+    "shirt": 8,
+    "matches": 5,
+    "starts": 4,
+    "attempts": 4,
+    "on_target": 2,
+    "goals": 2,
+    "share": 0.145
+   },
+   {
+    "player": "Achraf HAKIMI",
+    "shirt": 2,
+    "matches": 5,
+    "starts": 5,
+    "attempts": 13,
+    "on_target": 4,
+    "goals": 1,
+    "share": 0.14125
+   },
+   {
+    "player": "Issa DIOP",
+    "shirt": 14,
+    "matches": 4,
+    "starts": 4,
+    "attempts": 1,
+    "on_target": 1,
+    "goals": 1,
+    "share": 0.06625
+   },
+   {
+    "player": "Gessime YASSINE",
+    "shirt": 16,
+    "matches": 2,
+    "starts": 0,
+    "attempts": 1,
+    "on_target": 1,
+    "goals": 1,
+    "share": 0.06625
+   },
+   {
+    "player": "Bilal EL KHANNOUSS",
+    "shirt": 23,
+    "matches": 5,
+    "starts": 5,
+    "attempts": 6,
+    "on_target": 3,
+    "goals": 0,
+    "share": 0.0375
+   },
+   {
+    "player": "Neil EL AYNAOUI",
+    "shirt": 24,
+    "matches": 5,
+    "starts": 5,
+    "attempts": 6,
+    "on_target": 2,
+    "goals": 0,
+    "share": 0.0375
+   },
+   {
+    "player": "Brahim DIAZ",
+    "shirt": 10,
+    "matches": 5,
+    "starts": 5,
+    "attempts": 5,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.03125
+   },
+   {
+    "player": "Ayyoub BOUADDI",
+    "shirt": 6,
+    "matches": 4,
+    "starts": 4,
+    "attempts": 3,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.01875
+   },
+   {
+    "player": "Ayoub EL KAABI",
+    "shirt": 20,
+    "matches": 1,
+    "starts": 1,
+    "attempts": 3,
+    "on_target": 2,
+    "goals": 0,
+    "share": 0.01875
+   },
+   {
+    "player": "Chemsdine TALBI",
+    "shirt": 7,
+    "matches": 4,
+    "starts": 0,
+    "attempts": 2,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.0125
+   },
+   {
+    "player": "Ayoube AMAIMOUNI",
+    "shirt": 21,
+    "matches": 2,
+    "starts": 0,
+    "attempts": 2,
+    "on_target": 1,
+    "goals": 0,
+    "share": 0.0125
+   },
+   {
+    "player": "Chadi RIAD",
+    "shirt": 18,
+    "matches": 4,
+    "starts": 4,
+    "attempts": 1,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.00625
+   },
+   {
+    "player": "Anass SALAH EDDINE",
+    "shirt": 26,
+    "matches": 3,
+    "starts": 1,
+    "attempts": 1,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.00625
+   },
+   {
+    "player": "Yassine BOUNOU",
+    "shirt": 1,
+    "matches": 5,
+    "starts": 5,
+    "attempts": 0,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.0
+   },
+   {
+    "player": "Noussair MAZRAOUI",
+    "shirt": 3,
+    "matches": 5,
+    "starts": 4,
+    "attempts": 0,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.0
+   },
+   {
+    "player": "Samir EL MOURABET",
+    "shirt": 15,
+    "matches": 5,
+    "starts": 0,
+    "attempts": 0,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.0
+   },
+   {
+    "player": "Sofyan AMRABAT",
+    "shirt": 4,
+    "matches": 2,
+    "starts": 1,
+    "attempts": 0,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.0
+   },
+   {
+    "player": "Redouane HALHAL",
+    "shirt": 25,
+    "matches": 2,
+    "starts": 2,
+    "attempts": 0,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.0
+   },
+   {
+    "player": "Marwane SAADANE",
+    "shirt": 5,
+    "matches": 1,
+    "starts": 0,
+    "attempts": 0,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.0
+   }
+  ],
+  "Switzerland": [
+   {
+    "player": "Johan MANZAMBI",
+    "shirt": 9,
+    "matches": 4,
+    "starts": 2,
+    "attempts": 6,
+    "on_target": 3,
+    "goals": 3,
+    "share": 0.23809
+   },
+   {
+    "player": "Breel EMBOLO",
+    "shirt": 7,
+    "matches": 5,
+    "starts": 5,
+    "attempts": 9,
+    "on_target": 4,
+    "goals": 2,
+    "share": 0.19047
+   },
+   {
+    "player": "Ruben VARGAS",
+    "shirt": 17,
+    "matches": 5,
+    "starts": 3,
+    "attempts": 6,
+    "on_target": 4,
+    "goals": 2,
+    "share": 0.17142
+   },
+   {
+    "player": "Dan NDOYE",
+    "shirt": 11,
+    "matches": 5,
+    "starts": 4,
+    "attempts": 13,
+    "on_target": 5,
+    "goals": 1,
+    "share": 0.14921
+   },
+   {
+    "player": "Granit XHAKA",
+    "shirt": 10,
+    "matches": 5,
+    "starts": 5,
+    "attempts": 6,
+    "on_target": 1,
+    "goals": 1,
+    "share": 0.10476
+   },
+   {
+    "player": "Fabian RIEDER",
+    "shirt": 22,
+    "matches": 4,
+    "starts": 2,
+    "attempts": 6,
+    "on_target": 2,
+    "goals": 0,
+    "share": 0.0381
+   },
+   {
+    "player": "Denis ZAKARIA",
+    "shirt": 6,
+    "matches": 3,
+    "starts": 3,
+    "attempts": 4,
+    "on_target": 2,
+    "goals": 0,
+    "share": 0.0254
+   },
+   {
+    "player": "Nico ELVEDI",
+    "shirt": 4,
+    "matches": 5,
+    "starts": 5,
+    "attempts": 3,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.01905
+   },
+   {
+    "player": "Remo FREULER",
+    "shirt": 8,
+    "matches": 5,
+    "starts": 5,
+    "attempts": 2,
+    "on_target": 1,
+    "goals": 0,
+    "share": 0.0127
+   },
+   {
+    "player": "Michel AEBISCHER",
+    "shirt": 20,
+    "matches": 4,
+    "starts": 2,
+    "attempts": 2,
+    "on_target": 1,
+    "goals": 0,
+    "share": 0.0127
+   },
+   {
+    "player": "Manuel AKANJI",
+    "shirt": 5,
+    "matches": 5,
+    "starts": 5,
+    "attempts": 1,
+    "on_target": 1,
+    "goals": 0,
+    "share": 0.00635
+   },
+   {
+    "player": "Ricardo RODRIGUEZ",
+    "shirt": 13,
+    "matches": 5,
+    "starts": 5,
+    "attempts": 1,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.00635
+   },
+   {
+    "player": "Ardon JASHARI",
+    "shirt": 14,
+    "matches": 2,
+    "starts": 1,
+    "attempts": 1,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.00635
+   },
+   {
+    "player": "Zeki AMDOUNI",
+    "shirt": 23,
+    "matches": 3,
+    "starts": 0,
+    "attempts": 1,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.00635
+   },
+   {
+    "player": "Djibril SOW",
+    "shirt": 15,
+    "matches": 3,
+    "starts": 1,
+    "attempts": 1,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.00635
+   },
+   {
+    "player": "Noah OKAFOR",
+    "shirt": 19,
+    "matches": 1,
+    "starts": 0,
+    "attempts": 1,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.00635
+   },
+   {
+    "player": "Gregor KOBEL",
+    "shirt": 1,
+    "matches": 5,
+    "starts": 5,
+    "attempts": 0,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.0
+   },
+   {
+    "player": "Miro MUHEIM",
+    "shirt": 2,
+    "matches": 2,
+    "starts": 0,
+    "attempts": 0,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.0
+   },
+   {
+    "player": "Silvan WIDMER",
+    "shirt": 3,
+    "matches": 4,
+    "starts": 1,
+    "attempts": 0,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.0
+   },
+   {
+    "player": "Luca JAQUEZ",
+    "shirt": 25,
+    "matches": 2,
+    "starts": 1,
+    "attempts": 0,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.0
+   },
+   {
+    "player": "Cedric ITTEN",
+    "shirt": 26,
+    "matches": 3,
+    "starts": 0,
+    "attempts": 0,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.0
+   },
+   {
+    "player": "Christian FASSNACHT",
+    "shirt": 16,
+    "matches": 1,
+    "starts": 0,
+    "attempts": 0,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.0
+   }
+  ],
+  "Spain": [
+   {
+    "player": "Mikel OYARZABAL",
+    "shirt": 21,
+    "matches": 5,
+    "starts": 5,
+    "attempts": 19,
+    "on_target": 9,
+    "goals": 4,
+    "share": 0.38172
+   },
+   {
+    "player": "Lamine YAMAL",
+    "shirt": 19,
+    "matches": 5,
+    "starts": 4,
+    "attempts": 17,
+    "on_target": 8,
+    "goals": 1,
+    "share": 0.14812
+   },
+   {
+    "player": "Alex BAENA",
+    "shirt": 15,
+    "matches": 4,
+    "starts": 4,
+    "attempts": 8,
+    "on_target": 4,
+    "goals": 1,
+    "share": 0.10941
+   },
+   {
+    "player": "Pedro PORRO",
+    "shirt": 12,
+    "matches": 3,
+    "starts": 3,
+    "attempts": 4,
+    "on_target": 2,
+    "goals": 1,
+    "share": 0.0922
+   },
+   {
+    "player": "Mikel MERINO",
+    "shirt": 6,
+    "matches": 5,
+    "starts": 1,
+    "attempts": 3,
+    "on_target": 2,
+    "goals": 1,
+    "share": 0.0879
+   },
+   {
+    "player": "Ferran TORRES",
+    "shirt": 7,
+    "matches": 5,
+    "starts": 1,
+    "attempts": 10,
+    "on_target": 2,
+    "goals": 0,
+    "share": 0.04301
+   },
+   {
+    "player": "Dani OLMO",
+    "shirt": 10,
+    "matches": 5,
+    "starts": 3,
+    "attempts": 8,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.03441
+   },
+   {
+    "player": "Fabian RUIZ",
+    "shirt": 8,
+    "matches": 5,
+    "starts": 1,
+    "attempts": 5,
+    "on_target": 1,
+    "goals": 0,
+    "share": 0.02151
+   },
+   {
+    "player": "RODRI",
+    "shirt": 16,
+    "matches": 5,
+    "starts": 5,
+    "attempts": 5,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.02151
+   },
+   {
+    "player": "Aymeric LAPORTE",
+    "shirt": 14,
+    "matches": 5,
+    "starts": 5,
+    "attempts": 4,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.0172
+   },
+   {
+    "player": "PEDRI",
+    "shirt": 20,
+    "matches": 5,
+    "starts": 5,
+    "attempts": 4,
+    "on_target": 1,
+    "goals": 0,
+    "share": 0.0172
+   },
+   {
+    "player": "Marc CUCURELLA",
+    "shirt": 24,
+    "matches": 5,
+    "starts": 5,
+    "attempts": 3,
+    "on_target": 2,
+    "goals": 0,
+    "share": 0.0129
+   },
+   {
+    "player": "Pau CUBARSI",
+    "shirt": 22,
+    "matches": 5,
+    "starts": 4,
+    "attempts": 2,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.0086
+   },
+   {
+    "player": "GAVI",
+    "shirt": 9,
+    "matches": 2,
+    "starts": 1,
+    "attempts": 1,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.0043
+   },
+   {
+    "player": "Marcos LLORENTE",
+    "shirt": 5,
+    "matches": 2,
+    "starts": 2,
+    "attempts": 0,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.0
+   },
+   {
+    "player": "Nico WILLIAMS",
+    "shirt": 17,
+    "matches": 3,
+    "starts": 0,
+    "attempts": 0,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.0
+   },
+   {
+    "player": "Unai SIMON",
+    "shirt": 23,
+    "matches": 5,
+    "starts": 5,
+    "attempts": 0,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.0
+   },
+   {
+    "player": "Yeremy PINO",
+    "shirt": 11,
+    "matches": 2,
+    "starts": 0,
+    "attempts": 0,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.0
+   },
+   {
+    "player": "Marc PUBILL",
+    "shirt": 2,
+    "matches": 1,
+    "starts": 0,
+    "attempts": 0,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.0
+   },
+   {
+    "player": "Borja IGLESIAS",
+    "shirt": 26,
+    "matches": 1,
+    "starts": 0,
+    "attempts": 0,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.0
+   }
+  ],
+  "Belgium": [
+   {
+    "player": "Romelu LUKAKU",
+    "shirt": 9,
+    "matches": 5,
+    "starts": 1,
+    "attempts": 6,
+    "on_target": 3,
+    "goals": 3,
+    "share": 0.17243
+   },
+   {
+    "player": "Leandro TROSSARD",
+    "shirt": 10,
+    "matches": 5,
+    "starts": 5,
+    "attempts": 17,
+    "on_target": 2,
+    "goals": 2,
+    "share": 0.16355
+   },
+   {
+    "player": "Youri TIELEMANS",
+    "shirt": 8,
+    "matches": 5,
+    "starts": 5,
+    "attempts": 11,
+    "on_target": 3,
+    "goals": 2,
+    "share": 0.14112
+   },
+   {
+    "player": "Kevin DE BRUYNE",
+    "shirt": 7,
+    "matches": 4,
+    "starts": 4,
+    "attempts": 18,
+    "on_target": 4,
+    "goals": 1,
+    "share": 0.11729
+   },
+   {
+    "player": "Charles DE KETELAERE",
+    "shirt": 17,
+    "matches": 4,
+    "starts": 4,
+    "attempts": 4,
+    "on_target": 3,
+    "goals": 2,
+    "share": 0.11495
+   },
+   {
+    "player": "Hans VANAKEN",
+    "shirt": 20,
+    "matches": 5,
+    "starts": 2,
+    "attempts": 5,
+    "on_target": 0,
+    "goals": 1,
+    "share": 0.06869
+   },
+   {
+    "player": "Alexis SAELEMAEKERS",
+    "shirt": 22,
+    "matches": 3,
+    "starts": 1,
+    "attempts": 4,
+    "on_target": 1,
+    "goals": 1,
+    "share": 0.06495
+   },
+   {
+    "player": "Maxim DE CUYPER",
+    "shirt": 5,
+    "matches": 5,
+    "starts": 4,
+    "attempts": 9,
+    "on_target": 6,
+    "goals": 0,
+    "share": 0.03364
+   },
+   {
+    "player": "Dodi LUKEBAKIO",
+    "shirt": 14,
+    "matches": 3,
+    "starts": 1,
+    "attempts": 7,
+    "on_target": 1,
+    "goals": 0,
+    "share": 0.02617
+   },
+   {
+    "player": "Brandon MECHELE",
+    "shirt": 4,
+    "matches": 5,
+    "starts": 5,
+    "attempts": 5,
+    "on_target": 1,
+    "goals": 0,
+    "share": 0.01869
+   },
+   {
+    "player": "Arthur THEATE",
+    "shirt": 3,
+    "matches": 3,
+    "starts": 2,
+    "attempts": 5,
+    "on_target": 1,
+    "goals": 0,
+    "share": 0.01869
+   },
+   {
+    "player": "Jeremy DOKU",
+    "shirt": 11,
+    "matches": 4,
+    "starts": 3,
+    "attempts": 3,
+    "on_target": 1,
+    "goals": 0,
+    "share": 0.01121
+   },
+   {
+    "player": "Timothy CASTAGNE",
+    "shirt": 21,
+    "matches": 5,
+    "starts": 4,
+    "attempts": 3,
+    "on_target": 1,
+    "goals": 0,
+    "share": 0.01121
+   },
+   {
+    "player": "Matias FERNANDEZ-PARDO",
+    "shirt": 26,
+    "matches": 3,
+    "starts": 0,
+    "attempts": 3,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.01121
+   },
+   {
+    "player": "Thomas MEUNIER",
+    "shirt": 15,
+    "matches": 3,
+    "starts": 2,
+    "attempts": 2,
+    "on_target": 1,
+    "goals": 0,
+    "share": 0.00748
+   },
+   {
+    "player": "Nicolas RASKIN",
+    "shirt": 23,
+    "matches": 5,
+    "starts": 2,
+    "attempts": 2,
+    "on_target": 1,
+    "goals": 0,
+    "share": 0.00748
+   },
+   {
+    "player": "Amadou ONANA",
+    "shirt": 24,
+    "matches": 4,
+    "starts": 2,
+    "attempts": 2,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.00748
+   },
+   {
+    "player": "Nathan NGOY",
+    "shirt": 25,
+    "matches": 3,
+    "starts": 3,
+    "attempts": 1,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.00374
+   },
+   {
+    "player": "Thibaut COURTOIS",
+    "shirt": 1,
+    "matches": 5,
+    "starts": 5,
+    "attempts": 0,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.0
+   },
+   {
+    "player": "Diego MOREIRA",
+    "shirt": 19,
+    "matches": 1,
+    "starts": 0,
+    "attempts": 0,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.0
+   },
+   {
+    "player": "Axel WITSEL",
+    "shirt": 6,
+    "matches": 1,
+    "starts": 0,
+    "attempts": 0,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.0
+   }
+  ],
+  "France": [
+   {
+    "player": "Kylian MBAPPE",
+    "shirt": 10,
+    "matches": 5,
+    "starts": 5,
+    "attempts": 26,
+    "on_target": 17,
+    "goals": 7,
+    "share": 0.41817
+   },
+   {
+    "player": "Ousmane DEMBELE",
+    "shirt": 7,
+    "matches": 5,
+    "starts": 5,
+    "attempts": 12,
+    "on_target": 5,
+    "goals": 4,
+    "share": 0.22597
+   },
+   {
+    "player": "Bradley BARCOLA",
+    "shirt": 12,
+    "matches": 5,
+    "starts": 3,
+    "attempts": 6,
+    "on_target": 3,
+    "goals": 2,
+    "share": 0.11299
+   },
+   {
+    "player": "Desire DOUE",
+    "shirt": 20,
+    "matches": 5,
+    "starts": 1,
+    "attempts": 8,
+    "on_target": 3,
+    "goals": 1,
+    "share": 0.07922
+   },
+   {
+    "player": "Michael OLISE",
+    "shirt": 11,
+    "matches": 5,
+    "starts": 5,
+    "attempts": 14,
+    "on_target": 5,
+    "goals": 0,
+    "share": 0.06364
+   },
+   {
+    "player": "Adrien RABIOT",
+    "shirt": 14,
+    "matches": 4,
+    "starts": 4,
+    "attempts": 6,
+    "on_target": 1,
+    "goals": 0,
+    "share": 0.02727
+   },
+   {
+    "player": "Manu KONE",
+    "shirt": 6,
+    "matches": 3,
+    "starts": 3,
+    "attempts": 5,
+    "on_target": 2,
+    "goals": 0,
+    "share": 0.02273
+   },
+   {
+    "player": "Theo HERNANDEZ",
+    "shirt": 19,
+    "matches": 3,
+    "starts": 2,
+    "attempts": 3,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.01364
+   },
+   {
+    "player": "Dayot UPAMECANO",
+    "shirt": 4,
+    "matches": 5,
+    "starts": 5,
+    "attempts": 2,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.00909
+   },
+   {
+    "player": "Aurelien TCHOUAMENI",
+    "shirt": 8,
+    "matches": 3,
+    "starts": 3,
+    "attempts": 2,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.00909
+   },
+   {
+    "player": "Jules KOUNDE",
+    "shirt": 5,
+    "matches": 5,
+    "starts": 5,
+    "attempts": 1,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.00455
+   },
+   {
+    "player": "William SALIBA",
+    "shirt": 17,
+    "matches": 4,
+    "starts": 4,
+    "attempts": 1,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.00455
+   },
+   {
+    "player": "Lucas DIGNE",
+    "shirt": 3,
+    "matches": 3,
+    "starts": 3,
+    "attempts": 1,
+    "on_target": 1,
+    "goals": 0,
+    "share": 0.00455
+   },
+   {
+    "player": "Jean-Philippe MATETA",
+    "shirt": 22,
+    "matches": 2,
+    "starts": 0,
+    "attempts": 1,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.00455
+   },
+   {
+    "player": "Mike MAIGNAN",
+    "shirt": 16,
+    "matches": 5,
+    "starts": 5,
+    "attempts": 0,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.0
+   },
+   {
+    "player": "Rayan CHERKI",
+    "shirt": 24,
+    "matches": 5,
+    "starts": 0,
+    "attempts": 0,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.0
+   },
+   {
+    "player": "Malo GUSTO",
+    "shirt": 2,
+    "matches": 3,
+    "starts": 0,
+    "attempts": 0,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.0
+   },
+   {
+    "player": "Marcus THURAM",
+    "shirt": 9,
+    "matches": 1,
+    "starts": 0,
+    "attempts": 0,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.0
+   },
+   {
+    "player": "Maghnes AKLIOUCHE",
+    "shirt": 25,
+    "matches": 1,
+    "starts": 0,
+    "attempts": 0,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.0
+   },
+   {
+    "player": "Ibrahima KONATE",
+    "shirt": 15,
+    "matches": 1,
+    "starts": 0,
+    "attempts": 0,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.0
+   },
+   {
+    "player": "Maxence LACROIX",
+    "shirt": 26,
+    "matches": 1,
+    "starts": 1,
+    "attempts": 0,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.0
+   }
+  ],
+  "Norway": [
+   {
+    "player": "Erling HAALAND",
+    "shirt": 9,
+    "matches": 4,
+    "starts": 4,
+    "attempts": 17,
+    "on_target": 11,
+    "goals": 7,
+    "share": 0.5126
+   },
+   {
+    "player": "Leo OSTIGARD",
+    "shirt": 4,
+    "matches": 4,
+    "starts": 1,
+    "attempts": 3,
+    "on_target": 1,
+    "goals": 1,
+    "share": 0.07762
+   },
+   {
+    "player": "Antonio NUSA",
+    "shirt": 20,
+    "matches": 5,
+    "starts": 1,
+    "attempts": 3,
+    "on_target": 1,
+    "goals": 1,
+    "share": 0.07762
+   },
+   {
+    "player": "Thelo AASGAARD",
+    "shirt": 19,
+    "matches": 1,
+    "starts": 1,
+    "attempts": 2,
+    "on_target": 1,
+    "goals": 1,
+    "share": 0.06993
+   },
+   {
+    "player": "Marcus HOLMGREN PEDERSEN",
+    "shirt": 16,
+    "matches": 3,
+    "starts": 1,
+    "attempts": 1,
+    "on_target": 1,
+    "goals": 1,
+    "share": 0.06224
+   },
+   {
+    "player": "Martin ODEGAARD",
+    "shirt": 10,
+    "matches": 4,
+    "starts": 4,
+    "attempts": 8,
+    "on_target": 2,
+    "goals": 0,
+    "share": 0.06154
+   },
+   {
+    "player": "Alexander SORLOTH",
+    "shirt": 7,
+    "matches": 4,
+    "starts": 4,
+    "attempts": 3,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.02308
+   },
+   {
+    "player": "Kristian THORSTVEDT",
+    "shirt": 18,
+    "matches": 2,
+    "starts": 1,
+    "attempts": 3,
+    "on_target": 1,
+    "goals": 0,
+    "share": 0.02308
+   },
+   {
+    "player": "Oscar BOBB",
+    "shirt": 22,
+    "matches": 5,
+    "starts": 1,
+    "attempts": 3,
+    "on_target": 2,
+    "goals": 0,
+    "share": 0.02308
+   },
+   {
+    "player": "Patrick BERG",
+    "shirt": 6,
+    "matches": 5,
+    "starts": 3,
+    "attempts": 2,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.01538
+   },
+   {
+    "player": "Andreas SCHJELDERUP",
+    "shirt": 21,
+    "matches": 5,
+    "starts": 1,
+    "attempts": 2,
+    "on_target": 1,
+    "goals": 0,
+    "share": 0.01538
+   },
+   {
+    "player": "Jorgen STRAND LARSEN",
+    "shirt": 11,
+    "matches": 1,
+    "starts": 1,
+    "attempts": 2,
+    "on_target": 1,
+    "goals": 0,
+    "share": 0.01538
+   },
+   {
+    "player": "Kristoffer AJER",
+    "shirt": 3,
+    "matches": 4,
+    "starts": 4,
+    "attempts": 1,
+    "on_target": 1,
+    "goals": 0,
+    "share": 0.00769
+   },
+   {
+    "player": "Fredrik AURSNES",
+    "shirt": 14,
+    "matches": 5,
+    "starts": 3,
+    "attempts": 1,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.00769
+   },
+   {
+    "player": "Torbjorn HEGGEM",
+    "shirt": 17,
+    "matches": 4,
+    "starts": 4,
+    "attempts": 1,
+    "on_target": 1,
+    "goals": 0,
+    "share": 0.00769
+   },
+   {
+    "player": "Orjan NYLAND",
+    "shirt": 1,
+    "matches": 4,
+    "starts": 4,
+    "attempts": 0,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.0
+   },
+   {
+    "player": "David MOLLER WOLFE",
+    "shirt": 5,
+    "matches": 4,
+    "starts": 4,
+    "attempts": 0,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.0
+   },
+   {
+    "player": "Sander BERGE",
+    "shirt": 8,
+    "matches": 4,
+    "starts": 4,
+    "attempts": 0,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.0
+   },
+   {
+    "player": "Julian RYERSON",
+    "shirt": 26,
+    "matches": 3,
+    "starts": 1,
+    "attempts": 0,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.0
+   },
+   {
+    "player": "Morten THORSBY",
+    "shirt": 2,
+    "matches": 1,
+    "starts": 0,
+    "attempts": 0,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.0
+   },
+   {
+    "player": "Egil SELVIK",
+    "shirt": 13,
+    "matches": 1,
+    "starts": 1,
+    "attempts": 0,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.0
+   },
+   {
+    "player": "Fredrik Andre BJORKAN",
+    "shirt": 15,
+    "matches": 1,
+    "starts": 1,
+    "attempts": 0,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.0
+   },
+   {
+    "player": "Jens Petter HAUGE",
+    "shirt": 23,
+    "matches": 1,
+    "starts": 0,
+    "attempts": 0,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.0
+   },
+   {
+    "player": "Sondre LANGAS",
+    "shirt": 24,
+    "matches": 1,
+    "starts": 0,
+    "attempts": 0,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.0
+   },
+   {
+    "player": "Henrik FALCHENER",
+    "shirt": 25,
+    "matches": 1,
+    "starts": 1,
+    "attempts": 0,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.0
+   }
+  ],
+  "Argentina": [
+   {
+    "player": "Lionel MESSI",
+    "shirt": 10,
+    "matches": 5,
+    "starts": 4,
+    "attempts": 29,
+    "on_target": 17,
+    "goals": 8,
+    "share": 0.52186
+   },
+   {
+    "player": "Enzo FERNANDEZ",
+    "shirt": 24,
+    "matches": 4,
+    "starts": 4,
+    "attempts": 8,
+    "on_target": 3,
+    "goals": 1,
+    "share": 0.08826
+   },
+   {
+    "player": "Lautaro MARTINEZ",
+    "shirt": 22,
+    "matches": 5,
+    "starts": 4,
+    "attempts": 7,
+    "on_target": 2,
+    "goals": 1,
+    "share": 0.083
+   },
+   {
+    "player": "Lisandro MARTINEZ",
+    "shirt": 6,
+    "matches": 4,
+    "starts": 4,
+    "attempts": 2,
+    "on_target": 1,
+    "goals": 1,
+    "share": 0.05668
+   },
+   {
+    "player": "Cristian ROMERO",
+    "shirt": 13,
+    "matches": 4,
+    "starts": 4,
+    "attempts": 2,
+    "on_target": 1,
+    "goals": 1,
+    "share": 0.05668
+   },
+   {
+    "player": "Giovani LO CELSO",
+    "shirt": 11,
+    "matches": 1,
+    "starts": 1,
+    "attempts": 1,
+    "on_target": 1,
+    "goals": 1,
+    "share": 0.05142
+   },
+   {
+    "player": "Alexis MAC ALLISTER",
+    "shirt": 20,
+    "matches": 5,
+    "starts": 4,
+    "attempts": 6,
+    "on_target": 2,
+    "goals": 0,
+    "share": 0.03158
+   },
+   {
+    "player": "Julian ALVAREZ",
+    "shirt": 9,
+    "matches": 5,
+    "starts": 2,
+    "attempts": 5,
+    "on_target": 3,
+    "goals": 0,
+    "share": 0.02632
+   },
+   {
+    "player": "Nico GONZALEZ",
+    "shirt": 15,
+    "matches": 4,
+    "starts": 0,
+    "attempts": 4,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.02105
+   },
+   {
+    "player": "Leandro PAREDES",
+    "shirt": 5,
+    "matches": 4,
+    "starts": 2,
+    "attempts": 3,
+    "on_target": 1,
+    "goals": 0,
+    "share": 0.01579
+   },
+   {
+    "player": "Thiago ALMADA",
+    "shirt": 16,
+    "matches": 4,
+    "starts": 3,
+    "attempts": 2,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.01053
+   },
+   {
+    "player": "Marcos SENESI",
+    "shirt": 2,
+    "matches": 1,
+    "starts": 1,
+    "attempts": 2,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.01053
+   },
+   {
+    "player": "Gonzalo MONTIEL",
+    "shirt": 4,
+    "matches": 3,
+    "starts": 1,
+    "attempts": 1,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.00526
+   },
+   {
+    "player": "Rodrigo DE PAUL",
+    "shirt": 7,
+    "matches": 4,
+    "starts": 4,
+    "attempts": 1,
+    "on_target": 1,
+    "goals": 0,
+    "share": 0.00526
+   },
+   {
+    "player": "Nico PAZ",
+    "shirt": 18,
+    "matches": 2,
+    "starts": 1,
+    "attempts": 1,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.00526
+   },
+   {
+    "player": "Nicolas OTAMENDI",
+    "shirt": 19,
+    "matches": 4,
+    "starts": 1,
+    "attempts": 1,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.00526
+   },
+   {
+    "player": "Jose Manuel LOPEZ",
+    "shirt": 21,
+    "matches": 1,
+    "starts": 0,
+    "attempts": 1,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.00526
+   },
+   {
+    "player": "Emiliano MARTINEZ",
+    "shirt": 23,
+    "matches": 5,
+    "starts": 5,
+    "attempts": 0,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.0
+   },
+   {
+    "player": "Facundo MEDINA",
+    "shirt": 25,
+    "matches": 4,
+    "starts": 3,
+    "attempts": 0,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.0
+   },
+   {
+    "player": "Nahuel MOLINA",
+    "shirt": 26,
+    "matches": 4,
+    "starts": 3,
+    "attempts": 0,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.0
+   },
+   {
+    "player": "Nicolas TAGLIAFICO",
+    "shirt": 3,
+    "matches": 4,
+    "starts": 2,
+    "attempts": 0,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.0
+   },
+   {
+    "player": "Valentin BARCO",
+    "shirt": 8,
+    "matches": 1,
+    "starts": 0,
+    "attempts": 0,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.0
+   },
+   {
+    "player": "Exequiel PALACIOS",
+    "shirt": 14,
+    "matches": 1,
+    "starts": 1,
+    "attempts": 0,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.0
+   },
+   {
+    "player": "Giuliano SIMEONE",
+    "shirt": 17,
+    "matches": 1,
+    "starts": 1,
+    "attempts": 0,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.0
+   }
+  ],
+  "England": [
+   {
+    "player": "Harry KANE",
+    "shirt": 9,
+    "matches": 5,
+    "starts": 5,
+    "attempts": 19,
+    "on_target": 10,
+    "goals": 6,
+    "share": 0.42227
+   },
+   {
+    "player": "Jude BELLINGHAM",
+    "shirt": 10,
+    "matches": 5,
+    "starts": 5,
+    "attempts": 12,
+    "on_target": 8,
+    "goals": 4,
+    "share": 0.27818
+   },
+   {
+    "player": "Marcus RASHFORD",
+    "shirt": 11,
+    "matches": 4,
+    "starts": 2,
+    "attempts": 9,
+    "on_target": 3,
+    "goals": 1,
+    "share": 0.09955
+   },
+   {
+    "player": "Nico OREILLY",
+    "shirt": 3,
+    "matches": 5,
+    "starts": 4,
+    "attempts": 7,
+    "on_target": 1,
+    "goals": 0,
+    "share": 0.035
+   },
+   {
+    "player": "Elliot ANDERSON",
+    "shirt": 8,
+    "matches": 5,
+    "starts": 5,
+    "attempts": 7,
+    "on_target": 1,
+    "goals": 0,
+    "share": 0.035
+   },
+   {
+    "player": "Noni MADUEKE",
+    "shirt": 20,
+    "matches": 4,
+    "starts": 3,
+    "attempts": 6,
+    "on_target": 1,
+    "goals": 0,
+    "share": 0.03
+   },
+   {
+    "player": "Bukayo SAKA",
+    "shirt": 7,
+    "matches": 5,
+    "starts": 2,
+    "attempts": 5,
+    "on_target": 1,
+    "goals": 0,
+    "share": 0.025
+   },
+   {
+    "player": "Anthony GORDON",
+    "shirt": 18,
+    "matches": 4,
+    "starts": 3,
+    "attempts": 5,
+    "on_target": 3,
+    "goals": 0,
+    "share": 0.025
+   },
+   {
+    "player": "Declan RICE",
+    "shirt": 4,
+    "matches": 4,
+    "starts": 4,
+    "attempts": 4,
+    "on_target": 1,
+    "goals": 0,
+    "share": 0.02
+   },
+   {
+    "player": "Ezri KONSA",
+    "shirt": 2,
+    "matches": 5,
+    "starts": 5,
+    "attempts": 2,
+    "on_target": 1,
+    "goals": 0,
+    "share": 0.01
+   },
+   {
+    "player": "Marc GUEHI",
+    "shirt": 6,
+    "matches": 5,
+    "starts": 4,
+    "attempts": 1,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.005
+   },
+   {
+    "player": "Reece JAMES",
+    "shirt": 24,
+    "matches": 2,
+    "starts": 2,
+    "attempts": 1,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.005
+   },
+   {
+    "player": "Djed SPENCE",
+    "shirt": 25,
+    "matches": 5,
+    "starts": 2,
+    "attempts": 1,
+    "on_target": 1,
+    "goals": 0,
+    "share": 0.005
+   },
+   {
+    "player": "Eberechi EZE",
+    "shirt": 21,
+    "matches": 3,
+    "starts": 0,
+    "attempts": 1,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.005
+   },
+   {
+    "player": "Jordan PICKFORD",
+    "shirt": 1,
+    "matches": 5,
+    "starts": 5,
+    "attempts": 0,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.0
+   },
+   {
+    "player": "John STONES",
+    "shirt": 5,
+    "matches": 3,
+    "starts": 1,
+    "attempts": 0,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.0
+   },
+   {
+    "player": "Morgan ROGERS",
+    "shirt": 17,
+    "matches": 4,
+    "starts": 1,
+    "attempts": 0,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.0
+   },
+   {
+    "player": "Jordan HENDERSON",
+    "shirt": 14,
+    "matches": 2,
+    "starts": 0,
+    "attempts": 0,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.0
+   },
+   {
+    "player": "Ollie WATKINS",
+    "shirt": 19,
+    "matches": 1,
+    "starts": 0,
+    "attempts": 0,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.0
+   },
+   {
+    "player": "Jarell QUANSAH",
+    "shirt": 26,
+    "matches": 2,
+    "starts": 2,
+    "attempts": 0,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.0
+   },
+   {
+    "player": "Dan BURN",
+    "shirt": 15,
+    "matches": 1,
+    "starts": 0,
+    "attempts": 0,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.0
+   }
+  ]
+ }
+}
