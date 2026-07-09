@@ -286,14 +286,18 @@ def _classify_outcome(match: Match, market: dict,
         return None  # codes unrecognized — skip rather than misprice
 
     # Method of victory: REG = wins in regulation = our 90-min outcome.
-    # ET/PEN (extra time / penalties) can't be priced by a 90-min sim: skip.
+    # ET/PEN are priced from the simulated knockout continuation (Piece 2):
+    # win-in-ET = level at 90 then ahead after ET; win-on-pens = still level
+    # after ET then takes the shootout.
     if family == "KXWCMOV":
-        if ticker.endswith("REG"):
-            side = ticker.rsplit("-", 1)[-1][:-3]  # strip 'REG' -> FIFA code
-            if _code_is(side, match.home):
-                return "home_win"
-            if _code_is(side, match.away):
-                return "away_win"
+        m = re.match(r"^([A-Z]+?)(REG|ET|PEN)$", ticker.rsplit("-", 1)[-1])
+        if m:
+            side, mode = m.groups()
+            key = ("home" if _code_is(side, match.home)
+                   else "away" if _code_is(side, match.away) else None)
+            if key:
+                return {"REG": f"{key}_win", "ET": f"{key}_win_et",
+                        "PEN": f"{key}_win_pens"}[mode]
         return None
 
     # ---- Fallback for unknown families (moneyline / draw / advance) ----
@@ -373,28 +377,41 @@ def _mid(bid: float | None, ask: float | None) -> float | None:
 
 
 def _market_yes_price(m: dict) -> float | None:
-    """Best available yes-price as probability 0-1.
+    """BUY-side yes-price as probability 0-1.
 
-    Kalshi's fractional markets (all WC26 match markets) report prices in
-    *_dollars string fields; the legacy integer-cent fields sit null.
-    Priority: yes-side dollars quote → derived from no-side dollars quote
-    (yes = 1 - no) → last traded price → legacy integer cents."""
-    # 1. yes-side dollars quote
+    Uses the ASK — the price a buyer actually pays — not the bid/ask
+    midpoint. Kalshi books quote integer cents, so a thin 1c/2c longshot
+    book has a 1.5c midpoint (a 66.67x multiplier nobody can trade); the
+    real buy is 2c (50x). Midpoint remains the fallback when no ask is
+    quoted. Priority: yes-ask dollars → derived from the no-bid (selling
+    NO at its bid = buying YES at 1-bid) → midpoint → last trade →
+    legacy integer cents."""
+    # 1. buyable yes ask (dollars string)
+    ask = _to_float(m.get("yes_ask_dollars"))
+    if ask is not None and 0.0005 < ask < 0.9995:
+        return round(ask, 3)
+    # 2. derive the buy price from the no-side bid (yes_ask = 1 - no_bid)
+    no_bid = _to_float(m.get("no_bid_dollars"))
+    if no_bid is not None and 0.0005 < no_bid < 0.9995:
+        return round(1.0 - no_bid, 3)
+    # 3. midpoint fallback (no live ask on either side)
     p = _mid(_to_float(m.get("yes_bid_dollars")), _to_float(m.get("yes_ask_dollars")))
     if p is not None:
         return round(p, 3)
-    # 2. derive from no-side dollars quote
     no_mid = _mid(_to_float(m.get("no_bid_dollars")), _to_float(m.get("no_ask_dollars")))
     if no_mid is not None:
         return round(1.0 - no_mid, 3)
-    # 3. last traded price (dollars string, then legacy cents)
+    # 4. last traded price (dollars string, then legacy cents)
     last = _to_float(m.get("last_price_dollars"))
     if last is not None and 0 < last < 1:
         return round(last, 3)
-    # 4. legacy integer-cent fields
-    bid, ask = m.get("yes_bid"), m.get("yes_ask")
-    if bid and ask and ask > 0:
-        return round((bid + ask) / 2 / 100.0, 3)
+    # 5. legacy integer-cent fields — same ask-first logic
+    ask_c = m.get("yes_ask")
+    if ask_c and 0 < ask_c < 100:
+        return round(ask_c / 100.0, 3)
+    bid_c = m.get("yes_bid")
+    if bid_c and ask_c and ask_c > 0:
+        return round((bid_c + ask_c) / 2 / 100.0, 3)
     last = m.get("last_price")
     if last:
         return round(last / 100.0, 3)
@@ -427,6 +444,10 @@ def _display_title(match: Match, outcome_key: str, fallback: str) -> str:
         "home_margin_3": f"{h} to win by 3+ goals",
         "away_margin_2": f"{a} to win by 2+ goals",
         "away_margin_3": f"{a} to win by 3+ goals",
+        "home_win_et": f"{h} to win in extra time",
+        "away_win_et": f"{a} to win in extra time",
+        "home_win_pens": f"{h} to win on penalties",
+        "away_win_pens": f"{a} to win on penalties",
     }
     if outcome_key in fixed:
         return fixed[outcome_key]

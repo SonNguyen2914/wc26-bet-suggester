@@ -48,10 +48,10 @@ class SuggesterEngine:
 
     # ------------------------------------------------------------------
     def price_live(self, match: Match, current_home: int, current_away: int,
-                   minutes_elapsed: float, red_home: bool = False,
-                   red_away: bool = False,
-                   attack_home_mult: float = 1.0, attack_away_mult: float = 1.0
-                   ) -> dict:
+                   minutes_elapsed: float, red_home: int = 0,
+                   red_away: int = 0,
+                   attack_home_mult: float = 1.0, attack_away_mult: float = 1.0,
+                   phase: str = "auto") -> dict:
         """Price every current Kalshi market against a LIVE, in-progress
         state (Layer 3 manual entry). Uses simulate_remaining() — score
         seeded, time-scaled, known red cards, plus optional user-set attack
@@ -71,7 +71,7 @@ class SuggesterEngine:
         sim = self.simulator.simulate_remaining(
             home_stats, away_stats, current_home, current_away,
             minutes_elapsed=minutes_elapsed, stage=match.stage,
-            red_home=red_home, red_away=red_away)
+            red_home=red_home, red_away=red_away, phase=phase)
 
         markets = self._dedupe_markets(self.kalshi.get_markets_for_match(match))
         rows: list[dict] = []

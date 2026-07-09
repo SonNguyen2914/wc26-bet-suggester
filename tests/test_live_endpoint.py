@@ -64,7 +64,7 @@ class TestLiveEndpointContract:
     def test_red_card_flows_through(self, client):
         d = client.post(f"/api/prediction/{_match_id()}/live",
                         json={"minutes_elapsed": 45, "red_home": True}).json()
-        assert d["live_state"]["red_home"] is True
+        assert d["live_state"]["red_home"] == 1  # counts; legacy bool coerces
 
     def test_not_persisted(self, client):
         """Live pricing must not write Predictions (ephemeral)."""

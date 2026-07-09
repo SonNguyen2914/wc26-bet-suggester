@@ -186,8 +186,12 @@ class LiveStateIn(BaseModel):
     current_home: int = 0
     current_away: int = 0
     minutes_elapsed: float = 0.0
-    red_home: bool = False
-    red_away: bool = False
+    # red cards as COUNTS (0-3 per side); legacy booleans coerce (True -> 1)
+    red_home: int = 0
+    red_away: int = 0
+    # match segment: auto | regulation | et | pens. "auto" infers from the
+    # minute (>90 in a knockout = extra time).
+    phase: str = "auto"
     # user-set attack levers for qualitative reads (1.0 = no adjustment)
     attack_home_mult: float = 1.0
     attack_away_mult: float = 1.0
@@ -205,6 +209,11 @@ def live_prediction(match_id: str, state: LiveStateIn):
         raise HTTPException(422, "score cannot be negative")
     if not (0 <= state.minutes_elapsed <= 130):
         raise HTTPException(422, "minutes_elapsed out of range")
+    if state.phase not in ("auto", "regulation", "et", "pens"):
+        raise HTTPException(422, "phase must be auto|regulation|et|pens")
+    for r in (state.red_home, state.red_away):
+        if not (0 <= r <= 3):
+            raise HTTPException(422, "red cards out of range (0-3)")
     for m in (state.attack_home_mult, state.attack_away_mult):
         if not (0.25 <= m <= 3.0):
             raise HTTPException(422, "attack lever out of range (0.25-3.0)")
@@ -212,7 +221,8 @@ def live_prediction(match_id: str, state: LiveStateIn):
         return engine.price_live(
             match, state.current_home, state.current_away,
             state.minutes_elapsed, state.red_home, state.red_away,
-            state.attack_home_mult, state.attack_away_mult)
+            state.attack_home_mult, state.attack_away_mult,
+            phase=state.phase)
     except ValueError as exc:
         raise HTTPException(422, str(exc))
 

@@ -44,7 +44,7 @@ class TestRemainingSimCore:
         assert set(live.keys()) - set(pre.keys()) == {"live_state"}
         ls = live["live_state"]
         assert ls["score"] == "1-0" and ls["minutes_remaining"] == 20.0
-        assert ls["red_home"] is False and ls["red_away"] is False
+        assert ls["red_home"] == 0 and ls["red_away"] == 0  # counts now
 
     def test_lead_locks_in_as_clock_runs(self):
         """Same 1-0 lead is worth more at 80' than at 30'."""
@@ -101,7 +101,7 @@ class TestKnownStateEffects:
         carded = sim.simulate_remaining(HOME, AWAY, 0, 0, 45, red_home=True)
         assert carded["outcomes"]["home_win"] < clean["outcomes"]["home_win"] - 0.03
         assert carded["outcomes"]["away_win"] > clean["outcomes"]["away_win"] + 0.03
-        assert carded["live_state"]["red_home"] is True
+        assert carded["live_state"]["red_home"] == 1  # counts now
 
     def test_knockout_damping_lowers_remaining_lambda(self):
         sim = MatchSimulator(seed=12)

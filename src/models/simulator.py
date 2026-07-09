@@ -143,14 +143,15 @@ class MatchSimulator:
             props[f"home_margin_{m_line}"] = round(float(np.mean(margin >= m_line)), 4)
             props[f"away_margin_{m_line}"] = round(float(np.mean(-margin >= m_line)), 4)
 
-        # --- Scoreline distribution (top 10)
+        # --- Scoreline distribution (top 30 — deep enough that every Kalshi
+        # exact-score contract finds its probability; the UI shows fewer)
         pairs, counts = np.unique(
             np.stack([goals_home, goals_away], axis=1), axis=0, return_counts=True
         )
         order = np.argsort(-counts)
         scorelines = [
             {"score": f"{int(h)}-{int(a)}", "prob": round(float(c) / self.n, 4)}
-            for (h, a), c in zip(pairs[order][:10], counts[order][:10])
+            for (h, a), c in zip(pairs[order][:30], counts[order][:30])
         ]
 
         # --- Confidence: how decisive is the distribution?
@@ -180,6 +181,12 @@ class MatchSimulator:
                 "away": round(float(np.mean(~home_adv)), 4),
                 "p_reach_et": round(float(np.mean(level)), 4),
                 "p_reach_pens": round(float(np.mean(still_level)), 4),
+                # Method-of-victory breakdown: prices Kalshi's KXWCMOV ET/PEN
+                # contracts ("X wins in extra time" / "X wins on penalties").
+                "home_win_et": round(float(np.mean(level & (et_home > et_away))), 4),
+                "away_win_et": round(float(np.mean(level & (et_home < et_away))), 4),
+                "home_win_pens": round(float(np.mean(still_level & pens_home)), 4),
+                "away_win_pens": round(float(np.mean(still_level & ~pens_home)), 4),
                 "method": "simulated_et_pens",
             }
         else:
@@ -210,7 +217,8 @@ class MatchSimulator:
     def simulate_remaining(self, home_raw: dict, away_raw: dict,
                            current_home: int, current_away: int,
                            minutes_elapsed: float, stage: str = "group",
-                           red_home: bool = False, red_away: bool = False) -> dict:
+                           red_home: int = 0, red_away: int = 0,
+                           phase: str = "auto") -> dict:
         """Live in-play core (Piece 1): simulate only the REMAINDER of a
         match from a known state, seeded with the current score.
 
@@ -223,19 +231,21 @@ class MatchSimulator:
             goals are added on top. Totals/BTTS/scorelines therefore
             reflect FINAL totals automatically (e.g. at 1-0, over_0_5 is
             exactly 1.0 and btts is exactly P(away scores in remainder)).
-          - Red cards are KNOWN boolean inputs (they happened or they
-            didn't), not sampled risks. Coefficients are literature-sourced
-            (Vecer et al. 2009, WC 2006 + Euro 2008 in-play data: carded
-            side x~2/3, opponent x~5/4 — see RED_CARD_* constants).
+          - Red cards are KNOWN inputs (counts, 0-3 per side), not sampled
+            risks. Coefficients are literature-sourced (Vecer et al. 2009,
+            WC 2006 + Euro 2008 in-play data: carded side x~2/3, opponent
+            x~5/4 — see RED_CARD_* constants); a second red applies the
+            same multiplier again (multiplicative extrapolation).
+          - `phase` selects the match segment: "auto" infers from the
+            minute; "regulation" clamps to 0-90; "et" simulates the
+            REMAINING extra time from the current score (minute 90-120)
+            then 50/50 penalties; "pens" is the shootout itself (50/50).
+            In ET/pens, regulation has already ended LEVEL, so 90-minute
+            markets (winner/totals/scores) are settled facts, not
+            simulations — only advancement is priced.
 
         v1 limitations (documented, deliberate):
-          - minutes_elapsed >= 90 treats regulation as complete (stoppage
-            time is not modeled); the current score is returned as final.
-          - Knockout advancement DOES include the Piece-2 continuation
-            (simulated 30-min ET at time-scaled rates, then 50/50
-            penalties — see the "advance" block). What is still NOT
-            representable is a live state *inside* extra time (a minute
-            past 90 clamps to "regulation over").
+          - Stoppage time is not modeled (regulation phase clamps at 90).
           - The knockout x0.85 goal damping is inherited from the
             pre-match model (known hand-tuned debt) for consistency.
 
@@ -246,22 +256,31 @@ class MatchSimulator:
             raise ValueError("minutes_elapsed cannot be negative")
         if current_home < 0 or current_away < 0:
             raise ValueError("current score cannot be negative")
+        red_home, red_away = int(red_home), int(red_away)
+
+        if phase == "auto":
+            phase = ("et" if stage == "knockout" and minutes_elapsed > 90
+                     else "regulation")
 
         xg_home, xg_away = predict_xg(home_raw, away_raw)
-        frac_remaining = max(0.0, (90.0 - float(minutes_elapsed)) / 90.0)
 
         # Effective per-90 rates: damping + KNOWN cards applied BEFORE time
-        # scaling — the ET continuation reuses these at 30/90.
+        # scaling — the ET continuation reuses these at 30/90. Card counts
+        # apply the sourced multiplier once per red (0.67^n / 1.25^n).
         rate_home, rate_away = xg_home, xg_away
         if stage == "knockout":          # same damping as pre-match (debt)
             rate_home *= 0.85
             rate_away *= 0.85
-        if red_home:                     # known state, applies to remainder
-            rate_home *= RED_CARD_OWN_MULT
-            rate_away *= RED_CARD_OPP_MULT
-        if red_away:
-            rate_away *= RED_CARD_OWN_MULT
-            rate_home *= RED_CARD_OPP_MULT
+        rate_home *= (RED_CARD_OWN_MULT ** red_home) * (RED_CARD_OPP_MULT ** red_away)
+        rate_away *= (RED_CARD_OWN_MULT ** red_away) * (RED_CARD_OPP_MULT ** red_home)
+
+        if phase in ("et", "pens"):
+            return self._continuation_phase(
+                phase, rate_home, rate_away, current_home, current_away,
+                minutes_elapsed, xg_home, xg_away, red_home, red_away)
+
+        minutes_elapsed = min(float(minutes_elapsed), 90.0)
+        frac_remaining = max(0.0, (90.0 - float(minutes_elapsed)) / 90.0)
         lam_home = rate_home * frac_remaining
         lam_away = rate_away * frac_remaining
 
@@ -278,12 +297,86 @@ class MatchSimulator:
             "score": f"{current_home}-{current_away}",
             "minutes_elapsed": round(float(minutes_elapsed), 1),
             "minutes_remaining": round(90.0 * frac_remaining, 1),
-            "red_home": bool(red_home),
-            "red_away": bool(red_away),
+            "phase": "regulation",
+            "red_home": red_home,
+            "red_away": red_away,
             "lambda_remaining": {"home": round(lam_home, 3),
                                  "away": round(lam_away, 3)},
         }
         return result
+
+    # ------------------------------------------------------------------
+    def _continuation_phase(self, phase: str, rate_home: float,
+                            rate_away: float, current_home: int,
+                            current_away: int, minutes_elapsed: float,
+                            xg_home: float, xg_away: float,
+                            red_home: int, red_away: int) -> dict:
+        """Live state INSIDE extra time or at penalties. Regulation ended
+        level (that's how the match got here), so the 90-minute outcomes are
+        settled facts: draw = 1.0, and totals/exact-scores are NOT priced
+        (the 90' score can't be recovered from the current ET score, and
+        those books have settled anyway). What's simulated is advancement:
+        the remaining ET minutes at the time-scaled rates, then 50/50 pens.
+        The shootout itself is a flat coin flip — anything else would be an
+        invented number."""
+        if phase == "pens":
+            p_home = PENALTY_HOME_WIN_P
+            advance = {
+                "home": round(p_home, 4), "away": round(1 - p_home, 4),
+                "p_reach_et": 1.0, "p_reach_pens": 1.0,
+                "home_win_et": 0.0, "away_win_et": 0.0,
+                "home_win_pens": round(p_home, 4),
+                "away_win_pens": round(1 - p_home, 4),
+                "method": "penalty_coinflip",
+            }
+            minutes_remaining = 0.0
+            lam_home = lam_away = 0.0
+        else:
+            minute = min(max(float(minutes_elapsed), 90.0), 120.0)
+            minutes_remaining = 120.0 - minute
+            lam_home = rate_home * minutes_remaining / 90.0
+            lam_away = rate_away * minutes_remaining / 90.0
+            et_home = current_home + self.rng.poisson(lam_home, self.n)
+            et_away = current_away + self.rng.poisson(lam_away, self.n)
+            level = et_home == et_away
+            pens_home = self.rng.random(self.n) < PENALTY_HOME_WIN_P
+            home_adv = (et_home > et_away) | (level & pens_home)
+            advance = {
+                "home": round(float(np.mean(home_adv)), 4),
+                "away": round(float(np.mean(~home_adv)), 4),
+                "p_reach_et": 1.0,
+                "p_reach_pens": round(float(np.mean(level)), 4),
+                "home_win_et": round(float(np.mean(et_home > et_away)), 4),
+                "away_win_et": round(float(np.mean(et_home < et_away)), 4),
+                "home_win_pens": round(float(np.mean(level & pens_home)), 4),
+                "away_win_pens": round(float(np.mean(level & ~pens_home)), 4),
+                "method": "simulated_et_pens",
+            }
+        # confidence: how decisive is the advancement call? (binary entropy)
+        p = min(max(advance["home"], 1e-9), 1 - 1e-9)
+        entropy = -(p * np.log(p) + (1 - p) * np.log(1 - p))
+        confidence = 0.5 + 0.5 * (1.0 - float(entropy) / np.log(2))
+        return {
+            "model_version": MODEL_VERSION,
+            "n_simulations": self.n,
+            "xg": {"home": xg_home, "away": xg_away},
+            # regulation ended level — a settled fact, not a simulation
+            "outcomes": {"home_win": 0.0, "draw": 1.0, "away_win": 0.0},
+            "advance": advance,
+            "props": {},          # 90-min props settled; nothing to price
+            "scorelines": [],
+            "confidence": round(confidence, 4),
+            "live_state": {
+                "score": f"{current_home}-{current_away}",
+                "minutes_elapsed": round(float(minutes_elapsed), 1),
+                "minutes_remaining": round(minutes_remaining, 1),
+                "phase": phase,
+                "red_home": red_home,
+                "red_away": red_away,
+                "lambda_remaining": {"home": round(lam_home, 3),
+                                     "away": round(lam_away, 3)},
+            },
+        }
 
     # ------------------------------------------------------------------
     def prob_for_outcome_key(self, sim: dict, outcome_key: str) -> float | None:
@@ -305,6 +398,12 @@ class MatchSimulator:
             if adv is not None:
                 return adv["away"]
             return round(sim["outcomes"]["away_win"] + 0.5 * sim["outcomes"]["draw"], 4)
+        # Method-of-victory continuations (Kalshi KXWCMOV ET/PEN): only priced
+        # when the sim ran the real ET+pens continuation — legacy dicts skip.
+        if outcome_key in ("home_win_et", "away_win_et",
+                           "home_win_pens", "away_win_pens"):
+            adv = sim.get("advance") or {}
+            return adv.get(outcome_key)
         # Exact final scores: score_2_0 → "2-0" (from Kalshi KXWCSCORE).
         # Only priced when the scoreline appears in our top-10 distribution;
         # rarer scores return None and get skipped rather than mispriced.
