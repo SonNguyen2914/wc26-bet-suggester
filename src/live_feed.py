@@ -19,6 +19,7 @@ type the state yourself.
 """
 from __future__ import annotations
 
+import re
 import time
 import unicodedata
 from datetime import date, datetime, timezone
