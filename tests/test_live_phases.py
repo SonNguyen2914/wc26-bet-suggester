@@ -395,9 +395,13 @@ class TestReferenceOdds:
         assert "NOT Kalshi" in out["disclaimer"]
 
     def test_degrades_without_provider(self, monkeypatch):
+        # ESPN fallback isolated to None: this tests the PRIMARY path's
+        # honest degradation (the fallback has its own offline tests) —
+        # without the isolation these tests would hit the real network.
         import src.reference_odds as ro
         monkeypatch.setattr(ro, "_fixture_id", lambda h, a: 123)
         monkeypatch.setattr(ro, "_request", lambda p, q: None)
+        monkeypatch.setattr(ro, "_espn_reference", lambda m, p: None)
         ro._cache.clear()
         out = ro.reference_odds(self._match(), None)
         assert out["available"] is False and "reason" in out
@@ -405,6 +409,7 @@ class TestReferenceOdds:
     def test_unknown_fixture_degrades(self, monkeypatch):
         import src.reference_odds as ro
         monkeypatch.setattr(ro, "_fixture_id", lambda h, a: None)
+        monkeypatch.setattr(ro, "_espn_reference", lambda m, p: None)
         ro._cache.clear()
         out = ro.reference_odds(self._match(), None)
         assert out["available"] is False and "fixture" in out["reason"]
