@@ -4,3 +4,8 @@ __pycache__/
 .env
 data/*.db
 .pytest_cache/
+
+# OS/dev junk
+.DS_Store
+*.log
+probe_out.txt

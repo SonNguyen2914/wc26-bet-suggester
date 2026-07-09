@@ -98,3 +98,22 @@ class TestRedCardCounts:
         sim = MatchSimulator(n_simulations=5000, seed=5)
         r = sim.simulate_remaining(HOME, AWAY, 0, 0, 60, red_home=True)
         assert r["live_state"]["red_home"] == 1
+
+
+class TestContinuationMarketFilter:
+    def test_et_phase_prices_only_advancement_markets(self):
+        """In ET/pens the 90-min books are settled facts; price_live must not
+        blend them with stale prices ('draw after 90: 70%' nonsense)."""
+        from src.suggester import SuggesterEngine
+        from src.schedule_data import get_match
+        eng = SuggesterEngine()
+        m = get_match("MAR_FRA")
+        out = eng.price_live(m, 1, 1, 100, phase="et")
+        keys = {r["outcome_key"] for r in out["markets"]}
+        allowed = {"home_advance", "away_advance", "home_win_et",
+                   "away_win_et", "home_win_pens", "away_win_pens"}
+        assert keys <= allowed, f"settled 90-min markets leaked: {keys - allowed}"
+        # regulation phase keeps the full table
+        out_reg = eng.price_live(m, 1, 1, 60, phase="regulation")
+        assert any((r["outcome_key"] or "").startswith("over_")
+                   for r in out_reg["markets"])

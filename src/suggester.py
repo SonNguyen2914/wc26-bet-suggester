@@ -74,8 +74,18 @@ class SuggesterEngine:
             red_home=red_home, red_away=red_away, phase=phase)
 
         markets = self._dedupe_markets(self.kalshi.get_markets_for_match(match))
+        # Inside extra time / penalties the 90-minute books (winner, totals,
+        # margins, exact scores) are SETTLED facts — blending a settled 0/1
+        # with a stale market price produces nonsense ("draw after 90: 70%").
+        # Only advancement-family markets are still live, so only they price.
+        in_continuation = sim["live_state"].get("phase") in ("et", "pens")
+        _CONTINUATION_KEYS = {"home_advance", "away_advance",
+                              "home_win_et", "away_win_et",
+                              "home_win_pens", "away_win_pens"}
         rows: list[dict] = []
         for mkt in markets:
+            if in_continuation and mkt.get("outcome_key") not in _CONTINUATION_KEYS:
+                continue
             raw_model_p = self.simulator.prob_for_outcome_key(
                 sim, mkt["outcome_key"])
             if raw_model_p is None:
