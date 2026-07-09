@@ -277,6 +277,10 @@ def join_markets(team: str, players: list[dict]) -> None:
 _pm_cache: dict = {}
 
 _PM_TICK = re.compile(r"-([A-Z]{3})([A-Z]+?)(\d+)-(\d+)$")
+# KXWCFIRSTGOAL tickers have no trailing threshold: …-FRAKMBAPP10 = France
+# #10 scores first. The event's "-NOGOAL" leg has no shirt digits, so it
+# falls out of this pattern by construction (never a player row).
+_FG_TICK = re.compile(r"-([A-Z]{3})([A-Z]+?)(\d+)$")
 
 
 def _match_event_markets(series: str, home: str, away: str) -> list[dict]:
@@ -348,8 +352,41 @@ def join_match_markets(home: str, away: str, props: dict) -> None:
                     row["edge"] = round(anchored - price, 4)
             player.setdefault(field, []).append(row)
 
+    def place_first_goal() -> None:
+        # KXWCFIRSTGOAL ("First Goalscorer") — priced against the model's
+        # per-match first_goal (the Poisson first-goal race). Keep ONE row
+        # per player: the cheapest tradeable ask.
+        for mk in _match_event_markets("KXWCFIRSTGOAL", home, away):
+            t = _FG_TICK.search(mk.get("ticker") or "")
+            if not t:
+                continue      # the NOGOAL leg, or an unrecognized shape
+            team_code, shirt = t.group(1), int(t.group(3))
+            side = next((sd for sd, c in codes.items() if c == team_code), None)
+            player = rosters.get(side, {}).get(shirt) if side else None
+            if player is None:
+                continue
+            price = _market_yes_price(mk)
+            if price is None:
+                continue
+            bid = _to_float_or_none(mk.get("yes_bid_dollars"))
+            if not _is_tradeable(price, bid):
+                continue      # dead book — model stands alone
+            row = {"market_id": mk.get("ticker"),
+                   "implied": round(price, 4),
+                   "multiplier": round(1.0 / price, 2) if price > 0.005 else None}
+            model = player.get("first_goal")
+            if model is not None:
+                anchored = (config.MODEL_WEIGHT * model
+                            + (1 - config.MODEL_WEIGHT) * price)
+                row["likelihood"] = round(anchored, 4)
+                row["edge"] = round(anchored - price, 4)
+            cur = player.get("first_goal_market")
+            if cur is None or row["implied"] < cur["implied"]:
+                player["first_goal_market"] = row
+
     place("KXWCGOAL", "match_goal_markets", priced=True)
     place("KXWCAST", "assist_markets", priced=False)
+    place_first_goal()
     # Kalshi lists threshold variants; keep ONE row per n — the cheapest ask
     # (buyer-favorable), consistent with the moneyline dedup rule.
     for side in ("home", "away"):

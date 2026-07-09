@@ -263,3 +263,74 @@ class TestForecastAndLineups:
             with SessionLocal() as s:
                 s.query(MatchResult).filter(MatchResult.match_id == "TST_ET").delete()
                 s.commit()
+
+
+class TestFirstGoalMarkets:
+    """KXWCFIRSTGOAL — per-player First Goalscorer, priced against the
+    model's Poisson first-goal race. Discovered live 2026-07-09."""
+
+    def _props(self):
+        return {"home": [{"player": "Erling Haaland", "shirt": 9,
+                          "first_goal": 0.18}],
+                "away": [{"player": "Harry Kane", "shirt": 9,
+                          "first_goal": 0.15}]}
+
+    def test_join_prices_players_skips_nogoal_and_dead_books(self, monkeypatch):
+        import config
+        import src.player_props as pp
+
+        def fake(series, home, away):
+            if series != "KXWCFIRSTGOAL":
+                return []
+            return [
+                # real two-sided book on Kane (away = ENG)
+                {"ticker": "KXWCFIRSTGOAL-26JUL11NORENG-ENGHKANE9",
+                 "yes_ask_dollars": "0.20", "yes_bid_dollars": "0.15"},
+                # the NOGOAL leg — no shirt digits, must never attach
+                {"ticker": "KXWCFIRSTGOAL-26JUL11NORENG-NOGOAL",
+                 "yes_ask_dollars": "0.10", "yes_bid_dollars": "0.08"},
+                # dead book on Haaland — placeholder 95c ask, 2c bid
+                {"ticker": "KXWCFIRSTGOAL-26JUL11NORENG-NORAHAALA9",
+                 "yes_ask_dollars": "0.95", "yes_bid_dollars": "0.02"},
+            ]
+
+        monkeypatch.setattr(pp, "_match_event_markets", fake)
+        props = self._props()
+        pp.join_match_markets("Norway", "England", props)
+
+        kane = props["away"][0]["first_goal_market"]
+        assert kane["implied"] == 0.20
+        assert kane["multiplier"] == 5.0
+        anchored = config.MODEL_WEIGHT * 0.15 + (1 - config.MODEL_WEIGHT) * 0.20
+        assert abs(kane["likelihood"] - round(anchored, 4)) < 1e-9
+        assert abs(kane["edge"] - round(anchored - 0.20, 4)) < 1e-9
+        # dead book: model stands alone, no fictional price attached
+        assert "first_goal_market" not in props["home"][0]
+
+    def test_cheapest_ask_wins_on_duplicates(self, monkeypatch):
+        import src.player_props as pp
+
+        def fake(series, home, away):
+            if series != "KXWCFIRSTGOAL":
+                return []
+            return [
+                {"ticker": "KXWCFIRSTGOAL-26JUL11NORENG-ENGHKANE9",
+                 "yes_ask_dollars": "0.22", "yes_bid_dollars": "0.17"},
+                {"ticker": "KXWCFIRSTGOAL-26JUL11NORENG-ENGHKANE9",
+                 "yes_ask_dollars": "0.19", "yes_bid_dollars": "0.15"},
+            ]
+
+        monkeypatch.setattr(pp, "_match_event_markets", fake)
+        props = self._props()
+        pp.join_match_markets("Norway", "England", props)
+        assert props["away"][0]["first_goal_market"]["implied"] == 0.19
+
+    def test_firstgoal_family_never_reaches_match_pipeline(self):
+        from src.kalshi_client import SKIP_FAMILIES, _classify_outcome
+        from src.schedule_data import get_match
+        assert "KXWCFIRSTGOAL" in SKIP_FAMILIES
+        assert "KXWCPREPACK" in SKIP_FAMILIES
+        m = get_match("NOR_ENG")
+        mk = {"ticker": "KXWCFIRSTGOAL-26JUL11NORENG-ENGHKANE9",
+              "title": "", "yes_sub_title": "Harry Kane"}
+        assert _classify_outcome(m, mk, "KXWCFIRSTGOAL-26JUL11NORENG") is None

@@ -219,8 +219,13 @@ SKIP_FAMILIES = (
     # PLAYER NAMES — the free-text fallback once matched the "tie" inside
     # "TIElemans" and sold them as 'Draw after 90 min' at 93x.
     "KXWCGOAL", "KXWCAST",
-    # Observed but unmodelled: man/method-of-... + half-winner families.
-    "KXWCMOF", "KXWC1H", "KXWC2H",
+    # KXWCFIRSTGOAL = per-player First Goalscorer (…-FRAKMBAPP10 + a NOGOAL
+    # leg) — priced/displayed by the player-props endpoint against the
+    # Poisson first-goal race, never by the match pipeline.
+    "KXWCFIRSTGOAL",
+    # Observed but unmodelled: man/method-of-... + half-winner families,
+    # and novelty combos (PREPACK = first-goalscorer + advance parlay).
+    "KXWCMOF", "KXWC1H", "KXWC2H", "KXWCPREPACK",
 )
 
 
