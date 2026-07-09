@@ -265,7 +265,7 @@ TEAM_STATS: dict[str, dict] = {
         "scouting": "Total control and the meanest defence in the tournament. Rodri, Pedri and Laporte suffocate games (routinely 57%+ possession), and Spain concede almost nothing — just 0.22 xG allowed against Uruguay. The catch is conversion: they dominate the ball but win tight (a run of 1-0s against good sides, a 0-0 with Cabo Verde), only running up scores against weak opponents. Elite spine, question marks over ruthlessness."},
     # --- Argentina: opp-adjusted. Elite Messi attack (caps 1.45), softer at back.
     "Argentina":     {"attack": 1.45, "defence": 0.79, "form": 0.80, "set_piece_threat": 0.27, "red_card_risk": 0.06, "fatigue": 0.34, "elo": 1914,
-        "scouting": "Messi-driven elite attack \u2014 the highest chance quality of any side left, lethal from set pieces and free-kicks. Flexible shape: sits around 44-48% possession and counters against good teams, dominates the ball against weak ones. Soft at the back (conceded twice to Cabo Verde) and legs are heavy after a 120-minute R32."},
+        "scouting": "Messi-driven elite attack \u2014 the highest chance quality of any side left, lethal from set pieces and free-kicks. Dominates the ball against weaker teams (57% possession and 2.63 xG in a 3-2 R16 win over Egypt) and counters against good ones. That R16 also exposed the soft underbelly: a limited Egypt scored twice, and Argentina only pulled clear with three goals in the last 13 minutes \u2014 two of them headers from crosses, underlining a genuine aerial/set-piece threat. Elite going forward, gettable at the back, and carrying heavy legs after a 120-minute R32."},
     # --- England: OPP-ADJUSTED (2 PDFs). attack 1.35 clinical (3 goals/6
     # shots vs Mexico); defence 1.0 leaky when pinned (2.01 xGA Mexico, 2 vs
     # Croatia). Pragmatic: ceded 68% possession to Mexico, won on the counter.
@@ -277,15 +277,17 @@ TEAM_STATS: dict[str, dict] = {
     # --- Portugal: eliminated (lost to Spain R16). Reference only.
     "Portugal":      {"attack": 1.17, "defence": 1.06, "form": 0.80, "set_piece_threat": 0.24, "red_card_risk": 0.06, "fatigue": 0.24, "elo": 1788,
         "scouting": "Eliminated by Spain in the R16."},
-    # --- Colombia: OPP-ADJUSTED. Big upward correction (out-created Portugal).
+    # --- Colombia: eliminated (lost to Switzerland R16 on penalties). Reference only.
     "Colombia":      {"attack": 1.17, "defence": 0.80, "form": 0.90, "set_piece_threat": 0.22, "red_card_risk": 0.07, "fatigue": 0.18, "elo": 1740,
-        "scouting": "Quietly one of the strongest sides left \u2014 out-created Portugal and kept three clean sheets, with an elite raw xGA around 0.44. Patient 4-1-2-3 possession through D\u00edaz, James and Arias, a controlled mid-block, and excellent goalkeeping from Vargas. The one flaw is finishing: dominates xG but converts modestly. Fresh \u2014 the only quarter-finalist yet to play extra time."},
+        "scouting": "Eliminated by Switzerland in the R16 (0-0, lost on penalties)."},
     # --- Mexico: eliminated (lost to England R16). Reference only.
     "Mexico":        {"attack": 1.00, "defence": 0.72, "form": 0.95, "set_piece_threat": 0.20, "red_card_risk": 0.06, "fatigue": 0.18, "elo": 1754,
         "scouting": "Eliminated by England in the R16."},
     # --- Switzerland: OPP-ADJUSTED. Strong process, wasteful finishing (nudged).
-    "Switzerland":   {"attack": 1.38, "defence": 0.85, "form": 0.80, "set_piece_threat": 0.22, "red_card_risk": 0.05, "fatigue": 0.18, "elo": 1696,
-        "scouting": "Process-strong but finish-wasteful \u2014 piled up 3.14 xG against Qatar and only drew, a recurring theme. Xhaka and Akanji anchor a possession game that flips to a deep low block against better teams (just 40% of the ball against Algeria), with Kobel reliable in goal. Got out-shot by Canada and won on finishing. Adaptable and defensively sound; the question is whether the chances go in. Fresh, no extra time."},
+    # fatigue 0.18->0.30 (July 8): played 120 min + penalties in the R16 vs
+    # Colombia — same ET/pens fatigue treatment as Argentina/Belgium/Egypt.
+    "Switzerland":   {"attack": 1.38, "defence": 0.85, "form": 0.80, "set_piece_threat": 0.22, "red_card_risk": 0.05, "fatigue": 0.30, "elo": 1696,
+        "scouting": "Process-strong but finish-wasteful \u2014 piled up 3.14 xG against Qatar and only drew, a theme the R16 hammered home: just 0.58 xG and out-shot 15-7 by Colombia in a 0-0, then through on penalties. Xhaka and Akanji anchor a possession game that drops into a deep, resilient low block against better teams (40% of the ball against Algeria), with Kobel reliable in goal. Hard to break down; the question is always whether the chances go in. No longer fresh \u2014 120 minutes plus a shootout in the R16 put real miles in the legs."},
     # --- Norway: OPP-ADJUSTED. Clinical Haaland attack, genuinely leaky defence.
     "Norway":        {"attack": 1.30, "defence": 1.06, "form": 0.80, "set_piece_threat": 0.26, "red_card_risk": 0.05, "fatigue": 0.20, "elo": 1651,
         "scouting": "Haaland is the whole plan \u2014 and it works. Beat Brazil and Senegal despite being out-created in both; the finishing is clinical, the defence genuinely leaky (conceded 2.05 xG to Senegal, 2.57 to Brazil). Direct, vertical and transition-hungry, with real set-piece height from \u00d8stig\u00e5rd and Haaland. Rides its keeper and its striker. Underrated by the rating after beating Brazil, but the back line can be got at."},
@@ -298,9 +300,9 @@ TEAM_STATS: dict[str, dict] = {
     # --- United States: eliminated (lost to Belgium R16). Reference only.
     "United States": {"attack": 1.11, "defence": 1.02, "form": 0.70, "set_piece_threat": 0.21, "red_card_risk": 0.08, "fatigue": 0.20, "elo": 1690,
         "scouting": "Eliminated by Belgium in the R16."},
-    # --- Egypt: OPP-ADJUSTED. Weakest QF side; draws flatter the numbers.
+    # --- Egypt: eliminated (lost to Argentina R16). Reference only.
     "Egypt":         {"attack": 0.88, "defence": 0.97, "form": 0.60, "set_piece_threat": 0.21, "red_card_risk": 0.07, "fatigue": 0.30, "elo": 1597,
-        "scouting": "The deepest-sitting side left \u2014 a compact low block that soaks pressure and springs Salah on the counter. The results (draws with Belgium and Iran) flatter the underlying numbers: Iran badly out-created them. Individual threat through Salah and Marmoush plus a set-piece header outlet, but a negative xG difference overall. Tired legs after a penalty-shootout R32."},
+        "scouting": "Eliminated by Argentina in the R16 (lost 3-2)."},
     # ===== QF teams still pending deep review =====
     # --- France: OPP-ADJUSTED (5 PDFs). Elite attack (caps), elite defence.
     "France":        {"attack": 1.45, "defence": 0.75, "form": 0.95, "set_piece_threat": 0.25, "red_card_risk": 0.05, "fatigue": 0.18, "elo": 1926,
