@@ -144,7 +144,10 @@ class TestOutcomeKeyCompatibility:
                                    "scorelines", "confidence", "halves"}
         assert set(pre["outcomes"].keys()) == {"home_win", "draw", "away_win"}
         assert "over_2_5" in pre["props"] and "btts" in pre["props"]
-        # half-time forecast: W/D/L + a most-likely score per half
+        # half-time forecast: W/D/L lean + expected goals + goal chance
         for h in ("first_half", "second_half"):
-            assert {"home_win", "draw", "away_win", "top_score",
-                    "top_score_prob"} == set(pre["halves"][h].keys())
+            assert {"home_win", "draw", "away_win", "exp_goals",
+                    "goal_pct"} == set(pre["halves"][h].keys())
+        # second half carries more goals than the first (sourced skew)
+        assert pre["halves"]["second_half"]["exp_goals"] >= \
+            pre["halves"]["first_half"]["exp_goals"]

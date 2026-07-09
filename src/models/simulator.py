@@ -34,6 +34,14 @@ PENALTY_HOME_WIN_P = 0.5
 RED_CARD_OWN_MULT = 0.67   # carded team's rate: x ~2/3
 RED_CARD_OPP_MULT = 1.25   # opponent's rate:    x ~5/4
 
+# --- Half-time split -------------------------------------------------------
+# Goals skew to the second half in tournament football — accumulated fatigue,
+# games opening up, substitutions, and second-half stoppage time. Across World
+# Cups roughly ~54-56% of goals come after the break, so the match goal rate is
+# split unevenly between the halves rather than a flat 50/50. (A flat split
+# makes the two halves statistically identical, which is misleading.)
+SECOND_HALF_GOAL_SHARE = 0.54
+
 
 class MatchSimulator:
     def __init__(self, n_simulations: int | None = None, seed: int | None = None):
@@ -76,24 +84,25 @@ class MatchSimulator:
 
     # ------------------------------------------------------------------
     def _half_summaries(self, lam_home, lam_away) -> dict:
-        """First- and second-half result distributions. Each half is 45 min =
-        half the per-90 goal rate; a Poisson process is memoryless, so this
-        linear split is guess-free (the same principle as the live
-        remaining-match time-scaling). Each half is sampled independently and
-        reported as W/D/L plus that half's single most-likely scoreline."""
+        """First- and second-half outlooks. Reporting the single most-likely
+        HALF scoreline is uninformative — a 45-minute half is almost always
+        0-0 for every match — so each half is summarized by numbers that
+        actually vary: the result lean (W/D/L), expected goals, and the chance
+        of at least one goal. The match rate is split by SECOND_HALF_GOAL_SHARE
+        (goals skew after the break) rather than 50/50, so the two halves
+        differ realistically instead of coming out identical."""
         out = {}
-        for key in ("first_half", "second_half"):
-            h = self.rng.poisson(np.asarray(lam_home) * 0.5)
-            a = self.rng.poisson(np.asarray(lam_away) * 0.5)
-            pairs, counts = np.unique(np.stack([h, a], axis=1), axis=0,
-                                      return_counts=True)
-            top = pairs[int(np.argmax(counts))]
+        for key, share in (("first_half", 1.0 - SECOND_HALF_GOAL_SHARE),
+                           ("second_half", SECOND_HALF_GOAL_SHARE)):
+            h = self.rng.poisson(np.asarray(lam_home) * share)
+            a = self.rng.poisson(np.asarray(lam_away) * share)
+            total = h + a
             out[key] = {
                 "home_win": round(float(np.mean(h > a)), 4),
                 "draw": round(float(np.mean(h == a)), 4),
                 "away_win": round(float(np.mean(h < a)), 4),
-                "top_score": f"{int(top[0])}-{int(top[1])}",
-                "top_score_prob": round(float(np.max(counts)) / self.n, 4),
+                "exp_goals": round(float(np.mean(total)), 2),
+                "goal_pct": round(float(np.mean(total >= 1)), 4),
             }
         return out
 
