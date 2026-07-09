@@ -38,7 +38,9 @@ class TestRemainingSimCore:
     def test_return_shape_matches_prematch_plus_live_state(self):
         pre = MatchSimulator(seed=3).simulate(HOME, AWAY)
         live = MatchSimulator(seed=3).simulate_remaining(HOME, AWAY, 1, 0, 70)
-        assert set(pre.keys()) <= set(live.keys())
+        # Shared core; pre-match carries the half-time forecast ("halves"),
+        # the live path carries "live_state" instead.
+        assert set(pre.keys()) - set(live.keys()) == {"halves"}
         assert set(live.keys()) - set(pre.keys()) == {"live_state"}
         ls = live["live_state"]
         assert ls["score"] == "1-0" and ls["minutes_remaining"] == 20.0
@@ -139,6 +141,10 @@ class TestOutcomeKeyCompatibility:
         pre = MatchSimulator(seed=15).simulate(HOME, AWAY, stage="knockout")
         assert set(pre.keys()) == {"model_version", "n_simulations", "xg",
                                    "outcomes", "advance", "props",
-                                   "scorelines", "confidence"}
+                                   "scorelines", "confidence", "halves"}
         assert set(pre["outcomes"].keys()) == {"home_win", "draw", "away_win"}
         assert "over_2_5" in pre["props"] and "btts" in pre["props"]
+        # half-time forecast: W/D/L + a most-likely score per half
+        for h in ("first_half", "second_half"):
+            assert {"home_win", "draw", "away_win", "top_score",
+                    "top_score_prob"} == set(pre["halves"][h].keys())

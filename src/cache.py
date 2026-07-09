@@ -65,6 +65,7 @@ def latest_for_match(match_id: str) -> dict | None:
         "is_final": newest.is_final,
         "xg": {"home": newest.xg_home, "away": newest.xg_away},
         "scorelines": json.loads(newest.scoreline_json or "[]"),
+        "summary": json.loads(newest.summary_json) if newest.summary_json else None,
         "confidence": newest.confidence,
         "markets": [
             {

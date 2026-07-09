@@ -121,6 +121,14 @@ class SuggesterEngine:
         home_stats = get_team_stats(match.home)
         away_stats = get_team_stats(match.away)
         sim = self.simulator.simulate(home_stats, away_stats, stage=match.stage)
+        # Match-level prediction summary (identical for every market in the
+        # batch): full-time W/D/L, ET/penalties advancement, and first/second-
+        # half distributions. Persisted so the match page can show a forecast.
+        summary_json = json.dumps({
+            "full_time": sim["outcomes"],
+            "advance": sim.get("advance"),
+            "halves": sim.get("halves"),
+        })
 
         markets = self._dedupe_markets(self.kalshi.get_markets_for_match(match))
         suggestions: list[BetSuggestion] = []
@@ -160,6 +168,7 @@ class SuggesterEngine:
                     edge=edge, expected_value=ev, confidence=sim["confidence"],
                     xg_home=sim["xg"]["home"], xg_away=sim["xg"]["away"],
                     scoreline_json=json.dumps(sim["scorelines"]),
+                    summary_json=summary_json,
                     source=source, is_final=is_final,
                     model_version=sim["model_version"],
                 ))

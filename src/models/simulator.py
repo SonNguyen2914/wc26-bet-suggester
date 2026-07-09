@@ -67,10 +67,35 @@ class MatchSimulator:
         goals_home = self.rng.poisson(lam_home)
         goals_away = self.rng.poisson(lam_away)
 
-        return self._aggregate_outcomes(goals_home, goals_away, stage,
-                                        xg_home, xg_away,
-                                        lam90_home=lam_home,
-                                        lam90_away=lam_away)
+        result = self._aggregate_outcomes(goals_home, goals_away, stage,
+                                          xg_home, xg_away,
+                                          lam90_home=lam_home,
+                                          lam90_away=lam_away)
+        result["halves"] = self._half_summaries(lam_home, lam_away)
+        return result
+
+    # ------------------------------------------------------------------
+    def _half_summaries(self, lam_home, lam_away) -> dict:
+        """First- and second-half result distributions. Each half is 45 min =
+        half the per-90 goal rate; a Poisson process is memoryless, so this
+        linear split is guess-free (the same principle as the live
+        remaining-match time-scaling). Each half is sampled independently and
+        reported as W/D/L plus that half's single most-likely scoreline."""
+        out = {}
+        for key in ("first_half", "second_half"):
+            h = self.rng.poisson(np.asarray(lam_home) * 0.5)
+            a = self.rng.poisson(np.asarray(lam_away) * 0.5)
+            pairs, counts = np.unique(np.stack([h, a], axis=1), axis=0,
+                                      return_counts=True)
+            top = pairs[int(np.argmax(counts))]
+            out[key] = {
+                "home_win": round(float(np.mean(h > a)), 4),
+                "draw": round(float(np.mean(h == a)), 4),
+                "away_win": round(float(np.mean(h < a)), 4),
+                "top_score": f"{int(top[0])}-{int(top[1])}",
+                "top_score_prob": round(float(np.max(counts)) / self.n, 4),
+            }
+        return out
 
     # ------------------------------------------------------------------
     def _aggregate_outcomes(self, goals_home: np.ndarray, goals_away: np.ndarray,

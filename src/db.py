@@ -37,6 +37,9 @@ class Prediction(Base):
     xg_home = Column(Float)
     xg_away = Column(Float)
     scoreline_json = Column(Text)              # top scorelines as JSON
+    summary_json = Column(Text)                # match-level prediction summary:
+                                               # full_time W/D/L, advance (ET/pens),
+                                               # first/second-half distributions
     outcome_key = Column(String(32))           # home_win, over_2_5, score_2_1, ...
 
     source = Column(String(24), default="scheduled")   # scheduled | on_demand | final_lock
@@ -209,6 +212,10 @@ def _migrate() -> None:
             conn.execute(text("ALTER TABLE predictions ADD COLUMN outcome_key VARCHAR(32)"))
             conn.commit()
             print("[db] migrated: added predictions.outcome_key")
+        if cols and "summary_json" not in cols:
+            conn.execute(text("ALTER TABLE predictions ADD COLUMN summary_json TEXT"))
+            conn.commit()
+            print("[db] migrated: added predictions.summary_json")
 
 
 def get_setting(session, key: str, default: float) -> float:
