@@ -27,16 +27,30 @@ def latest_for_match(match_id: str) -> dict | None:
         if not newest:
             return None
 
-        # Rows written in one batch get microsecond-different timestamps,
-        # so group by a 3-second window around the newest row.
+        # Pull a recent window and keep the LATEST row per market_id. Two runs
+        # for the same match can overlap (a manual refresh-all landing near the
+        # hourly/boot job); a naive time-window would then return every market
+        # TWICE — once per run, with slightly different Monte Carlo probs —
+        # which showed up as duplicated rows on the board. Deduping to the
+        # freshest row per market_id fixes that and always shows current prices.
+        # 60s comfortably covers a single batch's write span.
         from datetime import timedelta
         batch_time = newest.created_at
-        rows = session.execute(
+        recent = session.execute(
             select(Prediction)
             .where(Prediction.match_id == match_id,
-                   Prediction.created_at >= batch_time - timedelta(seconds=3))
-            .order_by(Prediction.expected_value.desc())
+                   Prediction.created_at >= batch_time - timedelta(seconds=60))
+            .order_by(Prediction.created_at.desc())
         ).scalars().all()
+
+    seen: set[str] = set()
+    rows = []
+    for r in recent:                 # newest-first, so the first per id wins
+        if r.market_id in seen:
+            continue
+        seen.add(r.market_id)
+        rows.append(r)
+    rows.sort(key=lambda r: r.expected_value, reverse=True)
 
     if batch_time.tzinfo is None:  # SQLite drops tzinfo
         batch_time = batch_time.replace(tzinfo=timezone.utc)
