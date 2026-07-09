@@ -139,6 +139,19 @@ class MatchSimulator:
             p_over = float(np.mean(total > line + 0.5))
             props[f"over_{line}_5"] = round(p_over, 4)
             props[f"under_{line}_5"] = round(1 - p_over, 4)
+        # First-goal race (prices Kalshi KXWCFTTS: "team records the first
+        # goal" / "no goal"): independent Poisson processes — P(team first)
+        # = (lam_t/lam_tot)·P(any goal). Uses mean effective rates.
+        if lam90_home is not None and lam90_away is not None:
+            lh = float(np.mean(np.asarray(lam90_home, dtype=float)))
+            la = float(np.mean(np.asarray(lam90_away, dtype=float)))
+            lt = lh + la
+            if lt > 0:
+                p_any = 1.0 - float(np.exp(-lt))
+                props["home_first_goal"] = round(lh / lt * p_any, 4)
+                props["away_first_goal"] = round(la / lt * p_any, 4)
+                props["no_goal"] = round(1.0 - p_any, 4)
+
         # Winning margins (matches Kalshi's KXWCSPREAD markets, "wins by 1.5+/2.5+")
         for m_line in (2, 3):
             props[f"home_margin_{m_line}"] = round(float(np.mean(margin >= m_line)), 4)

@@ -330,13 +330,16 @@ def player_props(match_id: str):
     else:  # no cached sim yet — derive from the same xG model directly
         from src.models.xg_model import predict_xg
         xgh, xga = predict_xg(get_team_stats(m.home), get_team_stats(m.away))
-    from src.player_props import props_for
+    from src.player_props import props_for, join_markets
+    props = props_for(m.home, m.away, m.stage, xgh, xga)
+    join_markets(m.home, props["home"])     # tournament-anytime + Kalshi rows
+    join_markets(m.away, props["away"])
     return {
         "available": True,
         "match_id": match_id,
         "home_team": m.home, "away_team": m.away,
         "stage": m.stage,
-        **props_for(m.home, m.away, m.stage, xgh, xga),
+        **props,
         "generated_at": utcnow().isoformat(),
         "disclaimer": ("Model estimates from 5-match FIFA data. Minutes and "
                        "line-ups are not modelled; a substitute's share "

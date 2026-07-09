@@ -203,11 +203,10 @@ SKIP_FAMILIES = (
     "KXWC2HTOTAL", "KXWC2HSPREAD", "KXWC2HBTTS",
     "KXWC1HSCORE", "KXWC2HSCORE",
     "KXWCTEAMTOTAL", "KXWCSTART",
-    # KXWCFTTS = "Team to score first" (resolves on the game's OPENING goal,
-    # incl. extra time — per Kalshi's own market rules). NOT a winner market;
-    # the text fallback was mislabeling it as home/away_win. Our 90-min sim
-    # doesn't model goal order, so skip until a real first-goal model exists.
-    "KXWCFTTS",
+    # (KXWCFTTS un-skipped 2026-07-09: now priced by the analytic Poisson
+    # first-goal race in the simulator — verified against Kalshi's live
+    # titles: "Will {Team} record the first goal of the match?" + a
+    # No-Goal leg.)
     # KXWCTEAMFIRSTGOAL = per-PLAYER first-goalscorer props (e.g.
     # ...-MEX-ELIRA6 = "E. Lira scores first"). Their titles name one team,
     # so the text fallback labeled them home/away_win — and dedup then let a
@@ -267,6 +266,17 @@ def _classify_outcome(match: Match, market: dict,
 
     if family == "KXWCBTTS":
         return "btts"
+
+    # First team to score: suffix is a FIFA team code, or NONE for "no goal".
+    if family == "KXWCFTTS":
+        side = ticker.rsplit("-", 1)[-1]
+        if side == "NONE":
+            return "no_goal"
+        if _code_is(side, match.home):
+            return "home_first_goal"
+        if _code_is(side, match.away):
+            return "away_first_goal"
+        return None
 
     # Exact final score: ticker suffix like "FRA1MAR0" = France 1, Morocco 0.
     # The goals belong to the NAMED team codes — Kalshi's team order in the
@@ -448,6 +458,9 @@ def _display_title(match: Match, outcome_key: str, fallback: str) -> str:
         "away_win_et": f"{a} to win in extra time",
         "home_win_pens": f"{h} to win on penalties",
         "away_win_pens": f"{a} to win on penalties",
+        "home_first_goal": f"{h} to score first",
+        "away_first_goal": f"{a} to score first",
+        "no_goal": "No goal in the match",
     }
     if outcome_key in fixed:
         return fixed[outcome_key]
