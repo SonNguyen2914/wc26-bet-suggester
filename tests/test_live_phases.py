@@ -402,6 +402,7 @@ class TestReferenceOdds:
         monkeypatch.setattr(ro, "_fixture_id", lambda h, a: 123)
         monkeypatch.setattr(ro, "_request", lambda p, q: None)
         monkeypatch.setattr(ro, "_espn_reference", lambda m, p: None)
+        monkeypatch.setattr(ro, "_kambi_exact_score", lambda m, p: None)
         ro._cache.clear()
         out = ro.reference_odds(self._match(), None)
         assert out["available"] is False and "reason" in out
@@ -410,6 +411,7 @@ class TestReferenceOdds:
         import src.reference_odds as ro
         monkeypatch.setattr(ro, "_fixture_id", lambda h, a: None)
         monkeypatch.setattr(ro, "_espn_reference", lambda m, p: None)
+        monkeypatch.setattr(ro, "_kambi_exact_score", lambda m, p: None)
         ro._cache.clear()
         out = ro.reference_odds(self._match(), None)
         assert out["available"] is False and "fixture" in out["reason"]
@@ -581,3 +583,72 @@ class TestEspnSummaryCachePoisoning:
         out = ro._espn_reference(m, None)                 # retry refetches
         assert out is not None and out["available"]
         assert calls["n"] == 2                            # empty wasn't cached
+
+
+class TestKambiExactScore:
+    """Unibet's Correct Score via Kambi's keyless CDN — the exact-score
+    fill for matches Kalshi hasn't listed yet."""
+
+    def _seed(self, ro, match_id, home, away, outcomes):
+        import time as _t
+        ro._cache.clear()
+        ro._cache["__kambi_events__"] = (_t.time(), [
+            {"id": 555, "homeName": home, "awayName": away}])
+        ro._cache[f"kambi|{match_id}"] = (_t.time(), [
+            {"criterion": {"label": "Correct Score"}, "outcomes": outcomes}])
+
+    def test_scores_odds_and_model_join(self):
+        import src.reference_odds as ro
+        from src.schedule_data import get_match
+        m = get_match("NOR_ENG")
+        self._seed(ro, m.match_id, "Norway", "England", [
+            {"homeScore": 1, "awayScore": 0, "odds": 12000},
+            {"homeScore": 0, "awayScore": 2, "odds": 5500},
+            {"homeScore": 5, "awayScore": 2, "odds": None},   # suspended
+        ])
+        pred = {"scorelines": [{"score": "0-2", "prob": 0.13}]}
+        grp = ro._kambi_exact_score(m, pred)
+        rows = {r["label"]: r for r in grp["rows"]}
+        assert rows["1-0"]["odd"] == 12.0            # milli -> decimal
+        assert rows["0-2"]["model"] == 0.13          # exact scoreline join
+        assert "5-2" not in rows                     # no price, no row
+        # sorted most-likely first
+        assert grp["rows"][0]["label"] == "0-2"
+
+    def test_orientation_flips_when_kambi_home_differs(self):
+        # Kambi lists England as home; our schedule is NOR_ENG. An England
+        # 2-0 must surface as OUR 0-2 — names win, positions lie.
+        import src.reference_odds as ro
+        from src.schedule_data import get_match
+        m = get_match("NOR_ENG")
+        self._seed(ro, m.match_id, "England", "Norway", [
+            {"homeScore": 2, "awayScore": 0, "odds": 5500},
+        ])
+        grp = ro._kambi_exact_score(m, None)
+        assert [r["label"] for r in grp["rows"]] == ["0-2"]
+
+    def test_fill_appends_group_and_marks_source(self, monkeypatch):
+        import src.reference_odds as ro
+        from src.schedule_data import get_match
+        m = get_match("NOR_ENG")
+        grp = {"name": "Exact score · 90 min",
+               "rows": [{"label": "1-0", "odd": 12.0,
+                         "implied": 0.0833, "books": 1}]}
+        monkeypatch.setattr(ro, "_kambi_exact_score", lambda mm, p: grp)
+        # case 1: espn fallback payload (winner only) -> group appended
+        out = {"available": True, "source": "draftkings via espn",
+               "groups": [{"name": "Winner · 90 min", "rows": []}]}
+        out = ro._fill_exact_score(out, m, None)
+        assert any("Exact score" in g["name"] for g in out["groups"])
+        assert "kambi" in out["source"]
+        # case 2: everything else down -> kambi-only payload with the note
+        out = ro._fill_exact_score(
+            {"available": False, "reason": "plan blocked"}, m, None)
+        assert out["available"] and out["source"] == "unibet via kambi"
+        assert "plan blocked" in out["note"]
+        # case 3: a real exact-score group present -> kambi never replaces it
+        marker = {"name": "Exact score · 90 min", "rows": ["sentinel"]}
+        out = ro._fill_exact_score(
+            {"available": True, "source": "api-football",
+             "groups": [marker]}, m, None)
+        assert out["groups"] == [marker] and out["source"] == "api-football"

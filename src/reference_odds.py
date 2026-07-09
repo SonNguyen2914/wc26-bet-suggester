@@ -150,10 +150,19 @@ def _espn_reference(match: Match, prediction: dict | None) -> dict | None:
     else:
         try:
             import requests
+            from datetime import timedelta
+
             from src.live_feed import ESPN_SUMMARY, _espn_event_id
-            # the match may be 1-2 days out — look it up on its own date
-            ev = _espn_event_id(match.home, match.away,
-                                on_date=match.kickoff.strftime("%Y%m%d"))
+            # The match may be 1-2 days out — look it up on its own date.
+            # ESPN buckets scoreboards by US-EASTERN date, so a late-UTC
+            # kickoff lives on the previous ESPN day (ARG_SUI at 01:00 UTC
+            # Jul 12 = 9pm ET Jul 11). Try the UTC date, then ±1 day.
+            ev = None
+            for delta in (0, -1, 1):
+                day = (match.kickoff + timedelta(days=delta)).strftime("%Y%m%d")
+                ev = _espn_event_id(match.home, match.away, on_date=day)
+                if ev:
+                    break
             if not ev:
                 return None
             d = requests.get(ESPN_SUMMARY, params={"event": ev}, timeout=8,
@@ -230,6 +239,134 @@ def _espn_reference(match: Match, prediction: dict | None) -> dict | None:
                            "once Kalshi lists that book.")}
 
 
+# ---------------------------------------------------------------------------
+# Kambi (Unibet's engine) — keyless CDN with the full market catalog,
+# including Correct Score, which neither the ESPN fallback (no CS feed) nor
+# Kalshi (lists its books only 1-2 days out) can always provide. Used ONLY
+# to fill the exact-score group; same ground rules: display-only, never the
+# board or the strategy engine.
+# ---------------------------------------------------------------------------
+_KAMBI_LIST = ("https://eu-offering-api.kambicdn.com/offering/v2018/ub/"
+               "listView/football/world_cup_2026.json?lang=en_GB&market=GB")
+_KAMBI_OFFER = ("https://eu-offering-api.kambicdn.com/offering/v2018/ub/"
+                "betoffer/event/{eid}.json?lang=en_GB&market=GB")
+_KAMBI_UA = {"User-Agent": ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                            "AppleWebKit/537.36 Chrome/126 Safari/537.36")}
+_KAMBI_TTL = 30 * 60
+
+
+def _kambi_event(match: Match) -> dict | None:
+    """The Kambi event for this fixture: {'id', 'homeName', ...}, matched by
+    team names. Listing cached 1h; empty answers never cached."""
+    key = "__kambi_events__"
+    hit = _cache.get(key)
+    if hit and time.time() - hit[0] < 3600:
+        events = hit[1]
+    else:
+        try:
+            import requests
+            r = requests.get(_KAMBI_LIST, timeout=8, headers=_KAMBI_UA)
+            r.raise_for_status()
+            events = [e.get("event") or {} for e in r.json().get("events", [])]
+        except Exception:
+            return None
+        if events:
+            _cache[key] = (time.time(), events)
+    want = {_norm(match.home), _norm(match.away)}
+    for ev in events:
+        if want == {_norm(ev.get("homeName") or ""),
+                    _norm(ev.get("awayName") or "")}:
+            return ev
+    return None
+
+
+def _kambi_exact_score(match: Match, prediction: dict | None) -> dict | None:
+    """The 'Exact score · 90 min' group from Kambi's Correct Score book, or
+    None. Scores oriented to OUR home-away order by comparing team names
+    (Kambi's home is theirs, not necessarily ours). Odds come ×1000."""
+    ev = _kambi_event(match)
+    if not ev:
+        return None
+    key = f"kambi|{match.match_id}"
+    hit = _cache.get(key)
+    if hit and time.time() - hit[0] < _KAMBI_TTL:
+        offers = hit[1]
+    else:
+        try:
+            import requests
+            r = requests.get(_KAMBI_OFFER.format(eid=ev["id"]), timeout=10,
+                             headers=_KAMBI_UA)
+            r.raise_for_status()
+            offers = r.json().get("betOffers", [])
+        except Exception:
+            return None
+        if offers:                       # never cache an empty answer
+            _cache[key] = (time.time(), offers)
+
+    cs = next((b for b in offers
+               if (b.get("criterion") or {}).get("label") == "Correct Score"),
+              None)
+    if not cs:
+        return None
+    flipped = _norm(ev.get("homeName") or "") != _norm(match.home)
+    rows: list[dict] = []
+    for oc in cs.get("outcomes", []) or []:
+        milli = oc.get("odds")
+        if not milli:
+            continue                     # suspended outcome — no price
+        odd = round(milli / 1000.0, 2)
+        if odd <= 1.0:
+            continue
+        hs, as_ = oc.get("homeScore"), oc.get("awayScore")
+        if hs is None or as_ is None:
+            label = str(oc.get("label") or "?")   # e.g. an aggregate bucket
+            mlabel = None
+        else:
+            if flipped:
+                hs, as_ = as_, hs
+            label = f"{hs}-{as_}"
+            mlabel = label
+        row = {"label": label, "odd": odd,
+               "implied": round(1.0 / odd, 4), "books": 1}
+        if mlabel is not None:
+            model = _model_lookup("scoreline", mlabel, prediction)
+            if model is not None:
+                row["model"] = round(model, 4)
+        rows.append(row)
+    if not rows:
+        return None
+    rows.sort(key=lambda r: r["implied"], reverse=True)
+    return {"name": "Exact score · 90 min", "rows": rows,
+            "provider": "unibet via kambi"}
+
+
+def _fill_exact_score(out: dict, match: Match,
+                      prediction: dict | None) -> dict:
+    """Ensure the payload carries an exact-score group when any keyless
+    source has one. Fills a gap only — an exact-score group already present
+    (the paid provider's) is never replaced."""
+    has_cs = any("Exact score" in g["name"] for g in out.get("groups") or [])
+    if has_cs:
+        return out
+    grp = _kambi_exact_score(match, prediction)
+    if grp is None:
+        return out
+    if out.get("available"):
+        out["groups"].append(grp)
+        out["source"] = f"{out['source']} + unibet (kambi)"
+        return out
+    reason = out.get("reason", "")
+    return {"match_id": match.match_id, "source": "unibet via kambi",
+            "home_team": match.home, "away_team": match.away,
+            "available": True, "bookmaker_count": 1, "groups": [grp],
+            "note": f"primary odds provider unavailable — {reason}",
+            "disclaimer": ("Sportsbook reference only — Unibet's Correct "
+                           "Score book via Kambi's public feed, NOT Kalshi "
+                           "contracts; nothing here is buyable through this "
+                           "app. Implied probability includes the book's "
+                           "vig.")}
+
+
 def _unavailable(base: dict, reason: str, match: Match,
                  prediction: dict | None) -> dict:
     """Primary provider failed — try the keyless fallback before giving an
@@ -242,9 +379,17 @@ def _unavailable(base: dict, reason: str, match: Match,
 
 
 def reference_odds(match: Match, prediction: dict | None) -> dict:
-    """Aggregated pre-match sportsbook odds for one match. Median odd per
+    """Aggregated pre-match sportsbook odds for one match, with the
+    exact-score gap filled from Kambi when no other source carries it."""
+    out = _primary_reference(match, prediction)
+    return _fill_exact_score(out, match, prediction)
+
+
+def _primary_reference(match: Match, prediction: dict | None) -> dict:
+    """Primary path: API-Football's bookmaker aggregation — median odd per
     outcome across every quoting bookmaker (robust to one book's outlier),
-    with the count of books behind each number."""
+    with the count of books behind each number. Falls back to
+    DraftKings-via-ESPN when unavailable."""
     base = {"match_id": match.match_id, "source": "api-football",
             "home_team": match.home, "away_team": match.away}
     if not config.API_FOOTBALL_KEY:
