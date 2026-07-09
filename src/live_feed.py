@@ -379,3 +379,68 @@ def _espn_state_for(home: str, away: str,
                 stt = _flip(stt)
             return stt
     return None
+
+
+# ---------------------------------------------------------------------------
+# ESPN lineups (Team News) — keyless. ESPN posts matchday rosters ~1h before
+# kickoff in the event summary. FACTS ONLY: who starts, who's on the bench,
+# and (by absence) who isn't in the squad. Never a model input beyond the
+# settled-fact effects applied downstream (an out-of-squad player cannot
+# score this match).
+# ---------------------------------------------------------------------------
+ESPN_SUMMARY = ("https://site.api.espn.com/apis/site/v2/sports/soccer/"
+                "fifa.world/summary")
+
+
+def _espn_event_id(home: str, away: str) -> str | None:
+    want = {_norm(home), _norm(away)}
+    for stt in _espn_states():          # includes pre-match fixtures
+        if want == {_norm(stt["home_name"]), _norm(stt["away_name"])}:
+            return str(stt["fixture_id"])
+    return None
+
+
+def espn_lineups(home: str, away: str) -> dict:
+    """Matchday lineups for a fixture. {available: False} until ESPN posts
+    them (~1h pre-kickoff); cached briefly; graceful on any failure."""
+    key = f"__lineup__{_norm(home)}|{_norm(away)}"
+    hit = _cache.get(key)
+    if hit and (time.time() - hit[0]) < 60:
+        return hit[1]
+    out: dict = {"available": False, "reason": "lineups not posted yet"}
+    try:
+        ev = _espn_event_id(home, away)
+        if ev is None:
+            out["reason"] = "fixture not found on ESPN"
+        else:
+            r = requests.get(ESPN_SUMMARY, params={"event": ev}, timeout=8,
+                             headers={"User-Agent": "wc26-suggester/0.3"})
+            r.raise_for_status()
+            sides: dict = {}
+            for side in r.json().get("rosters", []):
+                roster = side.get("roster") or []
+                if not roster:
+                    continue
+                team_name = (side.get("team") or {}).get("displayName", "")
+                # orient by NAME, not homeAway — ESPN's home/away order can
+                # differ from our schedule's (venue-name lesson applies)
+                ours = ("home" if _norm(team_name) == _norm(home)
+                        else "away" if _norm(team_name) == _norm(away)
+                        else None)
+                if ours is None:
+                    continue
+                starters, bench = [], []
+                for p in roster:
+                    row = {
+                        "player": (p.get("athlete") or {}).get("displayName", ""),
+                        "shirt": p.get("jersey"),
+                        "pos": (p.get("position") or {}).get("abbreviation"),
+                    }
+                    (starters if p.get("starter") else bench).append(row)
+                sides[ours] = {"starters": starters, "bench": bench}
+            if sides:
+                out = {"available": True, **sides, "source": "espn"}
+    except Exception as exc:
+        out = {"available": False, "reason": f"lineup fetch failed: {exc}"}
+    _cache[key] = (time.time(), out)
+    return out

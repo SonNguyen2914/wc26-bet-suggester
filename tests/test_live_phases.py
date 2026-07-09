@@ -220,3 +220,46 @@ class TestLiquidityGate:
         assert _is_tradeable(0.08, 0.04)       # Tielemans 1+ style — real
         assert _is_tradeable(0.02, 0.01)       # cheap but two-sided
         assert not _is_tradeable(0.30, 0.05)   # 25c spread — no market
+
+
+class TestForecastAndLineups:
+    def test_slot_dist_sums_to_one_all_rounds(self):
+        from src.bracket import _slot_dist
+        for slot in ("SF1", "SF2", "FINAL"):
+            d = _slot_dist(slot)
+            assert abs(sum(d.values()) - 1.0) < 1e-6, (slot, d)
+        assert max(_slot_dist("FINAL"), key=lambda t: _slot_dist("FINAL")[t])
+
+    def test_lineup_squad_facts(self):
+        from src.player_props import apply_lineups
+        props = {"home": [
+            {"player": "Kylian Mbappe", "anytime": 0.47, "p2": 0.1,
+             "p3": 0.02, "first_goal": 0.2},
+            {"player": "Ghost Man", "anytime": 0.10, "p2": 0.01,
+             "p3": 0.0, "first_goal": 0.03},
+        ], "away": []}
+        lineups = {"available": True, "home": {
+            "starters": [{"player": "Kylian Mbappe"}], "bench": []}}
+        apply_lineups(props, lineups)
+        assert props["home"][0]["squad"] == "starter"
+        assert props["home"][0]["anytime"] == 0.47      # untouched
+        assert props["home"][1]["squad"] == "out"
+        assert props["home"][1]["anytime"] == 0.0       # settled fact
+
+    def test_et_fatigue_rule(self):
+        from src.db import MatchResult, SessionLocal, init_db, utcnow
+        from src.schedule_data import effective_team_stats, get_team_stats
+        init_db()
+        with SessionLocal() as s:
+            s.query(MatchResult).filter(MatchResult.match_id == "TST_ET").delete()
+            s.add(MatchResult(match_id="TST_ET", home="Norway", away="England",
+                              home_goals=1, away_goals=1, status_short="PEN",
+                              goals_json="[]", finished_at=utcnow()))
+            s.commit()
+        try:
+            assert get_team_stats("Norway")["fatigue"] < 0.30   # hand value
+            assert effective_team_stats("Norway")["fatigue"] >= 0.30
+        finally:
+            with SessionLocal() as s:
+                s.query(MatchResult).filter(MatchResult.match_id == "TST_ET").delete()
+                s.commit()

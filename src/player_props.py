@@ -90,7 +90,7 @@ _QF_PAIRS = [("Morocco", "France"), ("Spain", "Belgium"),
 @lru_cache(maxsize=64)
 def _sim_pair(a: str, b: str) -> dict:
     from src.models.simulator import MatchSimulator
-    from src.schedule_data import get_team_stats
+    from src.schedule_data import effective_team_stats as get_team_stats
     sim = MatchSimulator(n_simulations=20000, seed=11)
     return MatchSimulator and sim.simulate(get_team_stats(a),
                                            get_team_stats(b),
@@ -362,3 +362,30 @@ def join_match_markets(home: str, away: str, props: dict) -> None:
                         if cur is None or r["implied"] < cur["implied"]:
                             best[r["n"]] = r
                     p[f] = sorted(best.values(), key=lambda r: r["n"])
+
+
+def apply_lineups(props: dict, lineups: dict) -> None:
+    """FACTS-ONLY squad status once matchday lineups are posted:
+    starter / bench tags, and a player absent from the matchday squad is
+    OUT — his per-match scoring probabilities become 0 (settled fact, not
+    a model opinion). Tournament-run numbers are left untouched (he may
+    play the next round)."""
+    if not lineups.get("available"):
+        return
+    for side in ("home", "away"):
+        lu = lineups.get(side)
+        if not lu:
+            continue
+        starters = {_norm_name(p["player"]) for p in lu.get("starters", [])}
+        bench = {_norm_name(p["player"]) for p in lu.get("bench", [])}
+        for p in props.get(side, []):
+            n = _norm_name(p["player"])
+            if n in starters:
+                p["squad"] = "starter"
+            elif n in bench:
+                p["squad"] = "bench"
+            else:
+                p["squad"] = "out"
+                for k in ("anytime", "p2", "p3", "first_goal"):
+                    if k in p:
+                        p[k] = 0.0

@@ -216,10 +216,20 @@ def _bracket_match(m) -> dict:
                     }
         except Exception:
             result = None  # DB not ready / no table — show as upcoming
+    forecast = None
+    if not m.fully_resolved:
+        try:
+            forecast = {
+                "home": None if m.home_resolved else _side_forecast(m, "home"),
+                "away": None if m.away_resolved else _side_forecast(m, "away"),
+            }
+        except Exception:
+            forecast = None
     return {
         "match_id": m.match_id,
         "home": m.home, "home_resolved": m.home_resolved,
         "away": m.away, "away_resolved": m.away_resolved,
+        "forecast": forecast,
         "fully_resolved": m.fully_resolved,
         "kickoff": m.kickoff.astimezone(timezone.utc).isoformat(),
         "venue": m.venue,
@@ -246,10 +256,74 @@ def bracket_status() -> dict:
         r = fm.get("result")
         if r and r.get("winner"):
             champion = fm["home"] if r["winner"] == "home" else fm["away"]
+    # Model's champion forecast while the final is undecided.
+    champion_forecast = None
+    if champion is None:
+        try:
+            dist = _slot_dist("FINAL", "winner")
+            if dist:
+                t = max(dist, key=lambda x: dist[x])
+                champion_forecast = {"team": t, "p": round(dist[t], 4)}
+        except Exception:
+            champion_forecast = None
     return {
+        "champion_forecast": champion_forecast,
         "quarterfinals": by_stage["QF"],
         "semifinals": by_stage["SF"],
         "third_place": by_stage["3P"],
         "final": by_stage["F"],
         "champion": champion,
     }
+
+
+# ---------------------------------------------------------------------------
+# Model forecast for unresolved slots — recursive occupant distributions.
+# "Who occupies this slot?" = finished result (probability 1) when frozen,
+# else the pairwise-sim winner distribution; placeholder slots recurse into
+# their feeders. Works identically at QF, SF and Final stage, so the bracket
+# UI can always show the model's predicted semifinalists/finalists/champion.
+# ---------------------------------------------------------------------------
+def _slot_dist(match_id: str, want: str = "winner") -> dict:
+    from src.player_props import _pairwise
+    m = next((x for x in load_schedule() if x.match_id == match_id), None)
+    if m is None:
+        return {}
+    if m.fully_resolved:
+        # frozen result → certainty
+        try:
+            from src.db import MatchResult, SessionLocal
+            with SessionLocal() as s:
+                res = s.get(MatchResult, m.match_id)
+            if res is not None and res.home_goals != res.away_goals:
+                w = m.home if res.home_goals > res.away_goals else m.away
+                l = m.away if w == m.home else m.home
+                return {w: 1.0} if want == "winner" else {l: 1.0}
+        except Exception:
+            pass
+        a, _ = _pairwise(m.home, m.away)
+        return ({m.home: a, m.away: 1.0 - a} if want == "winner"
+                else {m.home: 1.0 - a, m.away: a})
+    dh = _slot_dist(m.home_feeders[0]) if m.home_feeders else {}
+    da = _slot_dist(m.away_feeders[0]) if m.away_feeders else {}
+    win: dict = {}
+    for t, pt in dh.items():
+        win[t] = win.get(t, 0.0) + pt * sum(
+            po * _pairwise(t, o)[0] for o, po in da.items())
+    for t, pt in da.items():
+        win[t] = win.get(t, 0.0) + pt * sum(
+            po * _pairwise(t, o)[0] for o, po in dh.items())
+    if want == "winner":
+        return win
+    total = {**{t: p for t, p in dh.items()}, **{t: p for t, p in da.items()}}
+    return {t: total[t] - win.get(t, 0.0) for t in total}
+
+
+def _side_forecast(m, side: str) -> dict | None:
+    feeders = m.home_feeders if side == "home" else m.away_feeders
+    if not feeders:
+        return None
+    dist = _slot_dist(feeders[0], "loser" if m.loser_feed else "winner")
+    if not dist:
+        return None
+    team = max(dist, key=lambda t: dist[t])
+    return {"team": team, "p": round(dist[team], 4)}

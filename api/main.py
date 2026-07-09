@@ -311,6 +311,20 @@ def team_info(match_id: str):
     }
 
 
+@app.get("/api/team-news/{match_id}")
+def team_news(match_id: str):
+    """Matchday lineups (FACTS: starters / bench), from ESPN's keyless
+    summary — typically posted ~1h before kickoff. Never a model input
+    beyond settled-fact effects (an out-of-squad player can't score)."""
+    m = get_match(match_id)
+    if not m:
+        raise HTTPException(404, f"Unknown match_id '{match_id}'")
+    from src.live_feed import espn_lineups
+    lu = espn_lineups(m.home, m.away)
+    return {"match_id": match_id, "home_team": m.home, "away_team": m.away,
+            "kickoff": m.kickoff.isoformat(), "venue": m.venue, **lu}
+
+
 @app.get("/api/player-props/{match_id}")
 def player_props(match_id: str):
     """Per-player anytime / first-goalscorer probabilities for a match —
@@ -335,6 +349,9 @@ def player_props(match_id: str):
     join_markets(m.home, props["home"])     # tournament-anytime + Kalshi rows
     join_markets(m.away, props["away"])
     join_match_markets(m.home, m.away, props)   # per-match 1+/2+/3+ + assists
+    from src.live_feed import espn_lineups
+    from src.player_props import apply_lineups
+    apply_lineups(props, espn_lineups(m.home, m.away))  # facts-only squad status
     return {
         "available": True,
         "match_id": match_id,

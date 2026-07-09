@@ -12,7 +12,7 @@ import config
 from src.db import Prediction, Suggestion, SessionLocal, get_setting, utcnow
 from src.kalshi_client import KalshiClient
 from src.models.simulator import MatchSimulator
-from src.schedule_data import Match, get_team_stats
+from src.schedule_data import Match, effective_team_stats as get_team_stats
 
 # Families verified to list the SAME real bet (the 90-minute winner) on two
 # tickers. ONLY these may collapse in dedup. Expanding this set requires

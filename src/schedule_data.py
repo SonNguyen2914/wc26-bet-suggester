@@ -333,3 +333,29 @@ def get_match(match_id: str) -> Match | None:
         if m.match_id == match_id:
             return m
     return None
+
+
+def effective_team_stats(team: str) -> dict:
+    """get_team_stats + codified, traceable adjustments from SETTLED facts.
+
+    ET-fatigue rule: a team whose most recent finished match went to extra
+    time or penalties carries fatigue >= 0.30 — the same treatment applied
+    by hand to Argentina/Belgium/Egypt/Switzerland after their 120-minute
+    matches (sourced pattern, now automatic for future rounds). Reads the
+    frozen MatchResult store; degrades silently to the hand-set values when
+    no result is recorded (e.g. right after a redeploy wipes the DB)."""
+    stats = get_team_stats(team)
+    try:
+        from src.db import MatchResult, SessionLocal
+        with SessionLocal() as s:
+            last = (s.query(MatchResult)
+                    .filter((MatchResult.home == team) |
+                            (MatchResult.away == team))
+                    .order_by(MatchResult.finished_at.desc())
+                    .first())
+        if last is not None and (last.status_short or "") in ("AET", "PEN") \
+                and stats.get("fatigue", 0) < 0.30:
+            stats["fatigue"] = 0.30
+    except Exception:
+        pass
+    return stats
