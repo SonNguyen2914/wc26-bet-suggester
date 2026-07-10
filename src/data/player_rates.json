@@ -11,97 +11,97 @@
     "attempts": 10,
     "on_target": 3,
     "goals": 3,
-    "share": 0.2425
+    "share": 0.23797
    },
    {
     "player": "Soufiane RAHIMI",
     "shirt": 9,
-    "matches": 5,
+    "matches": 6,
     "starts": 0,
     "attempts": 6,
     "on_target": 2,
     "goals": 2,
-    "share": 0.1575
+    "share": 0.15478
    },
    {
     "player": "Azzedine OUNAHI",
     "shirt": 8,
-    "matches": 5,
-    "starts": 4,
-    "attempts": 4,
-    "on_target": 2,
+    "matches": 6,
+    "starts": 5,
+    "attempts": 5,
+    "on_target": 3,
     "goals": 2,
-    "share": 0.145
+    "share": 0.14899
    },
    {
     "player": "Achraf HAKIMI",
     "shirt": 2,
-    "matches": 5,
-    "starts": 5,
-    "attempts": 13,
+    "matches": 6,
+    "starts": 6,
+    "attempts": 14,
     "on_target": 4,
     "goals": 1,
-    "share": 0.14125
-   },
-   {
-    "player": "Issa DIOP",
-    "shirt": 14,
-    "matches": 4,
-    "starts": 4,
-    "attempts": 1,
-    "on_target": 1,
-    "goals": 1,
-    "share": 0.06625
+    "share": 0.14116
    },
    {
     "player": "Gessime YASSINE",
     "shirt": 16,
-    "matches": 2,
+    "matches": 3,
     "starts": 0,
+    "attempts": 2,
+    "on_target": 1,
+    "goals": 1,
+    "share": 0.07159
+   },
+   {
+    "player": "Issa DIOP",
+    "shirt": 14,
+    "matches": 5,
+    "starts": 5,
     "attempts": 1,
     "on_target": 1,
     "goals": 1,
-    "share": 0.06625
-   },
-   {
-    "player": "Bilal EL KHANNOUSS",
-    "shirt": 23,
-    "matches": 5,
-    "starts": 5,
-    "attempts": 6,
-    "on_target": 3,
-    "goals": 0,
-    "share": 0.0375
+    "share": 0.0658
    },
    {
     "player": "Neil EL AYNAOUI",
     "shirt": 24,
-    "matches": 5,
-    "starts": 5,
-    "attempts": 6,
+    "matches": 6,
+    "starts": 6,
+    "attempts": 7,
     "on_target": 2,
     "goals": 0,
-    "share": 0.0375
+    "share": 0.04058
    },
    {
     "player": "Brahim DIAZ",
     "shirt": 10,
-    "matches": 5,
-    "starts": 5,
-    "attempts": 5,
+    "matches": 6,
+    "starts": 6,
+    "attempts": 6,
     "on_target": 0,
     "goals": 0,
-    "share": 0.03125
+    "share": 0.03478
+   },
+   {
+    "player": "Bilal EL KHANNOUSS",
+    "shirt": 23,
+    "matches": 6,
+    "starts": 6,
+    "attempts": 6,
+    "on_target": 3,
+    "goals": 0,
+    "share": 0.03478
    },
    {
     "player": "Ayyoub BOUADDI",
     "shirt": 6,
-    "matches": 4,
-    "starts": 4,
+    "matches": 5,
+    "starts": 5,
     "attempts": 3,
     "on_target": 0,
     "goals": 0,
-    "share": 0.01875
+    "share": 0.01739
    },
    {
     "player": "Ayoub EL KAABI",
@@ -111,17 +111,17 @@
     "attempts": 3,
     "on_target": 2,
     "goals": 0,
-    "share": 0.01875
+    "share": 0.01739
    },
    {
     "player": "Chemsdine TALBI",
     "shirt": 7,
-    "matches": 4,
-    "starts": 0,
+    "matches": 5,
+    "starts": 1,
     "attempts": 2,
     "on_target": 0,
     "goals": 0,
-    "share": 0.0125
+    "share": 0.01159
    },
    {
     "player": "Ayoube AMAIMOUNI",
@@ -131,7 +131,7 @@
     "attempts": 2,
     "on_target": 1,
     "goals": 0,
-    "share": 0.0125
+    "share": 0.01159
    },
    {
     "player": "Chadi RIAD",
@@ -141,23 +141,23 @@
     "attempts": 1,
     "on_target": 0,
     "goals": 0,
-    "share": 0.00625
+    "share": 0.0058
    },
    {
     "player": "Anass SALAH EDDINE",
     "shirt": 26,
-    "matches": 3,
-    "starts": 1,
+    "matches": 4,
+    "starts": 2,
     "attempts": 1,
     "on_target": 0,
     "goals": 0,
-    "share": 0.00625
+    "share": 0.0058
    },
    {
     "player": "Yassine BOUNOU",
     "shirt": 1,
-    "matches": 5,
-    "starts": 5,
+    "matches": 6,
+    "starts": 6,
     "attempts": 0,
     "on_target": 0,
     "goals": 0,
@@ -166,8 +166,8 @@
    {
     "player": "Noussair MAZRAOUI",
     "shirt": 3,
-    "matches": 5,
-    "starts": 4,
+    "matches": 6,
+    "starts": 5,
     "attempts": 0,
     "on_target": 0,
     "goals": 0,
@@ -186,7 +186,7 @@
    {
     "player": "Sofyan AMRABAT",
     "shirt": 4,
-    "matches": 2,
+    "matches": 3,
     "starts": 1,
     "attempts": 0,
     "on_target": 0,
@@ -206,6 +206,26 @@
    {
     "player": "Marwane SAADANE",
     "shirt": 5,
+    "matches": 1,
+    "starts": 0,
+    "attempts": 0,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.0
+   },
+   {
+    "player": "Zakaria EL OUAHDI",
+    "shirt": 13,
+    "matches": 1,
+    "starts": 0,
+    "attempts": 0,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.0
+   },
+   {
+    "player": "Amine SBAI",
+    "shirt": 17,
     "matches": 1,
     "starts": 0,
     "attempts": 0,
@@ -854,72 +874,82 @@
    {
     "player": "Kylian MBAPPE",
     "shirt": 10,
-    "matches": 5,
-    "starts": 5,
-    "attempts": 26,
-    "on_target": 17,
-    "goals": 7,
-    "share": 0.41817
+    "matches": 6,
+    "starts": 6,
+    "attempts": 30,
+    "on_target": 19,
+    "goals": 8,
+    "share": 0.40909
    },
    {
     "player": "Ousmane DEMBELE",
     "shirt": 7,
-    "matches": 5,
-    "starts": 5,
-    "attempts": 12,
-    "on_target": 5,
-    "goals": 4,
-    "share": 0.22597
+    "matches": 6,
+    "starts": 6,
+    "attempts": 16,
+    "on_target": 6,
+    "goals": 5,
+    "share": 0.24568
    },
    {
     "player": "Bradley BARCOLA",
     "shirt": 12,
-    "matches": 5,
+    "matches": 6,
     "starts": 3,
-    "attempts": 6,
-    "on_target": 3,
+    "attempts": 7,
+    "on_target": 4,
     "goals": 2,
-    "share": 0.11299
+    "share": 0.10045
    },
    {
     "player": "Desire DOUE",
     "shirt": 20,
-    "matches": 5,
-    "starts": 1,
-    "attempts": 8,
-    "on_target": 3,
+    "matches": 6,
+    "starts": 2,
+    "attempts": 11,
+    "on_target": 5,
     "goals": 1,
-    "share": 0.07922
+    "share": 0.0775
    },
    {
     "player": "Michael OLISE",
     "shirt": 11,
-    "matches": 5,
-    "starts": 5,
-    "attempts": 14,
+    "matches": 6,
+    "starts": 6,
+    "attempts": 17,
     "on_target": 5,
     "goals": 0,
-    "share": 0.06364
+    "share": 0.06182
    },
    {
     "player": "Adrien RABIOT",
     "shirt": 14,
-    "matches": 4,
-    "starts": 4,
-    "attempts": 6,
+    "matches": 5,
+    "starts": 5,
+    "attempts": 7,
     "on_target": 1,
     "goals": 0,
-    "share": 0.02727
+    "share": 0.02545
    },
    {
     "player": "Manu KONE",
     "shirt": 6,
-    "matches": 3,
-    "starts": 3,
-    "attempts": 5,
+    "matches": 4,
+    "starts": 4,
+    "attempts": 6,
     "on_target": 2,
     "goals": 0,
-    "share": 0.02273
+    "share": 0.02182
+   },
+   {
+    "player": "Dayot UPAMECANO",
+    "shirt": 4,
+    "matches": 6,
+    "starts": 6,
+    "attempts": 3,
+    "on_target": 1,
+    "goals": 0,
+    "share": 0.01091
    },
    {
     "player": "Theo HERNANDEZ",
@@ -929,17 +959,27 @@
     "attempts": 3,
     "on_target": 0,
     "goals": 0,
-    "share": 0.01364
+    "share": 0.01091
    },
    {
-    "player": "Dayot UPAMECANO",
-    "shirt": 4,
-    "matches": 5,
-    "starts": 5,
+    "player": "Jean-Philippe MATETA",
+    "shirt": 22,
+    "matches": 3,
+    "starts": 0,
+    "attempts": 3,
+    "on_target": 1,
+    "goals": 0,
+    "share": 0.01091
+   },
+   {
+    "player": "Jules KOUNDE",
+    "shirt": 5,
+    "matches": 6,
+    "starts": 6,
     "attempts": 2,
     "on_target": 0,
     "goals": 0,
-    "share": 0.00909
+    "share": 0.00727
    },
    {
     "player": "Aurelien TCHOUAMENI",
@@ -949,53 +989,33 @@
     "attempts": 2,
     "on_target": 0,
     "goals": 0,
-    "share": 0.00909
-   },
-   {
-    "player": "Jules KOUNDE",
-    "shirt": 5,
-    "matches": 5,
-    "starts": 5,
-    "attempts": 1,
-    "on_target": 0,
-    "goals": 0,
-    "share": 0.00455
-   },
-   {
-    "player": "William SALIBA",
-    "shirt": 17,
-    "matches": 4,
-    "starts": 4,
-    "attempts": 1,
-    "on_target": 0,
-    "goals": 0,
-    "share": 0.00455
+    "share": 0.00727
    },
    {
     "player": "Lucas DIGNE",
     "shirt": 3,
-    "matches": 3,
-    "starts": 3,
-    "attempts": 1,
+    "matches": 4,
+    "starts": 4,
+    "attempts": 2,
     "on_target": 1,
     "goals": 0,
-    "share": 0.00455
+    "share": 0.00727
    },
    {
-    "player": "Jean-Philippe MATETA",
-    "shirt": 22,
-    "matches": 2,
-    "starts": 0,
+    "player": "William SALIBA",
+    "shirt": 17,
+    "matches": 5,
+    "starts": 5,
     "attempts": 1,
     "on_target": 0,
     "goals": 0,
-    "share": 0.00455
+    "share": 0.00364
    },
    {
     "player": "Mike MAIGNAN",
     "shirt": 16,
-    "matches": 5,
-    "starts": 5,
+    "matches": 6,
+    "starts": 6,
     "attempts": 0,
     "on_target": 0,
     "goals": 0,
@@ -1014,7 +1034,7 @@
    {
     "player": "Malo GUSTO",
     "shirt": 2,
-    "matches": 3,
+    "matches": 4,
     "starts": 0,
     "attempts": 0,
     "on_target": 0,
@@ -1056,6 +1076,16 @@
     "shirt": 26,
     "matches": 1,
     "starts": 1,
+    "attempts": 0,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.0
+   },
+   {
+    "player": "Warren ZAIRE-EMERY",
+    "shirt": 18,
+    "matches": 1,
+    "starts": 0,
     "attempts": 0,
     "on_target": 0,
     "goals": 0,

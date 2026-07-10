@@ -474,11 +474,14 @@ def main() -> int:
                 per_team[t] += 1
     print("[manifest] per-team coverage:",
           " ".join(f"{t}={n}" for t, n in sorted(per_team.items())))
+    # Refuse only when a team has FEWER than the baseline (a missed match —
+    # the thing this gate exists for). More is normal: knockout PMSRs
+    # append to the manifest round by round as they are played.
     incomplete = [t for t, n in per_team.items()
-                  if n != manifest["expected_per_team"]]
+                  if n < manifest["expected_per_team"]]
     if incomplete:
         print(f"[manifest] INCOMPLETE teams: {incomplete} — refusing to "
-              f"proceed (every remaining team must have "
+              f"proceed (every remaining team must have at least "
               f"{manifest['expected_per_team']} matches)", file=sys.stderr)
         return 2
 
