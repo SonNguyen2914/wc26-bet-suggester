@@ -857,3 +857,46 @@ class TestRestoreMissingResults:
         out2 = ls.restore_missing_results()
         assert "MAR_FRA" not in captured
         assert out2["restored"] == 0 or "MAR_FRA" not in captured
+
+
+class TestNoFtCardFlood:
+    def test_restored_old_result_never_rides_the_ft_window(self, monkeypatch):
+        """Regression: a wipe+boot restore stamped finished_at=now on nine
+        old results and the landing page flooded with 'just finished' FT
+        cards. Restored results carry their real finish time AND the
+        scoreboard refuses FT cards for matches that kicked off long ago."""
+        import src.live_feed as lf
+        import src.live_state as ls
+        import src.research as research
+        from src.db import MatchResult, SessionLocal, init_db
+        init_db()
+        with SessionLocal() as s:
+            s.query(MatchResult).filter(
+                MatchResult.match_id == "CAN_MAR").delete()
+            s.commit()
+
+        def fake_state(home, away, want_finished=False, on_date=None):
+            if {home, away} == {"Canada", "Morocco"} and want_finished:
+                return {"home_name": "Canada", "away_name": "Morocco",
+                        "home_goals": 0, "away_goals": 3,
+                        "status_short": "FT", "is_live": False,
+                        "is_finished": True, "red_home": 0, "red_away": 0,
+                        "minutes_elapsed": 90.0, "goals_list": []}
+            return None
+
+        monkeypatch.setattr(lf, "_espn_state_for", fake_state)
+        monkeypatch.setattr(research, "capture_closing_snapshot",
+                            lambda m: {"status": "exists"})
+        ls.restore_missing_results()
+        with SessionLocal() as s:
+            row = s.get(MatchResult, "CAN_MAR")
+        assert row is not None
+        # finished_at ~ July 4 kickoff + 2h30, nowhere near "now"
+        assert ls._aware(row.finished_at) < ls.utcnow() - ls.FT_WINDOW
+        # and even with a fresh finished_at, the kickoff guard blocks it
+        with SessionLocal() as s:
+            row = s.get(MatchResult, "CAN_MAR")
+            row.finished_at = ls.utcnow()
+            s.commit()
+        entries = ls.scoreboard_entries()
+        assert all(e["match_id"] != "CAN_MAR" for e in entries)

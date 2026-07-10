@@ -148,6 +148,14 @@ def restore_missing_results() -> dict:
         with SessionLocal() as s:
             _freeze(s, m.match_id, state)
             s.commit()
+            # Stamp the REAL finish time (~kickoff + 2h30), not "now": a
+            # freshly-restored old result must not ride the scoreboard's
+            # recently-finished grace window (nine FT cards flooded the
+            # landing page after a wipe+boot).
+            row = s.get(MatchResult, m.match_id)
+            if row is not None:
+                row.finished_at = m.kickoff + timedelta(hours=2, minutes=30)
+                s.commit()
         restored += 1
         print(f"[live-state] restored result {m.match_id} from dated ESPN")
         from src import research
@@ -248,10 +256,17 @@ def scoreboard_entries() -> list[dict]:
                 "is_finished": False,
                 "_sort": (0, -(snap.minutes_elapsed or 0)),
             })
-        # recently-finished -> FT cards within the window
+        # recently-finished -> FT cards within the window. Guarded by the
+        # match's KICKOFF age too: finished_at is write-time metadata and a
+        # restore/backfill can stamp it "now" — an old result must never
+        # resurface as a just-finished card regardless of bookkeeping.
         cutoff = now - FT_WINDOW
+        recent_kick = {m.match_id for m in load_schedule()
+                       if now - m.kickoff <= timedelta(hours=8)}
         for res in (s.query(MatchResult)
                     .filter(MatchResult.finished_at >= cutoff).all()):
+            if res.match_id not in recent_kick:
+                continue
             out.append({
                 "match_id": res.match_id,
                 "home": res.home, "away": res.away,
