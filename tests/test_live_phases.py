@@ -1060,7 +1060,9 @@ class TestFirstGoalSettledFilter:
         with_goal = eng.price_live(m, 1, 1, 50, first_goal_scored=True,
                                    markets=fake)
         keys = {r["outcome_key"] for r in with_goal["markets"]}
-        assert keys == {"home_win"}          # settled race dropped
+        assert "home_win" in keys            # real book still priced
+        # settled race dropped from BOTH open-market and model-only rows
+        assert not keys & {"home_first_goal", "away_first_goal", "no_goal"}
         goalless = eng.price_live(m, 0, 0, 20, first_goal_scored=False,
                                   markets=fake)
         keys0 = {r["outcome_key"] for r in goalless["markets"]}
@@ -1084,3 +1086,43 @@ class TestSimMinutesClamp:
         assert sim_minutes(94.0, "2H") == 88.0
         assert sim_minutes(124.0, "ET") == 118.0
         assert sim_minutes(100.0, "P") == 120.0
+
+
+class TestModelFirstLiveBoard:
+    def test_model_only_rows_fill_the_closed_books(self):
+        """In play Kalshi closes settled/impossible books, leaving a thin
+        open list — the live read must still show the full model board,
+        with empty market columns where no book is open."""
+        from src.schedule_data import get_match
+        from src.suggester import SuggesterEngine
+        eng = SuggesterEngine()
+        m = get_match("ESP_BEL")
+        fake = [{"market_id": "T-GAME", "title": "Spain to win",
+                 "outcome_key": "home_win", "yes_price": 0.5,
+                 "decimal_odds": 2.0, "volume_24h": 0.0}]
+        out = eng.price_live(m, 1, 1, 76, markets=fake,
+                             first_goal_scored=True)
+        rows = {r["outcome_key"]: r for r in out["markets"]}
+        # totals ladder, margins, winner trio, advance + method all present
+        for k in ("over_2_5", "over_4_5", "btts", "home_margin_2",
+                  "away_margin_3", "draw", "away_win",
+                  "home_advance", "home_win_pens"):
+            assert k in rows, k
+        # exact scores from the remaining-sim distribution appear too
+        assert any(k.startswith("score_") for k in rows)
+        # model-only rows carry no market columns; the real book does
+        assert rows["over_4_5"]["market_probability"] is None
+        assert rows["over_4_5"].get("model_only") is True
+        assert rows["home_win"]["market_probability"] == 0.5
+
+    def test_et_continuation_still_restricts_model_rows(self):
+        from src.schedule_data import get_match
+        from src.suggester import SuggesterEngine
+        eng = SuggesterEngine()
+        m = get_match("ESP_BEL")
+        out = eng.price_live(m, 1, 1, 100, phase="et", markets=[],
+                             first_goal_scored=True)
+        keys = {r["outcome_key"] for r in out["markets"]}
+        allowed = {"home_advance", "away_advance", "home_win_et",
+                   "away_win_et", "home_win_pens", "away_win_pens"}
+        assert keys and keys <= allowed

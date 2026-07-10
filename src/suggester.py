@@ -6,6 +6,7 @@ filters by the configured thresholds, and produces ranked TAKE/SKIP calls.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import asdict, dataclass
 
 import config
@@ -118,6 +119,84 @@ class SuggesterEngine:
                 # informational only — NOT a betting signal in-play
                 "difference": round(model_p - implied_p, 4),
                 "volume_24h": mkt["volume_24h"],
+            })
+
+        # ---- model-first completeness -------------------------------------
+        # In play, Kalshi settles and CLOSES every book the state has already
+        # decided (Over 1.5 at 1-1, BTTS, impossible exact scores...), so the
+        # open-market list alone shows a thin board. The live read is a MODEL
+        # view: every key the remaining-match simulation prices gets a row —
+        # the market columns simply stay empty where no open book exists.
+        covered = {r["outcome_key"] for r in rows}
+        home, away = match.home, match.away
+
+        def _title(key: str) -> str:
+            fixed = {
+                "home_win": f"{home} to win (90 min)",
+                "draw": "Draw after 90 min",
+                "away_win": f"{away} to win (90 min)",
+                "home_advance": f"{home} to advance",
+                "away_advance": f"{away} to advance",
+                "home_win_et": f"{home} to win in extra time",
+                "away_win_et": f"{away} to win in extra time",
+                "home_win_pens": f"{home} to win on penalties",
+                "away_win_pens": f"{away} to win on penalties",
+                "btts": "Both teams to score",
+                "no_goal": "No goal in the match",
+                "home_first_goal": f"{home} to score first",
+                "away_first_goal": f"{away} to score first",
+            }
+            if key in fixed:
+                return fixed[key]
+            m = re.match(r"over_(\d)_5$", key)
+            if m:
+                return f"Over {m.group(1)}.5 total goals"
+            m = re.match(r"(home|away)_margin_(\d)$", key)
+            if m:
+                side = home if m.group(1) == "home" else away
+                return f"{side} to win by {m.group(2)}+ goals"
+            m = re.match(r"score_(\d+)_(\d+)$", key)
+            if m:
+                h, a = m.group(1), m.group(2)
+                return (f"Exact score: {h}-{a} draw" if h == a
+                        else f"Exact score: {home} {h}-{a} {away}"
+                        if int(h) > int(a)
+                        else f"Exact score: {away} {a}-{h} {home}")
+            return key
+
+        model_keys: list[str] = []
+        if not in_continuation:
+            model_keys += ["home_win", "draw", "away_win"]
+            model_keys += [f"over_{n}_5" for n in range(6)]
+            model_keys += ["btts",
+                           "home_margin_2", "home_margin_3",
+                           "away_margin_2", "away_margin_3"]
+            if not first_goal_scored:
+                model_keys += ["home_first_goal", "away_first_goal", "no_goal"]
+            model_keys += [f"score_{s['score'].replace('-', '_')}"
+                           for s in sim.get("scorelines", [])[:12]]
+        if match.stage == "knockout":
+            model_keys += ["home_advance", "away_advance"]
+            if sim.get("advance") and sim["advance"].get("home_win_et") is not None:
+                model_keys += ["home_win_et", "away_win_et",
+                               "home_win_pens", "away_win_pens"]
+        for key in model_keys:
+            if key in covered:
+                continue
+            p = self.simulator.prob_for_outcome_key(sim, key)
+            if p is None:
+                continue
+            covered.add(key)
+            rows.append({
+                "market_id": f"model:{key}",
+                "market_title": _title(key),
+                "outcome_key": key,
+                "kalshi_odds": None,
+                "market_probability": None,
+                "live_model_probability": round(p, 4),
+                "difference": None,
+                "volume_24h": 0.0,
+                "model_only": True,
             })
 
         rows.sort(key=lambda r: r["live_model_probability"], reverse=True)
