@@ -1065,3 +1065,18 @@ class TestFirstGoalSettledFilter:
                                   markets=fake)
         keys0 = {r["outcome_key"] for r in goalless["markets"]}
         assert "home_first_goal" in keys0    # still a live race at 0-0
+
+
+class TestSimMinutesClamp:
+    def test_period_stoppage_never_leaks_into_the_next_period(self):
+        """Regression: ESP-BEL at 45'+5' fed the sim 50 minutes 'played',
+        silently eating five minutes of the second half; 2H stoppage would
+        likewise masquerade as extra time."""
+        from src.live_auto import sim_minutes
+        assert sim_minutes(50.0, "1H") == 45.0     # 45'+5' -> HT point
+        assert sim_minutes(48.0, "HT") == 45.0
+        assert sim_minutes(94.0, "2H") == 90.0     # 90'+4' -> end of 90
+        assert sim_minutes(50.0, "2H") == 50.0     # genuine 2H time intact
+        assert sim_minutes(124.0, "ET") == 120.0
+        assert sim_minutes(100.0, "P") == 120.0
+        assert sim_minutes(30.0, "1H") == 30.0     # normal time untouched

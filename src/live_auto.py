@@ -81,6 +81,23 @@ def suggest_levers(xg_home: float | None, xg_away: float | None,
     }
 
 
+def sim_minutes(minutes: float, status_short: str) -> float:
+    """The simulation wants MATCH PROGRESS, not the wall clock. 45'+5' of
+    first-half stoppage is still only 45 of the 90 minutes played — feeding
+    it 50 silently eats five minutes of the second half (and 90'+4' of 2H
+    stoppage would wrongly read as extra time). Clamp per period."""
+    s2 = (status_short or "").upper()
+    if s2 in ("1H", "HT"):
+        return min(minutes, 45.0)
+    if s2 == "2H":
+        return min(max(minutes, 45.0), 90.0)
+    if s2 in ("ET", "BT"):
+        return min(max(minutes, 90.0), 120.0)
+    if s2 == "P":
+        return 120.0
+    return minutes
+
+
 def _phase_from_status(short: str) -> str:
     if short in ("ET", "BT"):
         return "et"
@@ -121,8 +138,9 @@ def live_auto(match, engine, prematch_xg: dict | None) -> dict:
         markets = engine.kalshi.get_markets_for_match(match)
         _markets_cache[match.match_id] = (time.time(), markets)
 
+    eff_minutes = sim_minutes(state["minutes"], state["status_short"])
     priced = engine.price_live(
-        match, state["home_goals"], state["away_goals"], state["minutes"],
+        match, state["home_goals"], state["away_goals"], eff_minutes,
         red_home=state["red_home"], red_away=state["red_away"],
         attack_home_mult=levers["home"], attack_away_mult=levers["away"],
         phase=_phase_from_status(state["status_short"]),

@@ -293,12 +293,17 @@ def fetch_live_state(match_id: str):
                 "budget": budget_status(),
                 "reason": ("feed not configured" if not config.API_FOOTBALL_KEY
                            else "no live match found or feed unavailable")}
+    from src.live_auto import sim_minutes
     return {
         "available": True,
         "match_id": match_id,
         "current_home": state["home_goals"],
         "current_away": state["away_goals"],
-        "minutes_elapsed": state["minutes_elapsed"],
+        # match PROGRESS, not the wall clock: 1H stoppage clamps to 45'
+        # so a manual simulation doesn't eat the second half's budget
+        "minutes_elapsed": sim_minutes(
+            float(state["minutes_elapsed"] or 0.0),
+            state.get("status_short") or ""),
         "red_home": state["red_home"],
         "red_away": state["red_away"],
         "status_short": state["status_short"],
