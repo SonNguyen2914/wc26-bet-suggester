@@ -118,6 +118,12 @@ def load_schedule() -> list[Match]:
     global _SCHEDULE
     if _SCHEDULE is None:
         _SCHEDULE = [
+            # Saturday July 4 (added retroactively so the bracket's R16 tier
+            # is complete — results/settlements restore from ESPN + Kalshi)
+            Match("CAN_MAR", "Canada", "Morocco", "R16", _utc(2026, 7, 4, 17),
+                  stage="knockout", venue="NRG Stadium, Houston"),
+            Match("PAR_FRA", "Paraguay", "France", "R16", _utc(2026, 7, 4, 21),
+                  stage="knockout", venue="Lincoln Financial Field, Philadelphia"),
             # Sunday July 5
             Match("BRA_NOR", "Brazil", "Norway", "R16", _utc(2026, 7, 5, 20),
                   stage="knockout", venue="MetLife Stadium, NJ"),

@@ -244,12 +244,19 @@ def bracket_status() -> dict:
     """Full knockout bracket for the UI: quarterfinals, semifinals, 3rd-place,
     and final, each with model win probabilities (resolved-unfinished) or the
     final score (finished). Read-only, no feed calls."""
-    by_stage = {"QF": [], "SF": [], "3P": [], "F": []}
+    by_stage = {"R16": [], "QF": [], "SF": [], "3P": [], "F": []}
     for m in load_schedule():
         if m.group in by_stage:
             by_stage[m.group].append(_bracket_match(m))
     for k in by_stage:
         by_stage[k].sort(key=lambda x: x["kickoff"])
+    # R16 ordered by the QF each pair feeds (not kickoff), so the UI's tier
+    # lines up feeders under their quarterfinal: QF1=MAR/FRA, QF2=ESP/BEL,
+    # QF3=NOR/ENG, QF4=ARG/SUI.
+    _r16_order = ["CAN_MAR", "PAR_FRA", "POR_ESP", "USA_BEL",
+                  "BRA_NOR", "MEX_ENG", "ARG_EGY", "SUI_COL"]
+    by_stage["R16"].sort(key=lambda x: (
+        _r16_order.index(x["match_id"]) if x["match_id"] in _r16_order else 99))
     # Champion: the winner of the FINAL, once it's finished.
     champion = None
     for fm in by_stage["F"]:
@@ -268,6 +275,7 @@ def bracket_status() -> dict:
             champion_forecast = None
     return {
         "champion_forecast": champion_forecast,
+        "round_of_16": by_stage["R16"],
         "quarterfinals": by_stage["QF"],
         "semifinals": by_stage["SF"],
         "third_place": by_stage["3P"],
