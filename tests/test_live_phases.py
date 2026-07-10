@@ -966,3 +966,34 @@ class TestSettledReviewPage:
         assert r.status_code == 200
         d = r.json()
         assert d["markets"] == [] and d["summary"]["full_time"]
+
+
+class TestLiveMatchStats:
+    def test_rows_oriented_by_name_and_pct_formatted(self, monkeypatch):
+        import src.live_feed as lf
+
+        class _Resp:
+            status_code = 200
+            def raise_for_status(self): pass
+            def json(self):
+                return {"boxscore": {"teams": [
+                    {"team": {"displayName": "Belgium"},
+                     "statistics": [
+                         {"name": "possessionPct", "displayValue": "34"},
+                         {"name": "passPct", "displayValue": "0.8"}]},
+                    {"team": {"displayName": "Spain"},
+                     "statistics": [
+                         {"name": "possessionPct", "displayValue": "66"},
+                         {"name": "passPct", "displayValue": "0.9"}]},
+                ]}}
+
+        lf._cache.pop("__stats__" + lf._norm("Spain") + "|" + lf._norm("Belgium"), None)
+        monkeypatch.setattr(lf, "_espn_event_id", lambda h, a, on_date=None: "760511")
+        monkeypatch.setattr(lf.requests, "get", lambda *a, **k: _Resp())
+        out = lf.espn_match_stats("Spain", "Belgium")
+        assert out["available"]
+        rows = {r["key"]: r for r in out["rows"]}
+        # ESPN listed Belgium first — orientation must follow NAMES
+        assert rows["possessionPct"]["home"] == "66"
+        assert rows["possessionPct"]["away"] == "34"
+        assert rows["passPct"]["home"] == "90"   # 0.9 -> 90%

@@ -359,6 +359,19 @@ def team_info(match_id: str):
     }
 
 
+@app.get("/api/live-stats/{match_id}")
+def live_match_stats(match_id: str):
+    """Broadcast-style team stat rows (possession, shots, corners...) for a
+    live or just-finished match, from ESPN's keyless boxscore. Cached 30s
+    server-side; no feed budget."""
+    m = get_match(match_id)
+    if not m:
+        raise HTTPException(404, f"Unknown match_id '{match_id}'")
+    from src.live_feed import espn_match_stats
+    return {"match_id": match_id, "home_team": m.home, "away_team": m.away,
+            **espn_match_stats(m.home, m.away)}
+
+
 @app.get("/api/team-news/{match_id}")
 def team_news(match_id: str):
     """Matchday lineups (FACTS: starters / bench), from ESPN's keyless

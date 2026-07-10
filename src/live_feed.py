@@ -491,3 +491,70 @@ def espn_lineups(home: str, away: str) -> dict:
         out = {"available": False, "reason": f"lineup fetch failed: {exc}"}
     _cache[key] = (time.time(), out)
     return out
+
+
+# --- live team stats (ESPN boxscore, keyless) ------------------------------
+# The stat card a broadcast shows: possession, shots, corners, passes...
+# Whitelisted + ordered; oriented by team NAME (never ESPN's home/away).
+_STAT_ROWS = [
+    ("possessionPct", "Possession %"),
+    ("totalShots", "Shots"),
+    ("shotsOnTarget", "Shots on goal"),
+    ("wonCorners", "Corner kicks"),
+    ("totalPasses", "Total passes"),
+    ("passPct", "Passing accuracy %"),
+    ("saves", "Saves"),
+    ("foulsCommitted", "Fouls"),
+    ("offsides", "Offsides"),
+    ("yellowCards", "Yellow cards"),
+    ("redCards", "Red cards"),
+]
+
+
+def _fmt_stat(name: str, v: str) -> str:
+    if name in ("passPct", "shotPct") and v not in ("", None):
+        try:
+            f = float(v)
+            return str(int(round(f * 100))) if f <= 1 else str(int(round(f)))
+        except ValueError:
+            return v
+    return v
+
+
+def espn_match_stats(home: str, away: str) -> dict:
+    """Live team-stat rows for an in-progress (or finished) fixture from
+    ESPN's boxscore. {available: False} until ESPN posts stats; cached
+    briefly; graceful on any failure."""
+    key = f"__stats__{_norm(home)}|{_norm(away)}"
+    hit = _cache.get(key)
+    if hit and (time.time() - hit[0]) < 30:
+        return hit[1]
+    out = {"available": False, "rows": []}
+    try:
+        ev = _espn_event_id(home, away)
+        if ev:
+            r = requests.get(ESPN_SUMMARY, params={"event": ev}, timeout=8,
+                             headers={"User-Agent": "wc26-suggester/0.3"})
+            r.raise_for_status()
+            teams = (r.json().get("boxscore") or {}).get("teams") or []
+            stats: dict[str, dict] = {}
+            for t in teams:
+                nm = _norm((t.get("team") or {}).get("displayName") or "")
+                stats[nm] = {s.get("name"): s.get("displayValue")
+                             for s in t.get("statistics", [])}
+            hs, as_ = stats.get(_norm(home)), stats.get(_norm(away))
+            if hs and as_:
+                rows = []
+                for name, label in _STAT_ROWS:
+                    if name in hs or name in as_:
+                        rows.append({
+                            "key": name, "label": label,
+                            "home": _fmt_stat(name, hs.get(name, "0")),
+                            "away": _fmt_stat(name, as_.get(name, "0")),
+                        })
+                if rows:
+                    out = {"available": True, "rows": rows}
+    except Exception as exc:
+        print(f"[live_feed] espn match stats failed: {exc}")
+    _cache[key] = (time.time(), out)
+    return out
