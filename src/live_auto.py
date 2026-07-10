@@ -85,14 +85,30 @@ def sim_minutes(minutes: float, status_short: str) -> float:
     """The simulation wants MATCH PROGRESS, not the wall clock. 45'+5' of
     first-half stoppage is still only 45 of the 90 minutes played — feeding
     it 50 silently eats five minutes of the second half (and 90'+4' of 2H
-    stoppage would wrongly read as extra time). Clamp per period."""
+    stoppage would wrongly read as extra time). Clamp per period.
+
+    Stoppage endings: no API carries the fourth official's ANNOUNCED added
+    time (feeds expose only the elapsed '+x'), so the end of a period can't
+    be priced off a board number. Instead the feed itself is the evidence:
+    while the status still says the period is RUNNING, a small remainder
+    must stay on the clock — at 90'+4' the match is observably not over,
+    and pricing it as finished is wrong (goals at 90+5 are real). The live
+    tick refreshes that observation every 15s, so the floor self-expires
+    the moment the feed flips to HT/FT."""
     s2 = (status_short or "").upper()
-    if s2 in ("1H", "HT"):
-        return min(minutes, 45.0)
+    if s2 == "1H":
+        # deep in 1H stoppage: hold a sliver of the half open while it runs
+        return min(minutes, 44.0) if minutes >= 45.0 else minutes
+    if s2 == "HT":
+        return 45.0                      # break: exactly half the match left
     if s2 == "2H":
-        return min(max(minutes, 45.0), 90.0)
+        if minutes >= 90.0:
+            return 88.0                  # still running -> ~2 min floor
+        return max(minutes, 45.0)
     if s2 in ("ET", "BT"):
-        return min(max(minutes, 90.0), 120.0)
+        if minutes >= 120.0:
+            return 118.0
+        return max(minutes, 90.0)
     if s2 == "P":
         return 120.0
     return minutes

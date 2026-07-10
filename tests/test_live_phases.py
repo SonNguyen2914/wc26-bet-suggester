@@ -1073,10 +1073,14 @@ class TestSimMinutesClamp:
         silently eating five minutes of the second half; 2H stoppage would
         likewise masquerade as extra time."""
         from src.live_auto import sim_minutes
-        assert sim_minutes(50.0, "1H") == 45.0     # 45'+5' -> HT point
-        assert sim_minutes(48.0, "HT") == 45.0
-        assert sim_minutes(94.0, "2H") == 90.0     # 90'+4' -> end of 90
+        # stoppage caps: progress never leaks into the next period...
+        assert sim_minutes(50.0, "1H") == 44.0     # 45'+5' -> half still open
+        assert sim_minutes(48.0, "HT") == 45.0     # break: half the match left
         assert sim_minutes(50.0, "2H") == 50.0     # genuine 2H time intact
-        assert sim_minutes(124.0, "ET") == 120.0
-        assert sim_minutes(100.0, "P") == 120.0
         assert sim_minutes(30.0, "1H") == 30.0     # normal time untouched
+        # ...but a RUNNING period keeps a small remainder on the clock:
+        # no API announces added time, yet at 90'+4' the match observably
+        # isn't over — pricing it as finished undervalues late goals.
+        assert sim_minutes(94.0, "2H") == 88.0
+        assert sim_minutes(124.0, "ET") == 118.0
+        assert sim_minutes(100.0, "P") == 120.0
