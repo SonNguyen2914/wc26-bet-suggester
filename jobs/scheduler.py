@@ -163,6 +163,11 @@ def start_scheduler() -> BackgroundScheduler:
     scheduler.add_job(live_tick, "interval",
                       seconds=config.LIVE_TICK_SECONDS, id="live_tick",
                       coalesce=True, max_instances=1)
+    # One-shot at boot: re-freeze any finished match a DB wipe erased
+    # (ephemeral SQLite until a Railway volume/Postgres exists) and
+    # re-capture its closing snapshot. Idempotent, cheap when healthy.
+    scheduler.add_job(live_state.restore_missing_results, "date",
+                      id="restore_results")
     # Bracket resolution: low frequency (the bracket changes at most a handful
     # of times all tournament) and self-skipping once fully known, so it's
     # nearly free. Interval, not cron, so it also runs shortly after boot.

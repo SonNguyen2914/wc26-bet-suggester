@@ -312,14 +312,19 @@ def _espn_minute(clock: str) -> float | None:
     return float(m.group(1)) + (float(m.group(2)) if m.group(2) else 0.0)
 
 
-def _espn_states() -> list[dict]:
-    """All of today's WC fixtures from ESPN, parsed to our state shape."""
-    hit = _cache.get(_ESPN_KEY)
-    if hit and (time.time() - hit[0]) < config.API_FOOTBALL_CACHE_SECONDS:
+def _espn_states(on_date: str | None = None) -> list[dict]:
+    """WC fixtures from ESPN parsed to our state shape — today's scoreboard
+    by default, or a specific day with on_date='YYYYMMDD' (ESPN buckets by
+    US-Eastern date). Dated boards change rarely, so they cache longer."""
+    key = _ESPN_KEY if on_date is None else f"__espnstates__{on_date}"
+    ttl = config.API_FOOTBALL_CACHE_SECONDS if on_date is None else 3600
+    hit = _cache.get(key)
+    if hit and (time.time() - hit[0]) < ttl:
         return hit[1]
     out: list[dict] = []
     try:
         r = requests.get(ESPN_URL, timeout=8,
+                         params={"dates": on_date} if on_date else None,
                          headers={"User-Agent": "wc26-suggester/0.3"})
         r.raise_for_status()
         for ev in r.json().get("events", []):
@@ -378,14 +383,14 @@ def _espn_states() -> list[dict]:
             })
     except Exception as exc:
         print(f"[live_feed] espn fallback failed: {exc}")
-    _cache[_ESPN_KEY] = (time.time(), out)
+    _cache[key] = (time.time(), out)
     return out
 
 
-def _espn_state_for(home: str, away: str,
-                    want_finished: bool = False) -> dict | None:
+def _espn_state_for(home: str, away: str, want_finished: bool = False,
+                    on_date: str | None = None) -> dict | None:
     want = {_norm(home), _norm(away)}
-    for stt in _espn_states():
+    for stt in _espn_states(on_date):
         names = {_norm(stt["home_name"]), _norm(stt["away_name"])}
         if want == names and (stt["is_live"] or stt["is_finished"]):
             if want_finished and not stt["is_finished"]:

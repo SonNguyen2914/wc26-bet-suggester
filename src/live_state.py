@@ -120,6 +120,41 @@ def poll_live_state() -> dict:
     return {"updated": updated, "frozen": frozen, "held": held}
 
 
+def restore_missing_results() -> dict:
+    """Self-heal after a DB wipe (the Railway container has no volume, so a
+    deploy resets SQLite): any resolved match whose live-poll window has
+    already closed but has no MatchResult is re-frozen from ESPN's dated
+    scoreboard, and its closing snapshot re-captured (both idempotent).
+    Runs once at scheduler boot; cheap when there is nothing to heal."""
+    restored = 0
+    now = utcnow()
+    for m in load_schedule():
+        if not m.fully_resolved or now < m.kickoff + LIVE_POLL_TRAIL:
+            continue          # upcoming/in-window matches use the normal path
+        with SessionLocal() as s:
+            if s.get(MatchResult, m.match_id):
+                continue
+        state = None
+        for delta in (0, -1, 1):   # ESPN buckets by US-Eastern date
+            day = (m.kickoff + timedelta(days=delta)).strftime("%Y%m%d")
+            state = live_feed._espn_state_for(
+                m.home, m.away, want_finished=True, on_date=day)
+            if state:
+                break
+        if not state:
+            print(f"[live-state] restore: no finished ESPN state for "
+                  f"{m.match_id}")
+            continue
+        with SessionLocal() as s:
+            _freeze(s, m.match_id, state)
+            s.commit()
+        restored += 1
+        print(f"[live-state] restored result {m.match_id} from dated ESPN")
+        from src import research
+        research.capture_closing_snapshot(m)
+    return {"restored": restored}
+
+
 def _aware(dt):
     """SQLite may hand back naive datetimes; treat them as UTC for math."""
     from datetime import timezone

@@ -815,3 +815,45 @@ class TestResearchSnapshots:
         assert d["closing"][0]["result"] == "no"
         assert TestClient(app).get("/api/research/NOPE").status_code == 404
         self._clear(m.match_id)
+
+
+class TestRestoreMissingResults:
+    """Self-heal for the ephemeral-DB wipe: finished matches re-freeze from
+    ESPN's dated scoreboard once their live window has closed."""
+
+    def test_restores_wiped_result_and_snapshots(self, monkeypatch):
+        import src.live_feed as lf
+        import src.live_state as ls
+        import src.research as research
+        from src.db import MatchResult, SessionLocal, init_db
+        init_db()
+        with SessionLocal() as s:      # simulate the wipe
+            s.query(MatchResult).filter(
+                MatchResult.match_id == "MAR_FRA").delete()
+            s.commit()
+
+        def fake_state(home, away, want_finished=False, on_date=None):
+            if {home, away} == {"Morocco", "France"} and want_finished:
+                return {"home_name": "Morocco", "away_name": "France",
+                        "home_goals": 0, "away_goals": 2,
+                        "status_short": "FT", "is_live": False,
+                        "is_finished": True, "red_home": 0, "red_away": 0,
+                        "minutes_elapsed": 90.0, "goals_list": []}
+            return None
+
+        captured = []
+        monkeypatch.setattr(lf, "_espn_state_for", fake_state)
+        monkeypatch.setattr(research, "capture_closing_snapshot",
+                            lambda m: captured.append(m.match_id) or
+                            {"status": "exists"})
+        out = ls.restore_missing_results()
+        assert out["restored"] >= 1
+        with SessionLocal() as s:
+            row = s.get(MatchResult, "MAR_FRA")
+        assert row is not None and row.home_goals == 0 and row.away_goals == 2
+        assert "MAR_FRA" in captured
+        # second run: nothing to heal
+        captured.clear()
+        out2 = ls.restore_missing_results()
+        assert "MAR_FRA" not in captured
+        assert out2["restored"] == 0 or "MAR_FRA" not in captured
