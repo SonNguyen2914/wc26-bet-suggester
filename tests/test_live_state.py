@@ -34,10 +34,21 @@ class TestETDisappearance:
         self._orig = ls.should_poll_live
         ls.should_poll_live = lambda m, n: m.match_id == "MAR_FRA"
         self._origfeed = lf.live_state_for
+        # The scoreboard refuses FT cards for matches that kicked off long
+        # ago (the restore-flood guard), so these tests must not depend on
+        # how far the real clock has drifted past MAR_FRA's actual kickoff:
+        # pretend it kicked off two hours ago.
+        from datetime import timedelta
+
+        from src.db import utcnow
+        self._m = sd.get_match("MAR_FRA")
+        self._orig_kick = self._m.kickoff
+        self._m.kickoff = utcnow() - timedelta(hours=2)
 
     def teardown_method(self):
         ls.should_poll_live = self._orig
         lf.live_state_for = self._origfeed
+        self._m.kickoff = self._orig_kick
 
     def _feed(self, state):
         lf.live_state_for = lambda h, a: (
