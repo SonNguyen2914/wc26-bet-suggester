@@ -165,6 +165,34 @@ def get_prediction(match_id: str, force_refresh: bool = False):
     if not match:
         raise HTTPException(404, f"Unknown match_id '{match_id}'")
 
+    # A finished match's page is a REVIEW page: never re-simulate (fresh
+    # runs see only settled books and would blank the table). Serve the
+    # T-10 LOCKED batch — the model's committed pre-kickoff numbers, kept
+    # for exactly this "was my model any good?" check — else the last
+    # cached batch. force_refresh is deliberately ignored here: a tapped
+    # Refresh button must never wipe the review view.
+    if live_state_svc.is_finished(match_id):
+        locked = latest_for_match(match_id, final_only=True)
+        if locked and locked["markets"]:
+            return {"freshness": "locked", **locked, "is_stale": False}
+        cached = latest_for_match(match_id)
+        if cached and cached["markets"]:
+            return {"freshness": "cached", **cached, "is_stale": False}
+        # nothing survived (pre-persistence wipe): summary from a cheap
+        # market-less sim, honestly empty markets, zero Kalshi calls
+        sim = engine.simulator.simulate(
+            get_team_stats(match.home), get_team_stats(match.away),
+            stage=match.stage)
+        return {"freshness": "cached", "match_id": match_id,
+                "generated_at": utcnow().isoformat(), "age_seconds": 0,
+                "is_stale": False, "source": "post_match", "is_final": False,
+                "xg": sim["xg"], "scorelines": sim["scorelines"],
+                "summary": {"full_time": sim["outcomes"],
+                            "advance": sim.get("advance"),
+                            "halves": sim.get("halves")},
+                "confidence": sim["confidence"], "markets": [],
+                "suggestions": []}
+
     if not force_refresh:
         cached = latest_for_match(match_id)
         if cached and not cached["is_stale"]:

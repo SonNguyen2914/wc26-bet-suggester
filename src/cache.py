@@ -15,12 +15,18 @@ import config
 from src.db import Prediction, SessionLocal, utcnow
 
 
-def latest_for_match(match_id: str) -> dict | None:
-    """Most recent prediction batch for a match, grouped by market."""
+def latest_for_match(match_id: str, final_only: bool = False) -> dict | None:
+    """Most recent prediction batch for a match, grouped by market.
+    final_only=True restricts to the T-10 LOCKED batch — the model's
+    committed pre-kickoff view, which is what a settled match's review
+    page shows."""
     with SessionLocal() as session:
+        where = [Prediction.match_id == match_id]
+        if final_only:
+            where.append(Prediction.is_final)
         newest = session.execute(
             select(Prediction)
-            .where(Prediction.match_id == match_id)
+            .where(*where)
             .order_by(Prediction.created_at.desc())
             .limit(1)
         ).scalar_one_or_none()
@@ -38,7 +44,7 @@ def latest_for_match(match_id: str) -> dict | None:
         batch_time = newest.created_at
         recent = session.execute(
             select(Prediction)
-            .where(Prediction.match_id == match_id,
+            .where(*where,
                    Prediction.created_at >= batch_time - timedelta(seconds=60))
             .order_by(Prediction.created_at.desc())
         ).scalars().all()

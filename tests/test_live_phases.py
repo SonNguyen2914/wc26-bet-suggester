@@ -900,3 +900,69 @@ class TestNoFtCardFlood:
             s.commit()
         entries = ls.scoreboard_entries()
         assert all(e["match_id"] != "CAN_MAR" for e in entries)
+
+
+class TestSettledReviewPage:
+    """A finished match's prediction endpoint is a REVIEW page: it serves
+    the T-10 locked batch (likelihood/odds/edge as committed pre-kickoff)
+    and never re-simulates into an empty table."""
+
+    def _seed(self, match_id, is_final, prob=0.61):
+        import json as _json
+
+        from src.db import Prediction, SessionLocal, utcnow
+        with SessionLocal() as s:
+            s.add(Prediction(
+                match_id=match_id, market_id=f"TK-{int(is_final)}",
+                market_title="France to win", outcome_key="away_win",
+                model_probability=prob, kalshi_odds=1.8,
+                implied_probability=0.55, edge=prob - 0.55,
+                expected_value=0.1, confidence=0.6, xg_home=1.0, xg_away=1.8,
+                scoreline_json="[]", summary_json=_json.dumps(
+                    {"full_time": {"home_win": 0.2, "draw": 0.2,
+                                   "away_win": 0.6}}),
+                source="final_lock" if is_final else "on_demand",
+                is_final=is_final, model_version="t"))
+            s.commit()
+
+    def _clean(self, match_id):
+        from src.db import MatchResult, Prediction, SessionLocal, init_db
+        init_db()
+        with SessionLocal() as s:
+            s.query(Prediction).filter(
+                Prediction.match_id == match_id).delete()
+            s.commit()
+
+    def test_locked_batch_served_and_no_fresh_run(self, monkeypatch):
+        from fastapi.testclient import TestClient
+        import api.main as main
+        from api.main import app
+        mid = "MAR_FRA"                    # has a MatchResult (finished)
+        self._clean(mid)
+        self._seed(mid, is_final=False, prob=0.55)
+        self._seed(mid, is_final=True, prob=0.61)
+
+        def boom(*a, **k):
+            raise AssertionError("finished match must not re-simulate")
+
+        monkeypatch.setattr(main.engine, "run_for_match", boom)
+        r = TestClient(app).get(f"/api/prediction/{mid}?force_refresh=true")
+        assert r.status_code == 200
+        d = r.json()
+        assert d["freshness"] == "locked" and d["is_stale"] is False
+        assert d["markets"][0]["model_probability"] == 0.61   # the LOCK
+        self._clean(mid)
+
+    def test_wiped_history_serves_honest_empty(self, monkeypatch):
+        from fastapi.testclient import TestClient
+        import api.main as main
+        from api.main import app
+        mid = "MAR_FRA"
+        self._clean(mid)
+        monkeypatch.setattr(main.engine, "run_for_match",
+                            lambda *a, **k: (_ for _ in ()).throw(
+                                AssertionError("no fresh run")))
+        r = TestClient(app).get(f"/api/prediction/{mid}")
+        assert r.status_code == 200
+        d = r.json()
+        assert d["markets"] == [] and d["summary"]["full_time"]
