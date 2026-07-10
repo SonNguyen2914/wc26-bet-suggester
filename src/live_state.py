@@ -73,6 +73,7 @@ def poll_live_state() -> dict:
                                 match really ended off-feed -> freeze it.
     """
     updated = frozen = held = 0
+    frozen_matches = []                 # capture closings AFTER the commit
     now = utcnow()
     with SessionLocal() as s:
         for m in load_schedule():
@@ -87,6 +88,7 @@ def poll_live_state() -> dict:
             if state and state.get("is_finished"):
                 _freeze(s, m.match_id, state)
                 frozen += 1
+                frozen_matches.append(m)
                 continue
 
             if state and state.get("is_live"):
@@ -102,9 +104,19 @@ def poll_live_state() -> dict:
                     # gone too long -> it ended off-feed; freeze from snapshot.
                     _freeze_from_snapshot(s, snap)
                     frozen += 1
+                    frozen_matches.append(m)
                 else:
                     held += 1  # within grace: keep showing last-known state
         s.commit()
+
+    # Market-side counterpart of the T-10 model lock: snapshot every priced
+    # market's closing/settlement state the moment the match freezes.
+    # capture_closing_snapshot never raises and is idempotent, so a feed
+    # hiccup here can't disturb the poll, and re-freezes can't duplicate.
+    for m in frozen_matches:
+        from src import research
+        research.capture_closing_snapshot(m)
+
     return {"updated": updated, "frozen": frozen, "held": held}
 
 

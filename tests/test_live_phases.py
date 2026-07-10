@@ -731,3 +731,87 @@ class TestZeroMarketPrediction:
         assert d["freshness"] == "fresh"
         ft = d["summary"]["full_time"]
         assert abs(ft["home_win"] + ft["draw"] + ft["away_win"] - 1) < 0.02
+
+
+class TestResearchSnapshots:
+    """Market-side counterpart of the T-10 model lock: the closing/settlement
+    snapshot captured when a match freezes (the MAR-FRA lesson)."""
+
+    def _clear(self, match_id):
+        from src.db import MarketClosing, SessionLocal, init_db
+        init_db()
+        with SessionLocal() as s:
+            s.query(MarketClosing).filter(
+                MarketClosing.match_id == match_id).delete()
+            s.commit()
+
+    def test_capture_is_one_shot_and_stores_raw(self, monkeypatch):
+        import src.research as research
+        from src.db import MarketClosing, SessionLocal
+        from src.schedule_data import get_match
+        m = get_match("MAR_FRA")
+        self._clear(m.match_id)
+        calls = {"n": 0}
+
+        def fake(sess, family, home, away):
+            calls["n"] += 1
+            if family != "KXWCGAME":
+                return []
+            return [("KXWCGAME-26JUL09FRAMAR",
+                     {"ticker": "KXWCGAME-26JUL09FRAMAR-FRA",
+                      "title": "France wins?", "status": "settled",
+                      "result": "yes", "yes_bid_dollars": "0.99",
+                      "yes_ask_dollars": "1.00", "volume": 12345})]
+
+        monkeypatch.setattr(research, "_fetch_family_markets", fake)
+        out = research.capture_closing_snapshot(m)
+        assert out == {"status": "captured", "markets": 1}
+        assert calls["n"] == len(research.FAMILIES)
+        # idempotent: second call touches nothing and fetches nothing
+        calls["n"] = 0
+        out2 = research.capture_closing_snapshot(m)
+        assert out2["status"] == "exists" and calls["n"] == 0
+        rows = research.closing_rows(m.match_id)
+        assert rows[0]["result"] == "yes" and rows[0]["status"] == "settled"
+        assert rows[0]["market_id"] == "KXWCGAME-26JUL09FRAMAR-FRA"
+        self._clear(m.match_id)
+
+    def test_capture_never_raises(self, monkeypatch):
+        import src.research as research
+        from src.schedule_data import get_match
+        m = get_match("MAR_FRA")
+        self._clear(m.match_id)
+
+        def boom(sess, family, home, away):
+            raise RuntimeError("kalshi down")
+
+        monkeypatch.setattr(research, "_fetch_family_markets", boom)
+        out = research.capture_closing_snapshot(m)   # must not raise
+        assert out["status"] == "empty"
+
+    def test_research_endpoint_shape(self, monkeypatch):
+        import json as _json
+
+        from fastapi.testclient import TestClient
+
+        import src.research as research
+        from api.main import app
+        from src.db import MarketClosing, SessionLocal, utcnow
+        from src.schedule_data import get_match
+        m = get_match("MAR_FRA")
+        self._clear(m.match_id)
+        with SessionLocal() as s:
+            s.add(MarketClosing(
+                match_id=m.match_id, market_id="TK-1", event_ticker="EV-1",
+                captured_at=utcnow(),
+                data_json=_json.dumps({"status": "settled", "result": "no",
+                                       "title": "Draw?"})))
+            s.commit()
+        r = TestClient(app).get(f"/api/research/{m.match_id}")
+        assert r.status_code == 200
+        d = r.json()
+        for k in ("result", "final_lock", "closing", "last_readings"):
+            assert k in d, k
+        assert d["closing"][0]["result"] == "no"
+        assert TestClient(app).get("/api/research/NOPE").status_code == 404
+        self._clear(m.match_id)

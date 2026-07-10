@@ -163,6 +163,27 @@ class MatchResult(Base):
     __table_args__ = (Index("ix_result_finished", "finished_at"),)
 
 
+class MarketClosing(Base):
+    """Post-match snapshot of every Kalshi market on a finished match —
+    settlement result + closing book, captured once at freeze time (and
+    backfillable afterwards, since Kalshi keeps settled markets queryable
+    by event). The T-10 final lock preserves the MODEL's side of the
+    record; this preserves the MARKET's side, so research can line up
+    model probability vs closing price vs actual outcome per market.
+    Raw Kalshi market object stored as JSON — no schema churn as Kalshi
+    adds fields."""
+    __tablename__ = "market_closings"
+
+    id = Column(Integer, primary_key=True)
+    match_id = Column(String(64), nullable=False)
+    market_id = Column(String(128), nullable=False)
+    event_ticker = Column(String(128))
+    captured_at = Column(DateTime(timezone=True), default=utcnow)
+    data_json = Column(Text)
+
+    __table_args__ = (Index("ix_closing_match", "match_id"),)
+
+
 class MatchLiveSnapshot(Base):
     """Last-seen-LIVE state per match, refreshed every poll while the match is
     in progress. The scoreboard reads from HERE, not directly from the feed,

@@ -345,6 +345,87 @@ def team_news(match_id: str):
             "kickoff": m.kickoff.isoformat(), "venue": m.venue, **lu}
 
 
+@app.get("/api/research/{match_id}")
+def research_bundle(match_id: str):
+    """The research record for one match, three aligned views per market:
+    the T-10 LOCKED model numbers, the market's CLOSING/settlement state,
+    and the frozen result. Closing rows exist once the post-FT snapshot
+    has been captured (automatic at freeze; POST .../snapshot to backfill)."""
+    m = get_match(match_id)
+    if not m:
+        raise HTTPException(404, f"Unknown match_id '{match_id}'")
+    import json as _json
+
+    from sqlalchemy import select as _select
+
+    from src.db import MatchResult, OddsReading, Prediction
+    from src.research import closing_rows
+
+    with SessionLocal() as s:
+        res = s.get(MatchResult, match_id)
+        result = None if res is None else {
+            "home_goals": res.home_goals, "away_goals": res.away_goals,
+            "status_short": res.status_short,
+            "finished_at": res.finished_at.isoformat() if res.finished_at else None,
+            "goals": _json.loads(res.goals_json or "[]"),
+        }
+        # T-10 lock: newest is_final row per market
+        locked = s.execute(
+            _select(Prediction)
+            .where(Prediction.match_id == match_id, Prediction.is_final)
+            .order_by(Prediction.created_at.desc())
+        ).scalars().all()
+        seen: set[str] = set()
+        final_lock = []
+        for r in locked:
+            if r.market_id in seen:
+                continue
+            seen.add(r.market_id)
+            final_lock.append({
+                "market_id": r.market_id, "market_title": r.market_title,
+                "outcome_key": r.outcome_key,
+                "model_probability": r.model_probability,
+                "kalshi_odds": r.kalshi_odds,
+                "implied_probability": r.implied_probability,
+                "edge": r.edge, "confidence": r.confidence,
+                "locked_at": r.created_at.isoformat() if r.created_at else None,
+            })
+        # last traded reading per market (the true pre-settlement close)
+        reads = s.execute(
+            _select(OddsReading)
+            .where(OddsReading.match_id == match_id)
+            .order_by(OddsReading.created_at.desc())
+        ).scalars().all()
+        rseen: set[str] = set()
+        last_readings = []
+        for r in reads:
+            if r.market_id in rseen:
+                continue
+            rseen.add(r.market_id)
+            last_readings.append({
+                "market_id": r.market_id, "yes_price": r.yes_price,
+                "model_probability": r.model_probability, "edge": r.edge,
+                "read_at": r.created_at.isoformat() if r.created_at else None,
+            })
+    return {"match_id": match_id, "home_team": m.home, "away_team": m.away,
+            "result": result, "final_lock": final_lock,
+            "closing": closing_rows(match_id),
+            "last_readings": last_readings,
+            "generated_at": utcnow().isoformat()}
+
+
+@app.post("/api/research/{match_id}/snapshot")
+def research_capture(match_id: str):
+    """Capture (or backfill) the closing-market snapshot for a match.
+    Idempotent — a match already snapshotted reports 'exists'. Works after
+    settlement too: Kalshi keeps settled markets queryable by event."""
+    m = get_match(match_id)
+    if not m:
+        raise HTTPException(404, f"Unknown match_id '{match_id}'")
+    from src.research import capture_closing_snapshot
+    return {"match_id": match_id, **capture_closing_snapshot(m)}
+
+
 @app.get("/api/reference-odds/{match_id}")
 def get_reference_odds(match_id: str):
     """Sportsbook reference odds (API-Football, display-only). Fills the
