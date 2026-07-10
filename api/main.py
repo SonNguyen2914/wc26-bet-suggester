@@ -359,6 +359,21 @@ def team_info(match_id: str):
     }
 
 
+@app.get("/api/prediction/{match_id}/live-auto")
+def live_auto_stream(match_id: str):
+    """The self-running live read: snapshot state + live shot stats ->
+    derived attack levers -> rest-of-match simulation -> every open market
+    priced. Server-cached ~25s so any number of viewers costs one cycle.
+    Informational only, never a TAKE signal — the market knows the score."""
+    m = get_match(match_id)
+    if not m:
+        raise HTTPException(404, f"Unknown match_id '{match_id}'")
+    from src.live_auto import live_auto as _run
+    cached = latest_for_match(match_id)
+    return {"match_id": match_id,
+            **_run(m, engine, (cached or {}).get("xg"))}
+
+
 @app.get("/api/live-stats/{match_id}")
 def live_match_stats(match_id: str):
     """Broadcast-style team stat rows (possession, shots, corners...) for a

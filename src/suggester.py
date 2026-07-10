@@ -51,7 +51,8 @@ class SuggesterEngine:
                    minutes_elapsed: float, red_home: int = 0,
                    red_away: int = 0,
                    attack_home_mult: float = 1.0, attack_away_mult: float = 1.0,
-                   phase: str = "auto") -> dict:
+                   phase: str = "auto",
+                   markets: list[dict] | None = None) -> dict:
         """Price every current Kalshi market against a LIVE, in-progress
         state (Layer 3 manual entry). Uses simulate_remaining() — score
         seeded, time-scaled, known red cards, plus optional user-set attack
@@ -73,7 +74,12 @@ class SuggesterEngine:
             minutes_elapsed=minutes_elapsed, stage=match.stage,
             red_home=red_home, red_away=red_away, phase=phase)
 
-        markets = self._dedupe_markets(self.kalshi.get_markets_for_match(match))
+        # The auto stream re-prices every ~30s; refetching Kalshi's ~20
+        # events each cycle would be abusive, so callers may hand in a
+        # recently-fetched market list.
+        if markets is None:
+            markets = self.kalshi.get_markets_for_match(match)
+        markets = self._dedupe_markets(markets)
         # Inside extra time / penalties the 90-minute books (winner, totals,
         # margins, exact scores) are SETTLED facts — blending a settled 0/1
         # with a stale market price produces nonsense ("draw after 90: 70%").

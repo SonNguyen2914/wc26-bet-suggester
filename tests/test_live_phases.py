@@ -997,3 +997,44 @@ class TestLiveMatchStats:
         assert rows["possessionPct"]["home"] == "66"
         assert rows["possessionPct"]["away"] == "34"
         assert rows["passPct"]["home"] == "90"   # 0.9 -> 90%
+
+
+class TestLiveAutoLevers:
+    def _stats(self, sot_h, sot_a, sh_h, sh_a):
+        return {"available": True, "rows": [
+            {"key": "shotsOnTarget", "home": str(sot_h), "away": str(sot_a)},
+            {"key": "totalShots", "home": str(sh_h), "away": str(sh_a)}]}
+
+    def test_neutral_without_inputs(self):
+        from src.live_auto import suggest_levers
+        assert suggest_levers(None, 1.2, self._stats(3, 1, 9, 2), 60)["source"] == "neutral"
+        assert suggest_levers(1.5, 1.2, {"available": False}, 60)["source"] == "neutral"
+
+    def test_shrinks_early_and_caps_extremes(self):
+        from src.live_auto import LEVER_CAP_HI, LEVER_CAP_LO, suggest_levers
+        early = suggest_levers(1.5, 1.5, self._stats(4, 0, 10, 1), 10)
+        late = suggest_levers(1.5, 1.5, self._stats(4, 0, 10, 1), 85)
+        # same evidence speaks louder later
+        assert abs(early["home"] - 1) < abs(late["home"] - 1)
+        wild = suggest_levers(1.5, 1.5, self._stats(15, 0, 30, 0), 90)
+        assert wild["home"] <= LEVER_CAP_HI and wild["away"] >= LEVER_CAP_LO
+        # dominant side up, quiet side down
+        assert late["home"] > 1 > late["away"]
+
+    def test_phase_mapping(self):
+        from src.live_auto import _phase_from_status
+        assert _phase_from_status("ET") == "et"
+        assert _phase_from_status("P") == "pens"
+        assert _phase_from_status("2H") == "regulation"
+
+    def test_no_snapshot_degrades(self):
+        from src.db import MatchLiveSnapshot, SessionLocal, init_db
+        from src.live_auto import live_auto
+        from src.schedule_data import get_match
+        init_db()
+        with SessionLocal() as s:
+            s.query(MatchLiveSnapshot).filter(
+                MatchLiveSnapshot.match_id == "NOR_ENG").delete()
+            s.commit()
+        out = live_auto(get_match("NOR_ENG"), None, None)
+        assert out["available"] is False
