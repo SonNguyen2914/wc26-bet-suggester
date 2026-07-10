@@ -705,3 +705,29 @@ class TestLiveEmptyBackoff:
             _t.time() - config.API_FOOTBALL_CACHE_SECONDS - 1, val)
         lf.live_state_for("Morocco", "France")
         assert calls["n"] == 2
+
+
+class TestZeroMarketPrediction:
+    def test_prediction_with_no_kalshi_markets_is_200_not_500(self, monkeypatch):
+        """Regression: prediction/SF1 500'd on prod — a match matching zero
+        Kalshi events persists zero Prediction rows, latest_for_match gave
+        None, and {**None} raised. Placeholder-sided matches must serve the
+        simulation with an empty markets list."""
+        from fastapi.testclient import TestClient
+        import api.main as main
+        from api.main import app
+        from src.db import Prediction, SessionLocal, init_db
+        init_db()
+        with SessionLocal() as s:   # drop any stale local rows for SF1
+            s.query(Prediction).filter(Prediction.match_id == "SF1").delete()
+            s.commit()
+        monkeypatch.setattr(main.engine.kalshi, "get_markets_for_match",
+                            lambda m: [])
+        client = TestClient(app)
+        r = client.get("/api/prediction/SF1?force_refresh=true")
+        assert r.status_code == 200, r.text
+        d = r.json()
+        assert d["markets"] == []
+        assert d["freshness"] == "fresh"
+        ft = d["summary"]["full_time"]
+        assert abs(ft["home_win"] + ft["draw"] + ft["away_win"] - 1) < 0.02

@@ -174,6 +174,26 @@ def get_prediction(match_id: str, force_refresh: bool = False):
     result = engine.run_for_match(match, source="on_demand")
     refresh_model_cache(result)   # keep the ripeness poller's edge current
     fresh = latest_for_match(match_id)
+    if fresh is None:
+        # Zero priceable Kalshi markets (e.g. a bracket slot still carrying
+        # a placeholder side) persists zero Prediction rows — serve the
+        # simulation honestly with an empty markets list, never a 500.
+        sim = result["simulation"]
+        fresh = {
+            "match_id": match_id,
+            "generated_at": result["generated_at"],
+            "age_seconds": 0,
+            "is_stale": False,
+            "source": result["source"],
+            "is_final": result["is_final"],
+            "xg": sim["xg"],
+            "scorelines": sim["scorelines"],
+            "summary": {"full_time": sim["outcomes"],
+                        "advance": sim.get("advance"),
+                        "halves": sim.get("halves")},
+            "confidence": sim["confidence"],
+            "markets": [],
+        }
     return {
         "freshness": "fresh",
         "inference_time_ms": round((time.time() - t0) * 1000),
