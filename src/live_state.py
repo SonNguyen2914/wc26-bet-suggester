@@ -116,6 +116,15 @@ def poll_live_state() -> dict:
     for m in frozen_matches:
         from src import research
         research.capture_closing_snapshot(m)
+    # A fresh result should fill its bracket slot NOW, not on the next
+    # 30-minute resolver tick (Spain resolved instantly tonight while
+    # France waited on the timer — the semifinal sat half-named).
+    if frozen_matches:
+        try:
+            from src.bracket import resolve_bracket
+            resolve_bracket()
+        except Exception as exc:
+            print(f"[live-state] post-freeze bracket resolve failed: {exc}")
 
     return {"updated": updated, "frozen": frozen, "held": held}
 
@@ -160,6 +169,12 @@ def restore_missing_results() -> dict:
         print(f"[live-state] restored result {m.match_id} from dated ESPN")
         from src import research
         research.capture_closing_snapshot(m)
+    if restored:
+        try:
+            from src.bracket import resolve_bracket
+            resolve_bracket()
+        except Exception as exc:
+            print(f"[live-state] post-restore bracket resolve failed: {exc}")
     return {"restored": restored}
 
 
