@@ -52,7 +52,8 @@ class SuggesterEngine:
                    red_away: int = 0,
                    attack_home_mult: float = 1.0, attack_away_mult: float = 1.0,
                    phase: str = "auto",
-                   markets: list[dict] | None = None) -> dict:
+                   markets: list[dict] | None = None,
+                   first_goal_scored: bool = False) -> dict:
         """Price every current Kalshi market against a LIVE, in-progress
         state (Layer 3 manual entry). Uses simulate_remaining() — score
         seeded, time-scaled, known red cards, plus optional user-set attack
@@ -88,9 +89,16 @@ class SuggesterEngine:
         _CONTINUATION_KEYS = {"home_advance", "away_advance",
                               "home_win_et", "away_win_et",
                               "home_win_pens", "away_win_pens"}
+        # Once ANY goal has been scored, the first-goal race is a settled
+        # fact — re-simulating it from the remaining match is nonsense
+        # (caught live: 'Spain to score first' priced 73% while Spain had
+        # already scored first). Same rule as the ET settled-books filter.
+        _FIRST_GOAL_KEYS = {"home_first_goal", "away_first_goal", "no_goal"}
         rows: list[dict] = []
         for mkt in markets:
             if in_continuation and mkt.get("outcome_key") not in _CONTINUATION_KEYS:
+                continue
+            if first_goal_scored and mkt.get("outcome_key") in _FIRST_GOAL_KEYS:
                 continue
             raw_model_p = self.simulator.prob_for_outcome_key(
                 sim, mkt["outcome_key"])

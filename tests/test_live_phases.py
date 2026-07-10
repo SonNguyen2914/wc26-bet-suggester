@@ -1038,3 +1038,30 @@ class TestLiveAutoLevers:
             s.commit()
         out = live_auto(get_match("NOR_ENG"), None, None)
         assert out["available"] is False
+
+
+class TestFirstGoalSettledFilter:
+    def test_first_goal_props_drop_once_a_goal_exists(self):
+        """Caught live in ESP-BEL: 'Spain to score first' re-simulated at
+        73% while Spain had already scored first. Once any goal exists the
+        first-goal race is settled — never re-priced."""
+        from src.schedule_data import get_match
+        from src.suggester import SuggesterEngine
+        eng = SuggesterEngine()
+        m = get_match("ESP_BEL")
+        fake = [
+            {"market_id": "T-FTTS", "title": "Spain to score first",
+             "outcome_key": "home_first_goal", "yes_price": 0.5,
+             "decimal_odds": 2.0, "volume_24h": 0.0},
+            {"market_id": "T-GAME", "title": "Spain to win",
+             "outcome_key": "home_win", "yes_price": 0.5,
+             "decimal_odds": 2.0, "volume_24h": 0.0},
+        ]
+        with_goal = eng.price_live(m, 1, 1, 50, first_goal_scored=True,
+                                   markets=fake)
+        keys = {r["outcome_key"] for r in with_goal["markets"]}
+        assert keys == {"home_win"}          # settled race dropped
+        goalless = eng.price_live(m, 0, 0, 20, first_goal_scored=False,
+                                  markets=fake)
+        keys0 = {r["outcome_key"] for r in goalless["markets"]}
+        assert "home_first_goal" in keys0    # still a live race at 0-0

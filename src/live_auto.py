@@ -126,7 +126,9 @@ def live_auto(match, engine, prematch_xg: dict | None) -> dict:
         red_home=state["red_home"], red_away=state["red_away"],
         attack_home_mult=levers["home"], attack_away_mult=levers["away"],
         phase=_phase_from_status(state["status_short"]),
-        markets=markets)
+        markets=markets,
+        first_goal_scored=bool(state["goals_list"])
+        or (state["home_goals"] + state["away_goals"]) > 0)
 
     out = {"available": True, **priced,
            "levers": levers,
