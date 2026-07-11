@@ -263,11 +263,12 @@ TEAM_STATS: dict[str, dict] = {
     # ===== OPPONENT-ADJUSTED from FIFA Post-Match PDFs (July 7) =====
     # These 5 teams' attack/defence were recomputed from per-match xG weighted
     # by opponent Elo (see docstring). "scouting" = match-page blurb.
-    # --- Spain: OPP-ADJUSTED (2 key PDFs + group). attack 1.15: dominates
-    # possession/creation but converts modestly vs good teams (1-0 URU/POR,
-    # 0-0 Cabo Verde); inflated to 4-0/3-0 only vs weak. defence 0.67 elite
-    # (0.22 xGA vs Uruguay, best in tournament, Unai Simón).
-    "Spain":         {"attack": 1.15, "defence": 0.67, "form": 0.80, "set_piece_threat": 0.20, "red_card_risk": 0.04, "fatigue": 0.20, "elo": 1912,
+    # --- Spain: OPP-ADJUSTED through the QF (6 matches). attack 1.15->1.26:
+    # the "modest conversion vs good sides" premise weakened — 2.20 xG at
+    # Belgium (Elo-adj 2.37) in the QF win. defence holds 0.67 elite
+    # (0.34 xGA vs Belgium, first goal conceded all tournament; Unai Simón).
+    # form 0.80->0.85: six straight wins, late winner vs a good side.
+    "Spain":         {"attack": 1.26, "defence": 0.67, "form": 0.85, "set_piece_threat": 0.20, "red_card_risk": 0.04, "fatigue": 0.20, "elo": 1912,
         "scouting": "Total control — and the ruthlessness question is being answered. Beat Belgium 2-1 in the QF on ~66% possession: Fabián Ruiz's opener, then an 88th-minute winner from Merino after De Ketelaere's counter became the FIRST goal Spain conceded all tournament (11-1 overall now). Rodri and Pedri suffocate games behind the tournament's best line-breaking passing (144 completed line breaks/game); under 0.5 xG/game allowed. Conversion still runs streaky against good sides, but they keep finding the decisive goal. No extra time played — though a day less rest than France before the semifinal."},
     # --- Argentina: opp-adjusted. Elite Messi attack (caps 1.45), softer at back.
     "Argentina":     {"attack": 1.45, "defence": 0.79, "form": 0.80, "set_piece_threat": 0.27, "red_card_risk": 0.06, "fatigue": 0.34, "elo": 1914,
@@ -310,8 +311,10 @@ TEAM_STATS: dict[str, dict] = {
     "Egypt":         {"attack": 0.88, "defence": 0.97, "form": 0.60, "set_piece_threat": 0.21, "red_card_risk": 0.07, "fatigue": 0.30, "elo": 1597,
         "scouting": "Eliminated by Argentina in the R16 (lost 3-2)."},
     # ===== QF teams still pending deep review =====
-    # --- France: OPP-ADJUSTED (5 PDFs). Elite attack (caps), elite defence.
-    "France":        {"attack": 1.45, "defence": 0.75, "form": 0.95, "set_piece_threat": 0.25, "red_card_risk": 0.05, "fatigue": 0.18, "elo": 1926,
+    # --- France: OPP-ADJUSTED through the QF (6 PDFs). Attack stays at the
+    # 1.45 cap (3.52 xG vs Morocco, Elo-adj 3.85, pushes further past it);
+    # defence 0.75->0.73 (0.16 xGA vs the QF's best-organised opponent).
+    "France":        {"attack": 1.45, "defence": 0.73, "form": 0.95, "set_piece_threat": 0.25, "red_card_risk": 0.05, "fatigue": 0.18, "elo": 1926,
         "scouting": "The best all-round side left — and the deep-block worry is answered. The QF was a dismantling of the tournament's most organised low block: 2-0 over Morocco on 3.52 xG to 0.16, 22 attempts (8 on target) and 104 completed line breaks. Tournament-leading attack (16 goals in six — Mbappé 8, Dembélé 5) built on devastating vertical transitions; France stay happy without the ball and lethal in space. Elite defence too: 0.59 xG/game allowed, two conceded all tournament. Six straight 90-minute wins — no extra time in the legs and an extra rest day before the semifinal."},
     # --- Morocco: OPP-ADJUSTED (3 PDFs). attack raw 0.86 nudged to 1.05:
     # out-CREATED Brazil (xG 1.33-0.99) and finishing beats xG (3 goals/0.85
