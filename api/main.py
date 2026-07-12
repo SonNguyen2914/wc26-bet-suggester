@@ -700,6 +700,37 @@ def get_timing(match_id: str, market_id: str):
     return compute_timing(market_id, match.kickoff)
 
 
+@app.get("/api/live-signals")
+def live_signals(match_id: str | None = Query(None),
+                 limit: int = Query(30, ge=1, le=200)):
+    """In-play BUY/SELL signals on watched markets, newest first. The live
+    box polls this to toast fresh signals and badge watched rows; Discord
+    gets the same pushes server-side, so nothing depends on a page being
+    open. Optional ?match_id= narrows to one match."""
+    from src.db import LiveSignal
+    with SessionLocal() as session:
+        q = select(LiveSignal).order_by(LiveSignal.created_at.desc()).limit(limit)
+        if match_id:
+            q = select(LiveSignal).where(LiveSignal.match_id == match_id) \
+                .order_by(LiveSignal.created_at.desc()).limit(limit)
+        rows = session.execute(q).scalars().all()
+    return {"min_diff": config.LIVE_SIGNAL_MIN_DIFF,
+            "signals": [
+                {
+                    "id": r.id,
+                    "match_id": r.match_id,
+                    "market_id": r.market_id,
+                    "market_title": r.market_title,
+                    "side": r.side,
+                    "live_probability": r.live_probability,
+                    "market_probability": r.market_probability,
+                    "difference": r.difference,
+                    "minute": r.minute,
+                    "fired_at": r.created_at.isoformat(),
+                } for r in rows
+            ]}
+
+
 @app.get("/api/alerts/recent")
 def recent_alerts(limit: int = Query(20, ge=1, le=100)):
     """Notification feed: every ripeness alert that has fired."""

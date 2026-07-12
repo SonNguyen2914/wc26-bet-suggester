@@ -101,6 +101,13 @@ LIVE_EMPTY_BACKOFF_SECONDS = int(os.getenv("LIVE_EMPTY_BACKOFF_SECONDS", "900"))
 # odds poll so the scoreboard tracks the real match closely.
 LIVE_TICK_SECONDS = int(os.getenv("LIVE_TICK_SECONDS", "15"))
 
+# In-play BUY/SELL signals on watched markets: fire when |live model −
+# market price| clears the threshold; re-fire only on a side flip or when
+# the divergence grows another 5 points, never inside the cooldown.
+LIVE_SIGNAL_MIN_DIFF = float(os.getenv("LIVE_SIGNAL_MIN_DIFF", "0.08"))
+LIVE_SIGNAL_COOLDOWN_SECONDS = int(os.getenv("LIVE_SIGNAL_COOLDOWN_SECONDS", "180"))
+LIVE_SIGNAL_POLL_SECONDS = int(os.getenv("LIVE_SIGNAL_POLL_SECONDS", "30"))
+
 # --- Live-state tracking (scoreboard robustness + finished-match handling) --
 # A live match briefly disappears from API-Football's live=all during
 # between-periods breaks (90'->ET, ET->penalties). The scoreboard holds a

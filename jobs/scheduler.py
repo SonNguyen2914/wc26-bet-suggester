@@ -22,6 +22,7 @@ from src.alerts import alert_final_lock, alert_new_take, alert_ripe, send_discor
 from src.bracket import resolve_bracket
 from src.db import SessionLocal, WatchlistItem, utcnow
 from src.kalshi_client import KalshiClient
+from src.live_signals import evaluate_live_signals
 from src.model_cache import get_model_prob, refresh_model_cache
 from src.schedule_data import is_trackable, load_schedule
 from src import spike_detector
@@ -136,6 +137,19 @@ def final_lock_check() -> None:
             print(f"[FINAL LOCK] {match.match_id} locked at T-{time_left}")
 
 
+def live_signals_job() -> None:
+    """BUY/SELL reads on WATCHED markets during live play. Piggybacks on the
+    same ~25s-cached live_auto cycle the frontend stream reads, so a pass is
+    nearly free; the module itself handles thresholds, cooldowns and pushes."""
+    try:
+        r = evaluate_live_signals(engine)
+        if r["fired"]:
+            print(f"[live-signals] fired {r['fired']} "
+                  f"(checked {r['checked']} watched markets)")
+    except Exception as exc:
+        print(f"[live-signals] pass error: {exc}")
+
+
 def resolve_bracket_job() -> None:
     """Fill QF placeholder slots as R16 results land (fixtures only; team
     stats stay hand-sourced). Cheap and idempotent: does nothing once the
@@ -163,6 +177,11 @@ def start_scheduler() -> BackgroundScheduler:
     scheduler.add_job(live_tick, "interval",
                       seconds=config.LIVE_TICK_SECONDS, id="live_tick",
                       coalesce=True, max_instances=1)
+    # Watched-market BUY/SELL signals: instant no-op when nothing is both
+    # live and watched, otherwise rides the cached live-read cycle.
+    scheduler.add_job(live_signals_job, "interval",
+                      seconds=config.LIVE_SIGNAL_POLL_SECONDS,
+                      id="live_signals", coalesce=True, max_instances=1)
     # One-shot at boot: re-freeze any finished match a DB wipe erased
     # (ephemeral SQLite until a Railway volume/Postgres exists) and
     # re-capture its closing snapshot. Idempotent, cheap when healthy.

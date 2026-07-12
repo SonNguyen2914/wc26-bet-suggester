@@ -163,6 +163,28 @@ class MatchResult(Base):
     __table_args__ = (Index("ix_result_finished", "finished_at"),)
 
 
+class LiveSignal(Base):
+    """In-play BUY/SELL reads on WATCHED markets: fired when the live
+    remainder-simulation diverges from the current price beyond the
+    configured threshold. Informational by design — the market knows the
+    score — but it's the read Son asked to be pinged with, thresholded and
+    cooled down so it only speaks when the divergence is real."""
+    __tablename__ = "live_signals"
+
+    id = Column(Integer, primary_key=True)
+    match_id = Column(String(64), nullable=False)
+    market_id = Column(String(128), nullable=False)
+    market_title = Column(String(256))
+    side = Column(String(8))               # BUY | SELL
+    live_probability = Column(Float)
+    market_probability = Column(Float)
+    difference = Column(Float)
+    minute = Column(Float)
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+
+    __table_args__ = (Index("ix_signal_created", "created_at"),)
+
+
 class MarketClosing(Base):
     """Post-match snapshot of every Kalshi market on a finished match —
     settlement result + closing book, captured once at freeze time (and
