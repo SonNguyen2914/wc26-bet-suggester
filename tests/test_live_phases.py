@@ -1126,3 +1126,58 @@ class TestModelFirstLiveBoard:
         allowed = {"home_advance", "away_advance", "home_win_et",
                    "away_win_et", "home_win_pens", "away_win_pens"}
         assert keys and keys <= allowed
+
+
+class TestOpennessDefenceLevers:
+    """The volume half of the live levers: attack levers redistribute
+    chances (share), the defence levers scale the whole goal environment
+    from total shot volume vs the xG-implied expectation."""
+
+    def _stats(self, sot_h, sot_a, sh_h, sh_a):
+        return {"available": True, "rows": [
+            {"key": "shotsOnTarget", "home": str(sot_h), "away": str(sot_a)},
+            {"key": "totalShots", "home": str(sh_h), "away": str(sh_a)}]}
+
+    def test_open_game_raises_both_defence_levers(self):
+        from src.live_auto import suggest_levers
+        # 1.2+1.2 damped xG expects ~19 weighted shots by 75'; 13 SoT + 30
+        # shots is a shootout
+        lv = suggest_levers(1.2, 1.2, self._stats(7, 6, 16, 14), 75)
+        assert lv["def_home"] == lv["def_away"] > 1.0
+        assert lv["basis"]["openness_raw"] > 1.0
+
+    def test_locked_game_lowers_both(self):
+        from src.live_auto import suggest_levers
+        lv = suggest_levers(1.5, 1.5, self._stats(1, 0, 3, 2), 80)
+        assert lv["def_home"] == lv["def_away"] < 1.0
+
+    def test_caps_and_neutral(self):
+        from src.live_auto import DEF_CAP_HI, DEF_CAP_LO, suggest_levers
+        wild = suggest_levers(0.8, 0.8, self._stats(15, 12, 30, 25), 85)
+        assert wild["def_home"] <= DEF_CAP_HI
+        quiet = suggest_levers(2.0, 2.0, self._stats(0, 0, 1, 0), 85)
+        assert quiet["def_home"] >= DEF_CAP_LO
+        assert suggest_levers(None, 1.2, self._stats(3, 1, 9, 2), 60)["def_home"] == 1.0
+
+    def test_shrinks_early(self):
+        from src.live_auto import suggest_levers
+        # same shot volume speaks louder at 80' than at 15'... but at 15'
+        # the same absolute volume is objectively wilder, so compare the
+        # SHRINK: early lever must sit closer to 1 than the raw signal
+        early = suggest_levers(1.2, 1.2, self._stats(4, 3, 8, 7), 15)
+        assert 1.0 < early["def_home"] < early["basis"]["openness_raw"]
+
+    def test_defence_mult_moves_goal_probabilities(self):
+        from src.schedule_data import get_match
+        from src.suggester import SuggesterEngine
+        eng = SuggesterEngine()
+        m = get_match("SF1")
+        base = eng.price_live(m, 0, 0, 45.0, markets=[])
+        open_ = eng.price_live(m, 0, 0, 45.0, markets=[],
+                               defence_home_mult=1.2, defence_away_mult=1.2)
+        def p(res, key):
+            return next(r["live_model_probability"] for r in res["markets"]
+                        if r["outcome_key"] == key)
+        # leakier defences -> more goals -> Over 2.5 up, echo transparent
+        assert p(open_, "over_2_5") > p(base, "over_2_5")
+        assert open_["defence_levers"] == {"home": 1.2, "away": 1.2}

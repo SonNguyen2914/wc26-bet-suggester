@@ -164,11 +164,12 @@ class MatchResult(Base):
 
 
 class LiveSignal(Base):
-    """In-play BUY/SELL reads on WATCHED markets: fired when the live
-    remainder-simulation diverges from the current price beyond the
-    configured threshold. Informational by design — the market knows the
-    score — but it's the read Son asked to be pinged with, thresholded and
-    cooled down so it only speaks when the divergence is real."""
+    """In-play alerts from the live read. Two kinds: 'watched' BUY/SELL —
+    the live remainder-simulation diverges from the price on a market Son
+    is betting; 'easy_win' — ANY open book the live model calls near-certain
+    while the price still pays. Informational by design — the market knows
+    the score — but these are the reads Son asked to be pinged with,
+    thresholded and cooled down so they only speak when it's real."""
     __tablename__ = "live_signals"
 
     id = Column(Integer, primary_key=True)
@@ -176,6 +177,7 @@ class LiveSignal(Base):
     market_id = Column(String(128), nullable=False)
     market_title = Column(String(256))
     side = Column(String(8))               # BUY | SELL
+    kind = Column(String(16), default="watched")   # watched | easy_win
     live_probability = Column(Float)
     market_probability = Column(Float)
     difference = Column(Float)

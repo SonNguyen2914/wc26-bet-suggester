@@ -52,6 +52,8 @@ class SuggesterEngine:
                    minutes_elapsed: float, red_home: int = 0,
                    red_away: int = 0,
                    attack_home_mult: float = 1.0, attack_away_mult: float = 1.0,
+                   defence_home_mult: float = 1.0,
+                   defence_away_mult: float = 1.0,
                    phase: str = "auto",
                    markets: list[dict] | None = None,
                    first_goal_scored: bool = False) -> dict:
@@ -70,6 +72,10 @@ class SuggesterEngine:
         away_stats = dict(get_team_stats(match.away))
         home_stats["attack"] = home_stats["attack"] * attack_home_mult
         away_stats["attack"] = away_stats["attack"] * attack_away_mult
+        # defence stat is "how much you concede" (higher = leakier), so the
+        # openness lever multiplies straight in: >1 = a more open game.
+        home_stats["defence"] = home_stats["defence"] * defence_home_mult
+        away_stats["defence"] = away_stats["defence"] * defence_away_mult
 
         sim = self.simulator.simulate_remaining(
             home_stats, away_stats, current_home, current_away,
@@ -210,6 +216,8 @@ class SuggesterEngine:
             "live_confidence": sim["confidence"],
             "user_attack_levers": {"home": attack_home_mult,
                                    "away": attack_away_mult},
+            "defence_levers": {"home": defence_home_mult,
+                               "away": defence_away_mult},
             "markets": rows,
             "generated_at": utcnow().isoformat(),
             "disclaimer": ("Live estimate given the entered state. The market "

@@ -12,14 +12,20 @@ module fires a signal:
          the market is paying more than the model thinks it's worth,
          exit/take profit.
 
+A second scan covers EVERY open book, watched or not: EASY WIN — the live
+model calls the outcome near-certain (>= LIVE_EASYWIN_MIN_PROB) while the
+price still pays (<= LIVE_EASYWIN_MAX_PRICE) and hasn't fully caught up
+(gap >= LIVE_EASYWIN_MIN_DIFF). Watched markets are excluded from that
+scan — they already get the sharper BUY/SELL treatment above.
+
 Anti-spam: a market re-fires only after LIVE_SIGNAL_COOLDOWN_SECONDS have
 passed AND the read materially changed — the side flipped, or the
 divergence strengthened by >= RESTRENGTHEN beyond the last fired value.
 
-This is the one deliberate exception to the "live edge is informational
-only" rule, and it stays narrow: only markets Son explicitly watched, never
-a board-wide TAKE resurrection. Model-only rows (Kalshi book closed) can't
-fire — there is nothing to buy or sell.
+These are deliberate, narrow exceptions to the "live edge is informational
+only" rule — explicit pings Son asked for, never a board-wide TAKE
+resurrection. Model-only rows (Kalshi book closed) can't fire — there is
+nothing to buy or sell.
 """
 from __future__ import annotations
 
@@ -61,6 +67,22 @@ def _decide(row: dict) -> tuple[str, float] | None:
     return None
 
 
+def _decide_easy(row: dict) -> tuple[str, float] | None:
+    """EASY WIN for one priced row: near-certain per the live model, price
+    still pays, market not fully caught up. Always BUY-side by nature."""
+    model_p = row.get("live_model_probability")
+    market_p = row.get("market_probability")
+    if model_p is None or market_p is None:
+        return None
+    diff = model_p - market_p
+    eps = 1e-9
+    if (model_p >= config.LIVE_EASYWIN_MIN_PROB - eps
+            and market_p <= config.LIVE_EASYWIN_MAX_PRICE + eps
+            and diff >= config.LIVE_EASYWIN_MIN_DIFF - eps):
+        return "BUY", diff
+    return None
+
+
 def _should_fire(market_id: str, side: str, diff: float,
                  now_ts: float | None = None) -> bool:
     prev = _state.get(market_id)
@@ -80,12 +102,38 @@ def _mark_fired(market_id: str, side: str, diff: float,
                          "ts": time.time() if now_ts is None else now_ts}
 
 
+def _fire(match, row: dict, side: str, diff: float, kind: str,
+          minute, fallback_title: str | None = None) -> None:
+    """Persist one signal and push it to Discord."""
+    title = row.get("market_title") or fallback_title or row["market_id"]
+    with SessionLocal() as s:
+        s.add(LiveSignal(
+            match_id=match.match_id, market_id=row["market_id"],
+            market_title=title, side=side, kind=kind,
+            live_probability=row["live_model_probability"],
+            market_probability=row["market_probability"],
+            difference=round(diff, 4),
+            minute=minute))
+        s.commit()
+    if kind == "easy_win":
+        head = "💰 **EASY WIN**"
+    else:
+        head = f"{'🟢' if side == 'BUY' else '🔴'} **{side} SIGNAL**"
+    min_str = f" ({minute:.0f}')" if minute is not None else ""
+    send_discord(
+        f"{head} — {match.home} vs {match.away}{min_str}\n"
+        f"**{title}**\n"
+        f"Live model {row['live_model_probability']:.0%} vs "
+        f"market {row['market_probability']:.0%} "
+        f"({diff:+.0%})")
+
+
 def evaluate_live_signals(engine) -> dict:
-    """One evaluation pass: every LIVE match that has watched markets gets
-    its (cached) live-read cycle, each watched market is checked against
-    the threshold, and new signals persist + push. Cheap by construction —
-    live_auto is the same ~25s-cached cycle the frontend stream reads, so
-    this piggybacks rather than re-simulating."""
+    """One evaluation pass over every LIVE match, riding the same
+    ~25s-cached live_auto cycle the frontend stream reads (so this is
+    nearly free). Two scans per match: watched-market BUY/SELL against
+    LIVE_SIGNAL_MIN_DIFF, and the EASY-WIN sweep across every other open
+    book. New signals persist + push; cooldowns keep them meaningful."""
     checked = fired = 0
     with SessionLocal() as s:
         items = s.execute(select(WatchlistItem)).scalars().all()
@@ -95,14 +143,13 @@ def evaluate_live_signals(engine) -> dict:
                 {"market_id": w.market_id, "market_title": w.market_title})
         live_ids = set(s.execute(select(MatchLiveSnapshot.match_id)).scalars())
 
-    active = {mid: w for mid, w in watched_by_match.items() if mid in live_ids}
-    if not active:
+    if not live_ids:
         return {"checked": 0, "fired": 0}
 
     for match in load_schedule():
-        watched = active.get(match.match_id)
-        if not watched:
+        if match.match_id not in live_ids:
             continue
+        watched = watched_by_match.get(match.match_id, [])
         try:
             out = live_auto(match, engine,
                             (latest_for_match(match.match_id) or {}).get("xg"))
@@ -113,7 +160,9 @@ def evaluate_live_signals(engine) -> dict:
             continue
         rows = {r["market_id"]: r for r in out.get("markets", [])}
         minute = (out.get("live_state") or {}).get("minutes_elapsed")
+        watched_ids = {w["market_id"] for w in watched}
 
+        # -- scan 1: BUY/SELL on the markets Son is betting ---------------
         for w in watched:
             row = rows.get(w["market_id"])
             if row is None:
@@ -127,23 +176,22 @@ def evaluate_live_signals(engine) -> dict:
                 continue
             _mark_fired(w["market_id"], side, diff)
             fired += 1
-            title = row.get("market_title") or w["market_title"] or w["market_id"]
-            with SessionLocal() as s:
-                s.add(LiveSignal(
-                    match_id=match.match_id, market_id=w["market_id"],
-                    market_title=title, side=side,
-                    live_probability=row["live_model_probability"],
-                    market_probability=row["market_probability"],
-                    difference=round(diff, 4),
-                    minute=minute))
-                s.commit()
-            emoji = "🟢" if side == "BUY" else "🔴"
-            min_str = f" ({minute:.0f}')" if minute is not None else ""
-            send_discord(
-                f"{emoji} **{side} SIGNAL** — {match.home} vs {match.away}{min_str}\n"
-                f"**{title}**\n"
-                f"Live model {row['live_model_probability']:.0%} vs "
-                f"market {row['market_probability']:.0%} "
-                f"({diff:+.0%})")
+            _fire(match, row, side, diff, "watched", minute,
+                  fallback_title=w["market_title"])
+
+        # -- scan 2: EASY WIN across every other open book ----------------
+        for mkt_id, row in rows.items():
+            if mkt_id in watched_ids:
+                continue
+            verdict = _decide_easy(row)
+            if verdict is None:
+                continue
+            side, diff = verdict
+            key = f"easy:{mkt_id}"
+            if not _should_fire(key, side, diff):
+                continue
+            _mark_fired(key, side, diff)
+            fired += 1
+            _fire(match, row, side, diff, "easy_win", minute)
 
     return {"checked": checked, "fired": fired}

@@ -30,6 +30,29 @@ class TestDecide:
         assert sig._decide(_row(None, 0.50)) is None
 
 
+class TestDecideEasyWin:
+    def test_easy_win_fires(self):
+        side, diff = sig._decide_easy(_row(0.92, 0.80))
+        assert side == "BUY" and abs(diff - 0.12) < 1e-9
+
+    def test_not_certain_enough(self):
+        assert sig._decide_easy(_row(0.80, 0.60)) is None
+
+    def test_fully_priced_no_payout(self):
+        # near-certain but the book already pays nothing
+        assert sig._decide_easy(_row(0.97, 0.95)) is None
+
+    def test_market_caught_up(self):
+        # certain AND cheap enough, but gap under the min diff
+        assert sig._decide_easy(_row(0.90, 0.88)) is None
+
+    def test_model_only_row_never_fires(self):
+        assert sig._decide_easy(_row(0.99, None)) is None
+
+    def test_boundary_fires(self):
+        assert sig._decide_easy(_row(0.85, 0.80)) is not None
+
+
 class TestRefireRules:
     def setup_method(self):
         sig._state.clear()
@@ -127,17 +150,46 @@ class TestEvaluatePass:
         assert r == {"checked": 0, "fired": 0}
         assert self._calls == 0          # live_auto never invoked
 
-    def test_unwatched_market_ignored(self):
-        # the OTHER market diverges hugely but isn't watched -> no signal
+    def test_unwatched_divergence_is_not_a_watched_signal(self):
+        # the OTHER market diverges below the certainty bar -> neither a
+        # watched signal (not watched) nor an easy win (model_p too low)
         def fake(match, engine, xg):
             return {"available": True, "live_state": {"minutes_elapsed": 60.0},
                     "markets": [_row(0.20, 0.60, market_id="KX-TEST-ESP"),
-                                _row(0.95, 0.50, market_id="KX-TEST-OTHER")]}
+                                _row(0.70, 0.50, market_id="KX-TEST-OTHER")]}
         sig.live_auto = fake
         r = sig.evaluate_live_signals(engine=None)
         assert r["fired"] == 1
         with SessionLocal() as s:
-            assert s.query(LiveSignal).one().side == "SELL"
+            one = s.query(LiveSignal).one()
+        assert one.side == "SELL" and one.kind == "watched"
+
+    def test_easy_win_fires_on_unwatched_book(self):
+        def fake(match, engine, xg):
+            return {"available": True, "live_state": {"minutes_elapsed": 71.0},
+                    "markets": [_row(0.60, 0.58, market_id="KX-TEST-ESP"),
+                                _row(0.93, 0.82, market_id="KX-TEST-OVER15",
+                                     title="Over 1.5 total goals")]}
+        sig.live_auto = fake
+        r = sig.evaluate_live_signals(engine=None)
+        assert r["fired"] == 1
+        with SessionLocal() as s:
+            one = s.query(LiveSignal).one()
+        assert (one.kind, one.side, one.market_id) == \
+            ("easy_win", "BUY", "KX-TEST-OVER15")
+        assert one.minute == 71.0
+
+    def test_watched_market_excluded_from_easy_win(self):
+        # watched market qualifies for BOTH scans -> only the watched
+        # BUY fires, no easy-win duplicate
+        def fake(match, engine, xg):
+            return {"available": True, "live_state": {"minutes_elapsed": 60.0},
+                    "markets": [_row(0.93, 0.82, market_id="KX-TEST-ESP")]}
+        sig.live_auto = fake
+        r = sig.evaluate_live_signals(engine=None)
+        assert r["fired"] == 1
+        with SessionLocal() as s:
+            assert s.query(LiveSignal).one().kind == "watched"
 
 
 class TestEndpoint:

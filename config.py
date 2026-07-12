@@ -108,6 +108,13 @@ LIVE_SIGNAL_MIN_DIFF = float(os.getenv("LIVE_SIGNAL_MIN_DIFF", "0.08"))
 LIVE_SIGNAL_COOLDOWN_SECONDS = int(os.getenv("LIVE_SIGNAL_COOLDOWN_SECONDS", "180"))
 LIVE_SIGNAL_POLL_SECONDS = int(os.getenv("LIVE_SIGNAL_POLL_SECONDS", "30"))
 
+# EASY-WIN alerts scan EVERY open in-play book (not just watched ones): the
+# live model must call it near-certain, the price must still leave a real
+# payout, and the gap must show the market hasn't fully caught up yet.
+LIVE_EASYWIN_MIN_PROB = float(os.getenv("LIVE_EASYWIN_MIN_PROB", "0.85"))
+LIVE_EASYWIN_MAX_PRICE = float(os.getenv("LIVE_EASYWIN_MAX_PRICE", "0.90"))
+LIVE_EASYWIN_MIN_DIFF = float(os.getenv("LIVE_EASYWIN_MIN_DIFF", "0.05"))
+
 # --- Live-state tracking (scoreboard robustness + finished-match handling) --
 # A live match briefly disappears from API-Football's live=all during
 # between-periods breaks (90'->ET, ET->penalties). The scoreboard holds a

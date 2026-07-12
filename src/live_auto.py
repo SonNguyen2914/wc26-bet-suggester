@@ -28,6 +28,17 @@ from src.live_feed import espn_match_stats
 LEVER_CAP_LO, LEVER_CAP_HI = 0.75, 1.35
 _SHRINK_MINUTES = 45.0          # at 45' the data has half the say
 
+# Defence (openness) lever: total live shot volume vs what the pre-match xG
+# implied for the minutes played. The attack levers above only REDISTRIBUTE
+# chances between the sides; this scales the whole goal environment — an
+# end-to-end game raises both teams' conceding rates, a locked-down one
+# lowers them. Capped tighter than attack: volume is a noisier signal.
+DEF_CAP_LO, DEF_CAP_HI = 0.85, 1.20
+# weighted shots (SoT + 0.5*shots) a team produces per 1.0 xG, roughly:
+# ~12 shots / ~4.5 SoT for a 1.4-xG performance -> (4.5 + 6) / 1.4 ≈ 7.5,
+# rounded up a touch for knockout long-shot inflation.
+_SHOTS_PER_XG = 8.0
+
 _markets_cache: dict[str, tuple[float, list]] = {}
 _MARKETS_TTL = 75
 _out_cache: dict[str, tuple[float, dict]] = {}
@@ -37,9 +48,11 @@ _OUT_TTL = 25
 def suggest_levers(xg_home: float | None, xg_away: float | None,
                    stats: dict, minutes: float) -> dict:
     """Attack multipliers from live shots-on-target share vs the share the
-    pre-match xG implied. Returns neutral levers with the reason when the
-    inputs aren't there to justify anything else."""
-    neutral = {"home": 1.0, "away": 1.0, "source": "neutral", "basis": None}
+    pre-match xG implied, plus symmetric DEFENCE multipliers from total shot
+    volume vs expected (game openness). Returns neutral levers with the
+    reason when the inputs aren't there to justify anything else."""
+    neutral = {"home": 1.0, "away": 1.0, "def_home": 1.0, "def_away": 1.0,
+               "source": "neutral", "basis": None}
     if not stats.get("available") or not xg_home or not xg_away:
         return neutral
     rows = {r["key"]: r for r in stats.get("rows", [])}
@@ -66,17 +79,34 @@ def suggest_levers(xg_home: float | None, xg_away: float | None,
         raw = (act / exp) ** weight if exp > 0 else 1.0
         return round(max(LEVER_CAP_LO, min(LEVER_CAP_HI, raw)), 3)
 
+    # openness: actual total weighted-shot volume vs the volume the xG
+    # implied for the minutes played, shrunk by the same early-game weight.
+    # Symmetric on both defences — volume says how open the GAME is, the
+    # share levers above already say who is doing the creating.
+    vol_actual = (h - 1.0) + (a - 1.0)          # strip the +1 smoothing
+    vol_expected = _SHOTS_PER_XG * (xg_home + xg_away) * max(minutes, 1.0) / 90.0
+    openness_raw = vol_actual / vol_expected if vol_expected > 0 else 1.0
+    openness = round(max(DEF_CAP_LO, min(
+        DEF_CAP_HI, openness_raw ** weight if openness_raw > 0 else 1.0)), 3)
+
     return {
         "home": lever(act_share, exp_share),
         "away": lever(1 - act_share, 1 - exp_share),
+        "def_home": openness,
+        "def_away": openness,
         "source": "live shots",
         "basis": {
             "sot_home": _num(sot, "home"), "sot_away": _num(sot, "away"),
             "shots_home": _num(shots, "home"), "shots_away": _num(shots, "away"),
             "actual_share_home": round(act_share, 3),
             "expected_share_home": round(exp_share, 3),
+            "volume_actual": round(vol_actual, 1),
+            "volume_expected": round(vol_expected, 1),
+            "openness_raw": round(openness_raw, 3),
+            "openness": openness,
             "minutes": minutes, "weight": round(weight, 3),
             "cap": [LEVER_CAP_LO, LEVER_CAP_HI],
+            "def_cap": [DEF_CAP_LO, DEF_CAP_HI],
         },
     }
 
@@ -159,6 +189,8 @@ def live_auto(match, engine, prematch_xg: dict | None) -> dict:
         match, state["home_goals"], state["away_goals"], eff_minutes,
         red_home=state["red_home"], red_away=state["red_away"],
         attack_home_mult=levers["home"], attack_away_mult=levers["away"],
+        defence_home_mult=levers.get("def_home", 1.0),
+        defence_away_mult=levers.get("def_away", 1.0),
         phase=_phase_from_status(state["status_short"]),
         markets=markets,
         first_goal_scored=bool(state["goals_list"])
