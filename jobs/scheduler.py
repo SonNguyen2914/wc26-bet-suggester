@@ -166,6 +166,36 @@ def resolve_bracket_job() -> None:
             f"{c['qf']} ({c['side']}).")
 
 
+def boot_sequence() -> None:
+    """Ordered boot recovery + prime — ONE job, because these raced as four
+    independent one-shots. If the prediction prime ran before
+    restore_missing_results had re-frozen finished results (the DB is wiped
+    on every deploy) and the bracket resolver had filled the next round's
+    slots, unresolved matches were skipped by the prime and the board sat on
+    placeholder default-stats numbers until the next hourly cron (observed
+    on prod 2026-07-12: SF2 served xg 1.398/1.398, advance ~0.50).
+
+    The order is load-bearing:
+      1. restore results   — bracket resolution reads frozen MatchResults
+                             (the feed fallback can't fetch finished 2026
+                             fixtures on the free plan);
+      2. resolve bracket   — priming needs real team names in the slots;
+      3. prime predictions — the odds poller needs model probs for edge;
+      4. prime odds poll.
+    Steps are isolated: a failing restore (ESPN down) must not leave the
+    bracket unresolved or the dashboard unprimed."""
+    for name, step in (
+        ("restore_results", live_state.restore_missing_results),
+        ("resolve_bracket", resolve_bracket_job),
+        ("prime_predictions", hourly_predictions),
+        ("prime_poll", poll_odds),
+    ):
+        try:
+            step()
+        except Exception as exc:
+            print(f"[boot] {name} FAILED: {exc}")
+
+
 def start_scheduler() -> BackgroundScheduler:
     scheduler = BackgroundScheduler(timezone="UTC")
     scheduler.add_job(hourly_predictions, "cron", minute=0, id="hourly")
@@ -182,20 +212,15 @@ def start_scheduler() -> BackgroundScheduler:
     scheduler.add_job(live_signals_job, "interval",
                       seconds=config.LIVE_SIGNAL_POLL_SECONDS,
                       id="live_signals", coalesce=True, max_instances=1)
-    # One-shot at boot: re-freeze any finished match a DB wipe erased
-    # (ephemeral SQLite until a Railway volume/Postgres exists) and
-    # re-capture its closing snapshot. Idempotent, cheap when healthy.
-    scheduler.add_job(live_state.restore_missing_results, "date",
-                      id="restore_results")
     # Bracket resolution: low frequency (the bracket changes at most a handful
     # of times all tournament) and self-skipping once fully known, so it's
-    # nearly free. Interval, not cron, so it also runs shortly after boot.
+    # nearly free. boot_sequence covers the boot-time resolve.
     scheduler.add_job(resolve_bracket_job, "interval",
                       minutes=config.BRACKET_RESOLVE_MINUTES, id="bracket")
     scheduler.start()
-    # Prime the cache immediately on boot so the dashboard isn't empty
-    # and the poller has model probabilities to compute edge with.
-    scheduler.add_job(hourly_predictions, "date", id="prime_predictions")
-    scheduler.add_job(poll_odds, "date", id="prime_poll")
-    scheduler.add_job(resolve_bracket_job, "date", id="prime_bracket")
+    # One-shot at boot, ORDERED: restore wiped results -> resolve bracket
+    # slots -> prime predictions -> prime the odds poll. A single chained
+    # job — as independent one-shots these raced each other (see
+    # boot_sequence docstring).
+    scheduler.add_job(boot_sequence, "date", id="boot_sequence")
     return scheduler
