@@ -229,6 +229,16 @@ class SuggesterEngine:
     def run_for_match(self, match: Match, source: str = "scheduled",
                       is_final: bool = False) -> dict:
         """Simulate a match, price every Kalshi market on it, persist, return."""
+        # Snapshot resolution BEFORE reading stats. The bracket resolver
+        # mutates the Match in place, so a request that starts on a
+        # placeholder slot ("NOR/ENG winner" -> _DEFAULT stats for both
+        # sides) can see real names by the time markets are matched — the
+        # slow first Kalshi events fetch is a seconds-wide window. That
+        # exact race persisted a symmetric default-stats batch against 47
+        # real SF2 markets on prod (2026-07-13, 8s after the boot prime).
+        # A side never un-resolves, so resolved-at-entry means the names
+        # below are stable for the whole run.
+        resolved = match.fully_resolved
         home_stats = get_team_stats(match.home)
         away_stats = get_team_stats(match.away)
         sim = self.simulator.simulate(home_stats, away_stats, stage=match.stage)
@@ -241,7 +251,11 @@ class SuggesterEngine:
             "halves": sim.get("halves"),
         })
 
-        markets = self._dedupe_markets(self.kalshi.get_markets_for_match(match))
+        # A placeholder slot prices and persists NOTHING: there are no real
+        # teams behind the simulation, so any market row it wrote would be
+        # default-stats noise served from cache until it went stale.
+        markets = ([] if not resolved else
+                   self._dedupe_markets(self.kalshi.get_markets_for_match(match)))
         suggestions: list[BetSuggestion] = []
 
         with SessionLocal() as session:

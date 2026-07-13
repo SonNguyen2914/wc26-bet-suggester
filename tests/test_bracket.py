@@ -146,3 +146,80 @@ class TestBracketStatus:
     def test_third_place_is_loser_fed(self):
         from src.schedule_data import get_match
         assert get_match("THIRD").loser_feed is True
+
+
+class TestPlaceholderNeverPersists:
+    """run_for_match on an unresolved slot: no Kalshi fetch, no Prediction
+    rows, no suggestions.
+
+    Regression (prod 2026-07-13): a request that started on placeholder
+    names simulated both sides on _DEFAULT stats, then the bracket resolver
+    mutated the Match during the slow first Kalshi events fetch — market
+    matching succeeded with the real names and the symmetric batch was
+    persisted as the newest cache entry (SF2 xg 1.398/1.398 against 47 real
+    markets, 8 seconds after the boot prime wrote the correct batch)."""
+
+    def setup_method(self):
+        _reset_schedule()
+
+    def test_unresolved_slot_prices_and_persists_nothing(self):
+        from src.db import Prediction, SessionLocal, init_db
+        from src.suggester import SuggesterEngine
+
+        init_db()
+        with SessionLocal() as s:
+            s.query(Prediction).filter(Prediction.match_id == "SF1").delete()
+            s.commit()
+
+        m = sd.get_match("SF1")
+        assert not m.fully_resolved
+
+        eng = SuggesterEngine()
+        fetched: list[str] = []
+
+        def _race_stub(match):
+            # the resolver firing mid-request must not matter: an
+            # unresolved-at-entry run never even reaches the fetch
+            fetched.append(match.match_id)
+            sd.resolve_side("SF1", "home", "France")
+            sd.resolve_side("SF1", "away", "Spain")
+            return [{"market_id": "KXWCGAME-X", "title": "France to win",
+                     "outcome_key": "home_win", "yes_price": 0.5,
+                     "decimal_odds": 2.0, "volume_24h": 99999.0}]
+
+        eng.kalshi.get_markets_for_match = _race_stub
+        result = eng.run_for_match(m, source="on_demand")
+
+        assert fetched == [], "placeholder slot must never fetch markets"
+        assert result["suggestions"] == []
+        with SessionLocal() as s:
+            n = (s.query(Prediction)
+                 .filter(Prediction.match_id == "SF1").count())
+        assert n == 0, "placeholder slot must never persist Prediction rows"
+
+    def test_resolved_match_still_prices_and_persists(self):
+        from src.db import Prediction, SessionLocal, init_db
+        from src.suggester import SuggesterEngine
+
+        init_db()
+        with SessionLocal() as s:
+            s.query(Prediction).filter(Prediction.match_id == "SF1").delete()
+            s.commit()
+
+        sd.resolve_side("SF1", "home", "France")
+        sd.resolve_side("SF1", "away", "Spain")
+        m = sd.get_match("SF1")
+        assert m.fully_resolved
+
+        eng = SuggesterEngine()
+        eng.kalshi.get_markets_for_match = lambda match: [
+            {"market_id": "KXWCGAME-X", "title": "France to win",
+             "outcome_key": "home_win", "yes_price": 0.5,
+             "decimal_odds": 2.0, "volume_24h": 99999.0}]
+        result = eng.run_for_match(m, source="on_demand")
+
+        assert len(result["suggestions"]) == 1
+        with SessionLocal() as s:
+            n = (s.query(Prediction)
+                 .filter(Prediction.match_id == "SF1").count())
+        assert n == 1
