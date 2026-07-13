@@ -20,8 +20,7 @@ from pathlib import Path
 SRC = Path(sys.argv[1] if len(sys.argv) > 1
            else "/Users/ns/Desktop/Projects/WC26 Predictor/match_pdfs/extracted")
 OUT = Path(__file__).resolve().parents[1] / "src" / "data" / "player_rates.json"
-REMAINING = {"France", "Morocco", "Spain", "Belgium",
-             "Norway", "England", "Argentina", "Switzerland"}
+REMAINING = {"France", "Spain", "England", "Argentina"}   # semifinalists
 
 rows = list(csv.DictReader(open(SRC / "player_match_stats.csv")))
 players: dict = defaultdict(lambda: {"matches": 0, "starts": 0, "attempts": 0,
@@ -71,7 +70,7 @@ for team, lst in out.items():
 
 OUT.parent.mkdir(parents=True, exist_ok=True)
 OUT.write_text(json.dumps({
-    "source": "FIFA Training Centre PMSR distributions tables (39 PDFs, validated)",
+    "source": "FIFA Training Centre PMSR distributions tables (43 PDFs through the QFs, validated)",
     "share_model": "0.6*goal_share + 0.4*attempt_share, normalised per team",
     "teams": out}, indent=1))
 print(f"wrote {OUT}")

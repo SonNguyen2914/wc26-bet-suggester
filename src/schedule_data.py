@@ -270,14 +270,22 @@ TEAM_STATS: dict[str, dict] = {
     # form 0.80->0.85: six straight wins, late winner vs a good side.
     "Spain":         {"attack": 1.26, "defence": 0.67, "form": 0.85, "set_piece_threat": 0.20, "red_card_risk": 0.04, "fatigue": 0.20, "elo": 1912,
         "scouting": "Total control — and the ruthlessness question is being answered. Beat Belgium 2-1 in the QF on ~66% possession: Fabián Ruiz's opener, then an 88th-minute winner from Merino after De Ketelaere's counter became the FIRST goal Spain conceded all tournament (11-1 overall now). Rodri and Pedri suffocate games behind the tournament's best line-breaking passing (144 completed line breaks/game); under 0.5 xG/game allowed. Conversion still runs streaky against good sides, but they keep finding the decisive goal. No extra time played — though a day less rest than France before the semifinal."},
-    # --- Argentina: opp-adjusted. Elite Messi attack (caps 1.45), softer at back.
-    "Argentina":     {"attack": 1.45, "defence": 0.79, "form": 0.80, "set_piece_threat": 0.27, "red_card_risk": 0.06, "fatigue": 0.34, "elo": 1914,
-        "scouting": "Messi-driven elite attack — the highest chance quality of any side left (2.38 xG/game), lethal from set pieces and free-kicks. Dominates the ball against weaker teams (57% possession and 2.63 xG in the 3-2 R16 win over Egypt) and counters against good ones. That R16 also exposed the soft underbelly: a limited Egypt scored twice, and Argentina only pulled clear with three goals in the last 13 minutes — two of them headers from crosses, underlining the aerial threat both ways. Elite going forward, gettable at the back; the 120-minute R32 is far enough behind them now."},
-    # --- England: OPP-ADJUSTED (2 PDFs). attack 1.35 clinical (3 goals/6
-    # shots vs Mexico); defence 1.0 leaky when pinned (2.01 xGA Mexico, 2 vs
-    # Croatia). Pragmatic: ceded 68% possession to Mexico, won on the counter.
-    "England":       {"attack": 1.35, "defence": 1.00, "form": 0.90, "set_piece_threat": 0.30, "red_card_risk": 0.04, "fatigue": 0.22, "elo": 1871,
-        "scouting": "Pragmatic and ruthless in transition. Against Mexico, England ceded 68% of the ball, sat in a deep block and still won 3-2 on six shots — clinical through Bellingham, Kane and the pace of Saka and Gordon. They can play open too (4-2 over Croatia). Real set-piece threat via Kane. The worry is defensive: they get pinned and leak chances (2.01 xG allowed to Mexico), and they've fallen behind more than once before rallying."},
+    # --- Argentina: OPP-ADJUSTED through the QF (6 PDFs). attack holds the
+    # 1.45 cap (2.32 raw / 2.24 adj xGF per game). defence 0.79->0.77: the
+    # Egypt wobble now looks like the outlier — 0.44 xGA vs Switzerland in
+    # the QF, 0.65 adj xGA/game overall. Group-opponent Elos are documented
+    # ESTIMATES (Algeria 1635, Austria 1760, Jordan 1455, Cabo Verde 1470,
+    # anchor 1650); +-40 Elo moves the result <0.5%, so estimate error is cheap.
+    "Argentina":     {"attack": 1.45, "defence": 0.77, "form": 0.80, "set_piece_threat": 0.27, "red_card_risk": 0.06, "fatigue": 0.34, "elo": 1914,
+        "scouting": "Messi-driven elite attack — the highest chance quality left alongside France (2.32 xG/game), lethal from set pieces and crosses. The QF followed the pattern: dominated Switzerland, led through Mac Allister's 10th-minute header, got pegged back by Ndoye at 67', then pulled clear in extra time (Álvarez 112', Lautaro 121'). The Egypt defensive wobble looks like the exception now — 0.44 xGA against Switzerland, one of the best opponent-adjusted concession rates left. The real concern is the legs: a second 120-minute match in three rounds and a day less rest than England before the semifinal."},
+    # --- England: OPP-ADJUSTED through the QF (6 PDFs, replacing the 2-PDF
+    # early read). attack 1.35->1.45 cap: 2.07 adj xGF/game once the group
+    # stage counts (3.33 xG vs Croatia). defence 1.00->0.86: Mexico's 2.01
+    # xGA was the one leaky night in six — 0.89 adj xGA/game overall.
+    # Group-opponent Elos are documented ESTIMATES (Croatia 1810, Ghana
+    # 1590, Panama 1565, Congo DR 1525, anchor 1650).
+    "England":       {"attack": 1.45, "defence": 0.86, "form": 0.90, "set_piece_threat": 0.30, "red_card_risk": 0.04, "fatigue": 0.22, "elo": 1871,
+        "scouting": "Comeback pragmatists. Behind to Norway at half-time in the QF, then a Bellingham double (47', and 93' in extra time) won it 2-1 — the fourth time this tournament England conceded first and won anyway. Happy ceding the ball (68% possession given to Mexico) and striking in transition through Bellingham, Kane and the pace of Saka and Gordon; they can play open too (4-2 over Croatia on 3.33 xG). The early 'leaky' read hasn't held — Mexico was the one bad defensive night in six matches. Kane and Bellingham split the scoring almost evenly (6 goals each). 120 minutes in the QF, but a day more rest than Argentina."},
     # --- Brazil: eliminated (lost to Norway R16). Kept for reference/opponent calc.
     "Brazil":        {"attack": 1.45, "defence": 0.80, "form": 0.70, "set_piece_threat": 0.27, "red_card_risk": 0.05, "fatigue": 0.24, "elo": 1805,
         "scouting": "Eliminated by Norway in the R16."},
