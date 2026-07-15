@@ -114,8 +114,10 @@ def resolve_bracket() -> list[dict]:
     if not slots:
         return []  # bracket fully known — no feed work at all
 
-    if not config.API_FOOTBALL_KEY:
-        return []  # no feed configured; placeholders stay, UI shows "TBD"
+    # No API-key gate here: the primary source is the frozen MatchResult row
+    # (zero feed cost), and the feed fallbacks are ESPN-keyless-capable with
+    # their own budgets. The old `if not API_FOOTBALL_KEY: return []` guard
+    # predated the ESPN backbone and silently disabled DB-only resolution.
 
     changed: list[dict] = []
     schedule = {m.match_id: m for m in load_schedule()}

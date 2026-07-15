@@ -136,3 +136,113 @@ class TestLivePollWindow:
         now = datetime.now(timezone.utc)
         unresolved = type("M", (), {"fully_resolved": False, "kickoff": now})()
         assert ls.should_poll_live(unresolved, now) is False
+
+
+class TestRestoreFixpoint:
+    """Regression for the SF1 heal blindspot (found live 2026-07-15): on a
+    fully wiped DB, a knockout match whose FEEDERS were also wiped is
+    visited while its teams are still placeholders and skipped — a single
+    restore pass can never heal it. The fixpoint loop must: heal the QFs,
+    resolve the SF slots, heal the SFs on the next pass, then resolve the
+    FINAL."""
+
+    # finished states keyed by (home, away) as the resolver names them
+    _RESULTS = {
+        ("Morocco", "France"): (0, 2),
+        ("Spain", "Belgium"): (2, 1),
+        ("Norway", "England"): (1, 2),
+        ("Argentina", "Switzerland"): (3, 1),
+        ("France", "Spain"): (0, 2),
+        ("England", "Argentina"): (1, 2),
+    }
+
+    def setup_method(self):
+        from datetime import timedelta
+
+        from src.db import (MatchResult, MatchLiveSnapshot, SessionLocal,
+                            init_db, utcnow)
+        init_db()
+        with SessionLocal() as s:
+            s.query(MatchResult).delete()
+            s.query(MatchLiveSnapshot).delete()
+            s.commit()
+        sd._SCHEDULE = None            # fresh placeholders, like a real boot
+        # pin every involved kickoff safely outside the live-poll window so
+        # the test never depends on the real clock vs real fixture dates
+        self._kicks = {}
+        for m in sd.load_schedule():
+            self._kicks[m.match_id] = m.kickoff
+            m.kickoff = utcnow() - timedelta(days=2)
+
+        self._orig_espn = lf._espn_state_for
+
+        def fake_espn(home, away, want_finished=False, on_date=None):
+            r = self._RESULTS.get((home, away))
+            if r is None:
+                return None
+            return {"home_name": home, "away_name": away,
+                    "home_goals": r[0], "away_goals": r[1],
+                    "minutes_elapsed": 90.0, "status_short": "FT",
+                    "is_live": False, "is_finished": True,
+                    "red_home": False, "red_away": False, "goals_list": []}
+        lf._espn_state_for = fake_espn
+        # the resolver's feed fallbacks must stay offline in tests: force
+        # them to "no answer" so only frozen MatchResult rows resolve slots
+        self._orig_live = lf.live_state_for
+        self._orig_fin = lf.finished_state_for
+        lf.live_state_for = lambda h, a: None
+        lf.finished_state_for = lambda h, a: None
+
+        from src import research
+        self._orig_snap = research.capture_closing_snapshot
+        research.capture_closing_snapshot = lambda m: None
+
+    def teardown_method(self):
+        from src.db import MatchResult, SessionLocal
+        lf._espn_state_for = self._orig_espn
+        lf.live_state_for = self._orig_live
+        lf.finished_state_for = self._orig_fin
+        from src import research
+        research.capture_closing_snapshot = self._orig_snap
+        for m in sd.load_schedule():
+            if m.match_id in self._kicks:
+                m.kickoff = self._kicks[m.match_id]
+        sd._SCHEDULE = None
+        with SessionLocal() as s:
+            s.query(MatchResult).delete()
+            s.commit()
+
+    def test_feeder_dependent_matches_heal_to_fixpoint(self):
+        from src.db import MatchResult, SessionLocal
+
+        r = ls.restore_missing_results()
+        assert r["restored"] == 6          # 4 QFs + both SFs
+
+        with SessionLocal() as s:
+            sf1 = s.get(MatchResult, "SF1")
+            sf2 = s.get(MatchResult, "SF2")
+        assert sf1 is not None and (sf1.home_goals, sf1.away_goals) == (0, 2)
+        assert sf2 is not None and (sf2.home_goals, sf2.away_goals) == (1, 2)
+
+        final = sd.get_match("FINAL")
+        assert final.fully_resolved
+        assert (final.home, final.away) == ("Spain", "Argentina")
+
+    def test_steady_state_is_one_cheap_pass(self):
+        ls.restore_missing_results()       # heal everything
+        calls = {"n": 0}
+        orig = lf._espn_state_for
+
+        def counting(*a, **k):
+            calls["n"] += 1
+            return orig(*a, **k)
+        lf._espn_state_for = counting
+        try:
+            r = ls.restore_missing_results()
+        finally:
+            lf._espn_state_for = orig
+        assert r["restored"] == 0
+        # exactly ONE pass: each still-missing match (8 unmocked R16 + FINAL
+        # + 3rd-place) probes <=3 ESPN date buckets. Fixpoint churn (six
+        # passes) would show ~6x this.
+        assert calls["n"] <= 3 * 10

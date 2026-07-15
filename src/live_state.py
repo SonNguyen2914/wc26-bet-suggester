@@ -134,7 +134,33 @@ def restore_missing_results() -> dict:
     deploy resets SQLite): any resolved match whose live-poll window has
     already closed but has no MatchResult is re-frozen from ESPN's dated
     scoreboard, and its closing snapshot re-captured (both idempotent).
-    Runs once at scheduler boot; cheap when there is nothing to heal."""
+    Runs once at scheduler boot; cheap when there is nothing to heal.
+
+    Runs to a FIXPOINT, not a single pass: a knockout match's teams are
+    placeholders until its FEEDER results exist, so on a fully wiped DB the
+    first pass restores the feeders but must skip the match itself
+    (`fully_resolved` is still False when it's visited). resolve_bracket()
+    after each pass fills the newly-decided slots, and the next pass can
+    then restore that match's own result. One extra pass per bracket round,
+    so this converges in <=4 passes and the steady-state cost is one no-op
+    pass. (Found live 2026-07-15: SF1's result was unhealable after a
+    deploy — its QF feeders restored in the same pass that skipped it.)"""
+    restored = 0
+    for _pass in range(6):    # bracket depth + margin; each pass is cheap
+        pass_restored = _restore_pass()
+        restored += pass_restored
+        try:
+            from src.bracket import resolve_bracket
+            resolve_bracket()
+        except Exception as exc:
+            print(f"[live-state] post-restore bracket resolve failed: {exc}")
+        if pass_restored == 0:
+            break
+    return {"restored": restored}
+
+
+def _restore_pass() -> int:
+    """One sweep of the schedule; returns how many results were restored."""
     restored = 0
     now = utcnow()
     for m in load_schedule():
@@ -169,13 +195,7 @@ def restore_missing_results() -> dict:
         print(f"[live-state] restored result {m.match_id} from dated ESPN")
         from src import research
         research.capture_closing_snapshot(m)
-    if restored:
-        try:
-            from src.bracket import resolve_bracket
-            resolve_bracket()
-        except Exception as exc:
-            print(f"[live-state] post-restore bracket resolve failed: {exc}")
-    return {"restored": restored}
+    return restored
 
 
 def _aware(dt):
