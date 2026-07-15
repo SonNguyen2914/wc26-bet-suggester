@@ -189,10 +189,10 @@ class TestPlayerProps:
         assert pp["lambda"]["home"] < 1.85
 
     def test_all_remaining_teams_have_rates(self):
-        # rates track the CURRENT round's survivors (semifinalists since
-        # 2026-07-12); eliminated teams drop out of player_rates.json
+        # rates track the CURRENT round's survivors (finalists since
+        # 2026-07-15); eliminated teams drop out of player_rates.json
         from src.player_props import team_players
-        for t in ("France", "Spain", "England", "Argentina"):
+        for t in ("Spain", "Argentina"):
             assert len(team_players(t)) >= 8, t
 
 

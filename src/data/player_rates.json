@@ -6,132 +6,132 @@
    {
     "player": "Mikel OYARZABAL",
     "shirt": 21,
-    "matches": 6,
-    "starts": 6,
-    "attempts": 20,
-    "on_target": 9,
-    "goals": 4,
-    "share": 0.31272
+    "matches": 7,
+    "starts": 7,
+    "attempts": 22,
+    "on_target": 10,
+    "goals": 5,
+    "share": 0.32333
    },
    {
     "player": "Lamine YAMAL",
     "shirt": 19,
-    "matches": 6,
-    "starts": 5,
+    "matches": 7,
+    "starts": 6,
     "attempts": 23,
     "on_target": 10,
     "goals": 1,
-    "share": 0.14364
-   },
-   {
-    "player": "Mikel MERINO",
-    "shirt": 6,
-    "matches": 6,
-    "starts": 1,
-    "attempts": 4,
-    "on_target": 3,
-    "goals": 2,
-    "share": 0.13455
-   },
-   {
-    "player": "Alex BAENA",
-    "shirt": 15,
-    "matches": 5,
-    "starts": 5,
-    "attempts": 9,
-    "on_target": 4,
-    "goals": 1,
-    "share": 0.09273
-   },
-   {
-    "player": "Fabian RUIZ",
-    "shirt": 8,
-    "matches": 6,
-    "starts": 2,
-    "attempts": 7,
-    "on_target": 1,
-    "goals": 1,
-    "share": 0.08545
+    "share": 0.12667
    },
    {
     "player": "Pedro PORRO",
     "shirt": 12,
-    "matches": 4,
-    "starts": 4,
-    "attempts": 5,
-    "on_target": 2,
+    "matches": 5,
+    "starts": 5,
+    "attempts": 7,
+    "on_target": 3,
+    "goals": 2,
+    "share": 0.12333
+   },
+   {
+    "player": "Mikel MERINO",
+    "shirt": 6,
+    "matches": 7,
+    "starts": 1,
+    "attempts": 4,
+    "on_target": 3,
+    "goals": 2,
+    "share": 0.11333
+   },
+   {
+    "player": "Alex BAENA",
+    "shirt": 15,
+    "matches": 6,
+    "starts": 6,
+    "attempts": 11,
+    "on_target": 4,
     "goals": 1,
-    "share": 0.07818
+    "share": 0.08667
+   },
+   {
+    "player": "Fabian RUIZ",
+    "shirt": 8,
+    "matches": 7,
+    "starts": 3,
+    "attempts": 8,
+    "on_target": 1,
+    "goals": 1,
+    "share": 0.07667
    },
    {
     "player": "Ferran TORRES",
     "shirt": 7,
-    "matches": 6,
+    "matches": 7,
     "starts": 1,
-    "attempts": 10,
+    "attempts": 11,
     "on_target": 2,
     "goals": 0,
-    "share": 0.03636
+    "share": 0.03667
    },
    {
     "player": "Dani OLMO",
     "shirt": 10,
-    "matches": 6,
-    "starts": 4,
-    "attempts": 10,
+    "matches": 7,
+    "starts": 5,
+    "attempts": 11,
     "on_target": 1,
     "goals": 0,
-    "share": 0.03636
+    "share": 0.03667
    },
    {
     "player": "RODRI",
     "shirt": 16,
-    "matches": 6,
-    "starts": 6,
+    "matches": 7,
+    "starts": 7,
     "attempts": 6,
     "on_target": 0,
     "goals": 0,
-    "share": 0.02182
+    "share": 0.02
    },
    {
     "player": "Aymeric LAPORTE",
     "shirt": 14,
-    "matches": 6,
-    "starts": 6,
+    "matches": 7,
+    "starts": 7,
     "attempts": 4,
     "on_target": 0,
     "goals": 0,
-    "share": 0.01455
+    "share": 0.01333
    },
    {
     "player": "PEDRI",
     "shirt": 20,
-    "matches": 6,
+    "matches": 7,
     "starts": 5,
     "attempts": 4,
     "on_target": 1,
     "goals": 0,
-    "share": 0.01455
+    "share": 0.01333
    },
    {
     "player": "Marc CUCURELLA",
     "shirt": 24,
-    "matches": 6,
-    "starts": 6,
+    "matches": 7,
+    "starts": 7,
     "attempts": 4,
     "on_target": 3,
     "goals": 0,
-    "share": 0.01455
+    "share": 0.01333
    },
    {
     "player": "Pau CUBARSI",
     "shirt": 22,
-    "matches": 6,
-    "starts": 5,
+    "matches": 7,
+    "starts": 6,
     "attempts": 3,
     "on_target": 1,
     "goals": 0,
-    "share": 0.01091
+    "share": 0.01
    },
    {
     "player": "GAVI",
@@ -141,23 +141,23 @@
     "attempts": 1,
     "on_target": 0,
     "goals": 0,
-    "share": 0.00364
-   },
-   {
-    "player": "Marcos LLORENTE",
-    "shirt": 5,
-    "matches": 2,
-    "starts": 2,
-    "attempts": 0,
-    "on_target": 0,
-    "goals": 0,
-    "share": 0.0
+    "share": 0.00333
    },
    {
     "player": "Nico WILLIAMS",
     "shirt": 17,
-    "matches": 4,
+    "matches": 5,
     "starts": 0,
+    "attempts": 1,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.00333
+   },
+   {
+    "player": "Marcos LLORENTE",
+    "shirt": 5,
+    "matches": 3,
+    "starts": 2,
     "attempts": 0,
     "on_target": 0,
     "goals": 0,
@@ -166,8 +166,8 @@
    {
     "player": "Unai SIMON",
     "shirt": 23,
-    "matches": 6,
-    "starts": 6,
+    "matches": 7,
+    "starts": 7,
     "attempts": 0,
     "on_target": 0,
     "goals": 0,
@@ -208,92 +208,102 @@
    {
     "player": "Kylian MBAPPE",
     "shirt": 10,
-    "matches": 6,
-    "starts": 6,
-    "attempts": 30,
+    "matches": 7,
+    "starts": 7,
+    "attempts": 33,
     "on_target": 19,
     "goals": 8,
-    "share": 0.40909
+    "share": 0.41
    },
    {
     "player": "Ousmane DEMBELE",
     "shirt": 7,
-    "matches": 6,
-    "starts": 6,
-    "attempts": 16,
-    "on_target": 6,
+    "matches": 7,
+    "starts": 7,
+    "attempts": 18,
+    "on_target": 8,
     "goals": 5,
-    "share": 0.24568
+    "share": 0.2475
    },
    {
     "player": "Bradley BARCOLA",
     "shirt": 12,
-    "matches": 6,
-    "starts": 3,
-    "attempts": 7,
+    "matches": 7,
+    "starts": 4,
+    "attempts": 8,
     "on_target": 4,
     "goals": 2,
-    "share": 0.10045
+    "share": 0.10167
    },
    {
     "player": "Desire DOUE",
     "shirt": 20,
-    "matches": 6,
+    "matches": 7,
     "starts": 2,
-    "attempts": 11,
-    "on_target": 5,
+    "attempts": 13,
+    "on_target": 6,
     "goals": 1,
-    "share": 0.0775
+    "share": 0.08083
    },
    {
     "player": "Michael OLISE",
     "shirt": 11,
-    "matches": 6,
-    "starts": 6,
+    "matches": 7,
+    "starts": 7,
     "attempts": 17,
     "on_target": 5,
     "goals": 0,
-    "share": 0.06182
+    "share": 0.05667
    },
    {
     "player": "Adrien RABIOT",
     "shirt": 14,
-    "matches": 5,
-    "starts": 5,
-    "attempts": 7,
+    "matches": 6,
+    "starts": 6,
+    "attempts": 8,
     "on_target": 1,
     "goals": 0,
-    "share": 0.02545
+    "share": 0.02667
    },
    {
     "player": "Manu KONE",
     "shirt": 6,
-    "matches": 4,
+    "matches": 5,
     "starts": 4,
     "attempts": 6,
     "on_target": 2,
     "goals": 0,
-    "share": 0.02182
+    "share": 0.02
    },
    {
     "player": "Dayot UPAMECANO",
     "shirt": 4,
-    "matches": 6,
-    "starts": 6,
+    "matches": 7,
+    "starts": 7,
     "attempts": 3,
     "on_target": 1,
     "goals": 0,
-    "share": 0.01091
+    "share": 0.01
+   },
+   {
+    "player": "Aurelien TCHOUAMENI",
+    "shirt": 8,
+    "matches": 4,
+    "starts": 4,
+    "attempts": 3,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.01
    },
    {
     "player": "Theo HERNANDEZ",
     "shirt": 19,
-    "matches": 3,
+    "matches": 4,
     "starts": 2,
     "attempts": 3,
     "on_target": 0,
     "goals": 0,
-    "share": 0.01091
+    "share": 0.01
    },
    {
     "player": "Jean-Philippe MATETA",
@@ -303,53 +313,43 @@
     "attempts": 3,
     "on_target": 1,
     "goals": 0,
-    "share": 0.01091
+    "share": 0.01
    },
    {
     "player": "Jules KOUNDE",
     "shirt": 5,
-    "matches": 6,
-    "starts": 6,
+    "matches": 7,
+    "starts": 7,
     "attempts": 2,
     "on_target": 0,
     "goals": 0,
-    "share": 0.00727
-   },
-   {
-    "player": "Aurelien TCHOUAMENI",
-    "shirt": 8,
-    "matches": 3,
-    "starts": 3,
-    "attempts": 2,
-    "on_target": 0,
-    "goals": 0,
-    "share": 0.00727
+    "share": 0.00667
    },
    {
     "player": "Lucas DIGNE",
     "shirt": 3,
-    "matches": 4,
-    "starts": 4,
+    "matches": 5,
+    "starts": 5,
     "attempts": 2,
     "on_target": 1,
     "goals": 0,
-    "share": 0.00727
+    "share": 0.00667
    },
    {
     "player": "William SALIBA",
     "shirt": 17,
-    "matches": 5,
-    "starts": 5,
+    "matches": 6,
+    "starts": 6,
     "attempts": 1,
     "on_target": 0,
     "goals": 0,
-    "share": 0.00364
+    "share": 0.00333
    },
    {
     "player": "Mike MAIGNAN",
     "shirt": 16,
-    "matches": 6,
-    "starts": 6,
+    "matches": 7,
+    "starts": 7,
     "attempts": 0,
     "on_target": 0,
     "goals": 0,
@@ -358,7 +358,7 @@
    {
     "player": "Rayan CHERKI",
     "shirt": 24,
-    "matches": 5,
+    "matches": 6,
     "starts": 0,
     "attempts": 0,
     "on_target": 0,
@@ -408,7 +408,7 @@
    {
     "player": "Maxence LACROIX",
     "shirt": 26,
-    "matches": 1,
+    "matches": 2,
     "starts": 1,
     "attempts": 0,
     "on_target": 0,

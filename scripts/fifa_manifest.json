@@ -1,9 +1,7 @@
 {
- "note": "Authoritative per-team PMSR manifest (user-verified 2026-07-08, post-R16; QFs M97-M100 added as played, complete 2026-07-12). Completeness rule through the QFs: every semifinalist has 3 group + 1 R32 + 1 R16 + 1 QF; knockout matches append as they are played.",
+ "note": "Authoritative per-team PMSR manifest (user-verified 2026-07-08, post-R16; QFs M97-M100 added as played, SF M101 added 2026-07-15; M102 pending). Completeness rule through the QFs: every semifinalist has 3 group + 1 R32 + 1 R16 + 1 QF; knockout matches append as they are played.",
  "remaining_team_codes": [
-  "FRA",
   "ESP",
-  "ENG",
   "ARG"
  ],
  "expected_per_team": 6,
@@ -394,6 +392,15 @@
     "SUI"
    ],
    "url": "https://www.fifatrainingcentre.com/media/native/tournaments/fifa-world-cup/2026/PMSR-M100-ARG-V-SUI.pdf"
+  },
+  {
+   "match_no": 101,
+   "stage": "Semi-final",
+   "teams": [
+    "FRA",
+    "ESP"
+   ],
+   "url": "https://www.fifatrainingcentre.com/media/native/tournaments/fifa-world-cup/2026/PMSR-M101-FRA-V-ESP.pdf"
   }
  ]
 }
