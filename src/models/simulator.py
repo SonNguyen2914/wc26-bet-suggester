@@ -48,6 +48,18 @@ class MatchSimulator:
         self.n = n_simulations or config.N_SIMULATIONS
         self.rng = np.random.default_rng(seed)
 
+    def _dispersed(self, lam_home, lam_away):
+        """Gamma-mix the per-sim goal rates (negative binomial dispersion):
+        real performances are streakier than pure Poisson — see
+        GOAL_DISPERSION_CV in config for the sourcing. Mean-1 multipliers,
+        so team strength (the mean) is untouched; only the spread widens."""
+        cv = config.GOAL_DISPERSION_CV
+        if cv <= 0:
+            return lam_home, lam_away
+        k = 1.0 / (cv * cv)
+        return (lam_home * self.rng.gamma(k, 1.0 / k, self.n),
+                lam_away * self.rng.gamma(k, 1.0 / k, self.n))
+
     def simulate(self, home_raw: dict, away_raw: dict, stage: str = "group") -> dict:
         xg_home, xg_away = predict_xg(home_raw, away_raw)
 
@@ -67,6 +79,8 @@ class MatchSimulator:
         if stage == "knockout":
             lam_home *= config.KNOCKOUT_DAMPING
             lam_away *= config.KNOCKOUT_DAMPING
+        # performance variance beyond Poisson (see _dispersed)
+        lam_home, lam_away = self._dispersed(lam_home, lam_away)
         # Red card: sourced coefficients (see RED_CARD_* constants above)
         lam_home = np.where(red_home, lam_home * RED_CARD_OWN_MULT, lam_home)
         lam_away = np.where(red_home, lam_away * RED_CARD_OPP_MULT, lam_away)
@@ -295,8 +309,11 @@ class MatchSimulator:
 
         minutes_elapsed = min(float(minutes_elapsed), 90.0)
         frac_remaining = max(0.0, (90.0 - float(minutes_elapsed)) / 90.0)
-        lam_home = rate_home * frac_remaining
-        lam_away = rate_away * frac_remaining
+        lam_home = np.full(self.n, rate_home * frac_remaining)
+        lam_away = np.full(self.n, rate_away * frac_remaining)
+        # same performance variance in the remainder as pre-match — exact
+        # scores settle on the 90, so the live cluster needs it too
+        lam_home, lam_away = self._dispersed(lam_home, lam_away)
 
         rem_home = self.rng.poisson(lam_home, self.n)
         rem_away = self.rng.poisson(lam_away, self.n)
@@ -314,8 +331,10 @@ class MatchSimulator:
             "phase": "regulation",
             "red_home": red_home,
             "red_away": red_away,
-            "lambda_remaining": {"home": round(lam_home, 3),
-                                 "away": round(lam_away, 3)},
+            # report the MEAN remaining rate (lam arrays carry per-sim
+            # dispersion multipliers; the echo is the expectation)
+            "lambda_remaining": {"home": round(rate_home * frac_remaining, 3),
+                                 "away": round(rate_away * frac_remaining, 3)},
         }
         return result
 

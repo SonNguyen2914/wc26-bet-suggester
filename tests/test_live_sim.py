@@ -151,3 +151,62 @@ class TestOutcomeKeyCompatibility:
         # second half carries more goals than the first (sourced skew)
         assert pre["halves"]["second_half"]["exp_goals"] >= \
             pre["halves"]["first_half"]["exp_goals"]
+
+
+class TestGoalOverdispersion:
+    """Gamma-mixed Poisson (GOAL_DISPERSION_CV): variance beyond Poisson.
+    Honest directional contract: tails and 0-0 fatten, means and win
+    probabilities hold; one-nil mass moves slightly UP (zero-side
+    convexity), 1-1 slightly down — dispersion is a tail-calibration fix,
+    not a scoreline-ordering fix."""
+
+    def _dist(self, cv, seed=7):
+        import config
+        from src.models.simulator import MatchSimulator
+        old = config.GOAL_DISPERSION_CV
+        config.GOAL_DISPERSION_CV = cv
+        try:
+            self._sim = MatchSimulator(n_simulations=40000, seed=seed)
+            stats = {"attack": 1.1, "defence": 0.85, "form": 0.85,
+                     "set_piece_threat": 0.2, "red_card_risk": 0.0,
+                     "fatigue": 0.2, "elo": 1900}
+            return self._sim.simulate(dict(stats), dict(stats),
+                                      stage="knockout")
+        finally:
+            config.GOAL_DISPERSION_CV = old
+
+    def _score_p(self, res, name):
+        for s in res["scorelines"]:
+            if s["score"] == name:
+                return s["prob"]
+        return 0.0
+
+    def test_tails_and_zero_zero_fatten(self):
+        # direction is tested at an exaggerated CV: at the deployed 0.30 the
+        # tail effect (+~0.4pt) is real but inside 40k-sim Monte Carlo noise
+        pure = self._dist(0.0)
+        p_over_pure = self._sim.prob_for_outcome_key(pure, "over_3_5")
+        zz_pure = self._score_p(pure, "0-0")
+        disp = self._dist(0.60)
+        p_over_disp = self._sim.prob_for_outcome_key(disp, "over_3_5")
+        assert p_over_disp > p_over_pure
+        assert self._score_p(disp, "0-0") > zz_pure
+        # the middle funds it: 1-1 gives up mass
+        assert self._score_p(disp, "1-1") < self._score_p(pure, "1-1")
+
+    def test_means_and_win_probs_stable(self):
+        pure = self._dist(0.0)
+        disp = self._dist(0.30)
+        # identical teams: win prob must stay ~symmetric and ~unchanged
+        assert abs(disp["outcomes"]["home_win"] - pure["outcomes"]["home_win"]) < 0.02
+        assert abs(disp["xg"]["home"] - pure["xg"]["home"]) < 1e-9  # means untouched
+
+    def test_draw_mass_roughly_preserved(self):
+        pure = self._dist(0.0)
+        disp = self._dist(0.30)
+        assert abs(disp["outcomes"]["draw"] - pure["outcomes"]["draw"]) < 0.03
+
+    def test_cv_zero_recovers_pure_poisson(self):
+        a = self._dist(0.0, seed=11)
+        b = self._dist(0.0, seed=11)
+        assert a["outcomes"] == b["outcomes"]

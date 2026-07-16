@@ -58,6 +58,20 @@ CORS_ORIGINS = os.getenv("CORS_ORIGINS", "http://localhost:3000,https://namson.d
 # estimate, kept configurable so it can be tuned against data without code.
 KNOCKOUT_DAMPING = float(os.getenv("KNOCKOUT_DAMPING", "0.85"))
 
+# --- Goal overdispersion ---------------------------------------------------
+# Real goal counts are streakier than an independent Poisson allows —
+# variance/mean ~1.1-1.25 in the literature, and this tournament's tails
+# agree (four 3-0s, three 1-4s in 41 clean matches). A gamma-mixed Poisson
+# (negative binomial): per-team-match rate multipliers Gamma(k, 1/k) with
+# CV = this value; CV 0.30 at lambda 1.3 gives variance/mean ~1.12. What it
+# DOES: fattens blowout tails and 0-0, better longshot/total calibration.
+# What it DOESN'T: fix any 1-0-vs-1-1 ordering — dispersion slightly RAISES
+# one-nil mass (zero-side convexity) and trims 1-1; the top-of-list order
+# for even matchups is the calibrated answer either way. The tournament's
+# apparent one-nil deficit (4 seen vs 7.6 expected) is p~0.13 — noted, not
+# actionable. Set to 0 to recover pure Poisson.
+GOAL_DISPERSION_CV = float(os.getenv("GOAL_DISPERSION_CV", "0.30"))
+
 # --- Model humility (market anchoring) -----------------------------------
 # Final probability = MODEL_WEIGHT * model + (1-MODEL_WEIGHT) * market-implied.
 # Liquid markets are usually right; only large, genuine disagreements should
