@@ -272,14 +272,16 @@ TEAM_STATS: dict[str, dict] = {
     # (1470, anchor 1650).
     "Spain":         {"attack": 1.45, "defence": 0.66, "form": 0.90, "set_piece_threat": 0.20, "red_card_risk": 0.04, "fatigue": 0.20, "elo": 1912,
         "scouting": "Total control, and now total ruthlessness. Dismantled France 2-0 in the semifinal with 2.21 xG against the tournament's meanest defence — the 'streaky conversion' caveat is dead. Rodri and Pedri suffocate games behind the tournament's best line-breaking passing; 0.32 opponent-adjusted xGA per game and just two goals conceded in seven matches (Unai Simón barely worked). Seven straight wins, zero minutes of extra time all tournament, and a full day more rest than Argentina before the final. The complete team of this World Cup — the only question left is Messi."},
-    # --- Argentina: OPP-ADJUSTED through the QF (6 PDFs). attack holds the
-    # 1.45 cap (2.32 raw / 2.24 adj xGF per game). defence 0.79->0.77: the
-    # Egypt wobble now looks like the outlier — 0.44 xGA vs Switzerland in
-    # the QF, 0.65 adj xGA/game overall. Group-opponent Elos are documented
-    # ESTIMATES (Algeria 1635, Austria 1760, Jordan 1455, Cabo Verde 1470,
-    # anchor 1650); +-40 Elo moves the result <0.5%, so estimate error is cheap.
-    "Argentina":     {"attack": 1.45, "defence": 0.77, "form": 0.80, "set_piece_threat": 0.27, "red_card_risk": 0.06, "fatigue": 0.34, "elo": 1914,
-        "scouting": "Messi-driven elite attack, and the knack for the decisive late blow is now a pattern: trailed England 1-0 after Gordon's 55th, then Enzo Fernández (85') and ANOTHER stoppage-time Lautaro header (90+2) turned it in regulation — no extra time needed this round. Third straight knockout win via goals after the 84th minute. Set pieces and crosses remain the weapon (three headed knockout goals). Stats refresh through the SF pending M102's report; the QF-era read holds: elite attack at the cap, defence among the best left. One day less rest than Spain, but legs are fresher than feared — the SF stayed at 90 minutes."},
+    # --- Argentina: OPP-ADJUSTED through the SF (7 PDFs). attack holds the
+    # 1.45 cap (2.16 adj xGF/game — 1.47 xG vs England, adj 1.67). defence
+    # 0.77->0.76 (0.46 xGA vs England; 0.61 adj/game). form 0.80->0.85:
+    # seven straight, the SF won in regulation from behind. fatigue eases
+    # 0.34->0.28 — the double-ET load is two matches back now and the SF
+    # stayed at 90; four days' rest before the final (Spain gets five).
+    # Group-opponent Elos are documented ESTIMATES (Algeria 1635, Austria
+    # 1760, Jordan 1455, Cabo Verde 1470, anchor 1650).
+    "Argentina":     {"attack": 1.45, "defence": 0.76, "form": 0.85, "set_piece_threat": 0.27, "red_card_risk": 0.06, "fatigue": 0.28, "elo": 1914,
+        "scouting": "Messi-driven elite attack, and the knack for the decisive late blow is now a pattern: trailed England 1-0 after Gordon's 55th, then Enzo Fernández (85') and ANOTHER stoppage-time Lautaro header (90+2) turned it in regulation — no extra time needed this round. Third straight knockout win via goals after the 84th minute. Set pieces and crosses remain the weapon (three headed knockout goals). Through seven matches the numbers hold elite: attack at the model's cap, 0.61 opponent-adjusted xGA/game (only Spain concedes less among the finalists' opponents). One day less rest than Spain, but the legs are fresher than feared — the SF stayed at 90 minutes and the double-ET load is two rounds back."},
     # --- England: OPP-ADJUSTED through the QF (6 PDFs, replacing the 2-PDF
     # early read). attack 1.35->1.45 cap: 2.07 adj xGF/game once the group
     # stage counts (3.33 xG vs Croatia). defence 1.00->0.86: Mexico's 2.01

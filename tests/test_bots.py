@@ -162,3 +162,38 @@ class TestEndpoint:
         assert len(moon["open"]) == 1
         assert moon["bankroll"] < bots.START_BANKROLL
         assert moon["equity"] == bots.START_BANKROLL   # cost still in play
+
+
+class TestSweetspot:
+    def _score(self, h, a, model_p, implied):
+        return {"market_id": f"KX-{h}{a}", "market_title": f"Exact {h}-{a}",
+                "outcome_key": f"score_{h}_{a}",
+                "model_probability": model_p, "implied_probability": implied}
+
+    def test_cluster_is_mode_plus_neighbours(self):
+        rows = [self._score(1, 1, 0.14, 0.16), self._score(1, 0, 0.10, 0.08),
+                self._score(2, 1, 0.09, 0.11), self._score(0, 1, 0.09, 0.07),
+                self._score(3, 3, 0.02, 0.05),      # far from the mode: out
+                {"market_id": "KX-W", "market_title": "Spain to win",
+                 "outcome_key": "home_win",
+                 "model_probability": 0.5, "implied_probability": 0.5}]
+        entries = bots.sweetspot_entries(rows, 1000)
+        got = {e[0] for e in entries}
+        assert got == {"KX-11", "KX-10", "KX-21", "KX-01"}
+
+    def test_dutch_split_follows_model_p(self):
+        rows = [self._score(1, 1, 0.20, 0.15), self._score(1, 0, 0.15, 0.12)]
+        entries = bots.sweetspot_entries(rows, 1000)
+        stakes = {e[0]: e[3] for e in entries}
+        assert abs(sum(stakes.values()) - 60.0) < 0.01
+        assert stakes["KX-11"] > stakes["KX-10"]
+
+    def test_cluster_caps_at_four(self):
+        rows = [self._score(i, 0, 0.10, 0.10) for i in range(6)]
+        assert len(bots.sweetspot_entries(rows, 1000)) == 4
+
+    def test_no_exact_books_no_entries(self):
+        rows = [{"market_id": "KX-W", "market_title": "t",
+                 "outcome_key": "home_win",
+                 "model_probability": 0.6, "implied_probability": 0.5}]
+        assert bots.sweetspot_entries(rows, 1000) == []

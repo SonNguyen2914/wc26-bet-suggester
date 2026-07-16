@@ -1,4 +1,4 @@
-"""Five paper-trading bots, each with its own strategy and temperament,
+"""The strategy-lab bots, each with its own strategy and temperament,
 betting the REAL Kalshi books through the model. Hypothetical money only —
 this is a strategy laboratory: five different philosophies running against
 the same markets, so their ledgers show which instincts actually pay.
@@ -16,6 +16,9 @@ the same markets, so their ledgers show which instincts actually pay.
             their pre-match price while the live model still rates them
             (>= price + 8pts), then holds to settlement. Everyone is
             overreacting.
+  SWEETSPOT Son's own recipe: the model's modal exact score plus its
+            neighbourhood (>=60% of the mode, max 4 books), $60 dutched
+            by model probability. Patient, cluster-shaped.
 
 Costs are modelled like the strategy page: Kalshi taker fee 0.07*P*(1-P)
 per contract on entry AND on an early exit. Settlement uses the closing
@@ -49,6 +52,9 @@ PERSONAS = {
     "FADE": {"name": "Fade", "emoji": "🧊",
              "tagline": "Buys the panic when the live model disagrees. Holds. Everyone overreacts.",
              "style": "in-play contrarian"},
+    "SWEETSPOT": {"name": "Sweetspot", "emoji": "🍯",
+                  "tagline": "The house recipe: find the score the match wants, buy the neighbourhood. Dutched, patient.",
+                  "style": "exact-score cluster"},
 }
 
 
@@ -164,6 +170,33 @@ def moonshot_entries(rows, cash):
         if p / c >= 1.4:
             out.append((r["market_id"], r["market_title"], c, 10.0,
                         f"model {p:.0%} vs {c:.0%} implied ({p/c:.1f}x)"))
+    return out
+
+
+def sweetspot_entries(rows, cash):
+    """Son's strategy, codified: the model's modal exact score plus every
+    neighbour within 60% of the mode's probability (max 4 books), $60 per
+    match dutched proportional to model probability. Backtested +6.5% over
+    the four archived knockouts (both QFs hit the 1-1 cluster at ~2x; both
+    SFs missed just outside it) — the arena settles whether that holds."""
+    import re as _re
+    scores = []
+    for r in rows:
+        m = _re.match(r"score_(\d+)_(\d+)$", r.get("outcome_key") or "")
+        p, c = r.get("model_probability"), r.get("implied_probability")
+        if m and p and c and c > 0:
+            scores.append((r, p, c))
+    if not scores:
+        return []
+    scores.sort(key=lambda x: -x[1])
+    mode_p = scores[0][1]
+    cluster = [x for x in scores if x[1] >= 0.6 * mode_p][:4]
+    psum = sum(p for _, p, _ in cluster) or 1.0
+    out = []
+    for r, p, c in cluster:
+        stake = 60.0 * p / psum
+        out.append((r["market_id"], r["market_title"], c, stake,
+                    f"cluster {p:.0%} model vs {c:.0%} implied"))
     return out
 
 
@@ -351,10 +384,11 @@ def bots_tick(engine) -> dict:
                     if r.get("implied_probability") is not None]
             with SessionLocal() as s:
                 cash = {b: bankroll(b, s)
-                        for b in ("KELLY", "CHALK", "MOONSHOT")}
+                        for b in ("KELLY", "CHALK", "MOONSHOT", "SWEETSPOT")}
             for bot, entries in (("KELLY", kelly_entries(rows, cash["KELLY"])),
                                  ("CHALK", chalk_entries(rows, cash["CHALK"])),
-                                 ("MOONSHOT", moonshot_entries(rows, cash["MOONSHOT"]))):
+                                 ("MOONSHOT", moonshot_entries(rows, cash["MOONSHOT"])),
+                                 ("SWEETSPOT", sweetspot_entries(rows, cash["SWEETSPOT"]))):
                 for mk, title, price, stake, note in entries:
                     if open_position(bot, m.match_id, mk, title, price,
                                      stake, note):

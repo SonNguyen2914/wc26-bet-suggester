@@ -430,72 +430,72 @@
    {
     "player": "Lionel MESSI",
     "shirt": 10,
-    "matches": 6,
-    "starts": 5,
-    "attempts": 33,
+    "matches": 7,
+    "starts": 6,
+    "attempts": 34,
     "on_target": 18,
     "goals": 8,
-    "share": 0.4347
+    "share": 0.38702
    },
    {
     "player": "Lautaro MARTINEZ",
     "shirt": 22,
-    "matches": 6,
+    "matches": 7,
     "starts": 4,
-    "attempts": 9,
-    "on_target": 3,
-    "goals": 2,
-    "share": 0.11173
-   },
-   {
-    "player": "Alexis MAC ALLISTER",
-    "shirt": 20,
-    "matches": 6,
-    "starts": 5,
     "attempts": 10,
-    "on_target": 3,
-    "goals": 1,
-    "share": 0.07832
-   },
-   {
-    "player": "Julian ALVAREZ",
-    "shirt": 9,
-    "matches": 6,
-    "starts": 3,
-    "attempts": 8,
     "on_target": 4,
-    "goals": 1,
-    "share": 0.07015
+    "goals": 3,
+    "share": 0.1354
    },
    {
     "player": "Enzo FERNANDEZ",
     "shirt": 24,
-    "matches": 5,
-    "starts": 5,
-    "attempts": 8,
-    "on_target": 3,
+    "matches": 6,
+    "starts": 6,
+    "attempts": 12,
+    "on_target": 4,
+    "goals": 2,
+    "share": 0.10914
+   },
+   {
+    "player": "Alexis MAC ALLISTER",
+    "shirt": 20,
+    "matches": 7,
+    "starts": 6,
+    "attempts": 13,
+    "on_target": 4,
     "goals": 1,
-    "share": 0.07015
+    "share": 0.07935
+   },
+   {
+    "player": "Julian ALVAREZ",
+    "shirt": 9,
+    "matches": 7,
+    "starts": 4,
+    "attempts": 11,
+    "on_target": 5,
+    "goals": 1,
+    "share": 0.07227
    },
    {
     "player": "Lisandro MARTINEZ",
     "shirt": 6,
-    "matches": 5,
-    "starts": 5,
+    "matches": 6,
+    "starts": 6,
     "attempts": 4,
     "on_target": 2,
     "goals": 1,
-    "share": 0.05383
+    "share": 0.04749
    },
    {
     "player": "Cristian ROMERO",
     "shirt": 13,
-    "matches": 5,
-    "starts": 5,
+    "matches": 6,
+    "starts": 6,
     "attempts": 3,
     "on_target": 1,
     "goals": 1,
-    "share": 0.04974
+    "share": 0.04395
    },
    {
     "player": "Giovani LO CELSO",
@@ -505,17 +505,17 @@
     "attempts": 1,
     "on_target": 1,
     "goals": 1,
-    "share": 0.04158
+    "share": 0.03687
    },
    {
     "player": "Nico GONZALEZ",
     "shirt": 15,
-    "matches": 5,
+    "matches": 6,
     "starts": 0,
-    "attempts": 6,
-    "on_target": 0,
+    "attempts": 7,
+    "on_target": 1,
     "goals": 0,
-    "share": 0.02449
+    "share": 0.02478
    },
    {
     "player": "Thiago ALMADA",
@@ -525,17 +525,27 @@
     "attempts": 5,
     "on_target": 2,
     "goals": 0,
-    "share": 0.02041
+    "share": 0.0177
    },
    {
     "player": "Leandro PAREDES",
     "shirt": 5,
-    "matches": 5,
-    "starts": 3,
-    "attempts": 3,
+    "matches": 6,
+    "starts": 4,
+    "attempts": 4,
     "on_target": 1,
     "goals": 0,
-    "share": 0.01224
+    "share": 0.01416
+   },
+   {
+    "player": "Rodrigo DE PAUL",
+    "shirt": 7,
+    "matches": 6,
+    "starts": 5,
+    "attempts": 2,
+    "on_target": 1,
+    "goals": 0,
+    "share": 0.00708
    },
    {
     "player": "Marcos SENESI",
@@ -545,27 +555,17 @@
     "attempts": 2,
     "on_target": 0,
     "goals": 0,
-    "share": 0.00816
+    "share": 0.00708
    },
    {
     "player": "Gonzalo MONTIEL",
     "shirt": 4,
-    "matches": 4,
+    "matches": 5,
     "starts": 1,
     "attempts": 1,
     "on_target": 0,
     "goals": 0,
-    "share": 0.00408
-   },
-   {
-    "player": "Rodrigo DE PAUL",
-    "shirt": 7,
-    "matches": 5,
-    "starts": 5,
-    "attempts": 1,
-    "on_target": 1,
-    "goals": 0,
-    "share": 0.00408
+    "share": 0.00354
    },
    {
     "player": "Nico PAZ",
@@ -575,27 +575,27 @@
     "attempts": 1,
     "on_target": 0,
     "goals": 0,
-    "share": 0.00408
+    "share": 0.00354
    },
    {
     "player": "Nicolas OTAMENDI",
     "shirt": 19,
-    "matches": 5,
+    "matches": 6,
     "starts": 1,
     "attempts": 1,
     "on_target": 0,
     "goals": 0,
-    "share": 0.00408
+    "share": 0.00354
    },
    {
     "player": "Nahuel MOLINA",
     "shirt": 26,
-    "matches": 5,
-    "starts": 4,
+    "matches": 6,
+    "starts": 5,
     "attempts": 1,
     "on_target": 0,
     "goals": 0,
-    "share": 0.00408
+    "share": 0.00354
    },
    {
     "player": "Jose Manuel LOPEZ",
@@ -605,13 +605,13 @@
     "attempts": 1,
     "on_target": 0,
     "goals": 0,
-    "share": 0.00408
+    "share": 0.00354
    },
    {
     "player": "Emiliano MARTINEZ",
     "shirt": 23,
-    "matches": 6,
-    "starts": 6,
+    "matches": 7,
+    "starts": 7,
     "attempts": 0,
     "on_target": 0,
     "goals": 0,
@@ -630,8 +630,8 @@
    {
     "player": "Nicolas TAGLIAFICO",
     "shirt": 3,
-    "matches": 5,
-    "starts": 3,
+    "matches": 6,
+    "starts": 4,
     "attempts": 0,
     "on_target": 0,
     "goals": 0,
@@ -660,8 +660,8 @@
    {
     "player": "Giuliano SIMEONE",
     "shirt": 17,
-    "matches": 1,
-    "starts": 1,
+    "matches": 2,
+    "starts": 2,
     "attempts": 0,
     "on_target": 0,
     "goals": 0,
@@ -672,32 +672,42 @@
    {
     "player": "Harry KANE",
     "shirt": 9,
-    "matches": 6,
-    "starts": 6,
-    "attempts": 22,
+    "matches": 7,
+    "starts": 7,
+    "attempts": 23,
     "on_target": 11,
     "goals": 6,
-    "share": 0.37054
+    "share": 0.35008
    },
    {
     "player": "Jude BELLINGHAM",
     "shirt": 10,
-    "matches": 6,
-    "starts": 6,
+    "matches": 7,
+    "starts": 7,
     "attempts": 17,
     "on_target": 10,
     "goals": 6,
-    "share": 0.34926
+    "share": 0.32584
    },
    {
     "player": "Marcus RASHFORD",
     "shirt": 11,
-    "matches": 4,
+    "matches": 5,
     "starts": 2,
     "attempts": 9,
     "on_target": 3,
     "goals": 1,
-    "share": 0.08445
+    "share": 0.07922
+   },
+   {
+    "player": "Anthony GORDON",
+    "shirt": 18,
+    "matches": 6,
+    "starts": 5,
+    "attempts": 6,
+    "on_target": 4,
+    "goals": 1,
+    "share": 0.0671
    },
    {
     "player": "Bukayo SAKA",
@@ -707,27 +717,27 @@
     "attempts": 8,
     "on_target": 3,
     "goals": 0,
-    "share": 0.03404
+    "share": 0.03232
    },
    {
     "player": "Nico OREILLY",
     "shirt": 3,
-    "matches": 6,
+    "matches": 7,
     "starts": 5,
     "attempts": 7,
     "on_target": 1,
     "goals": 0,
-    "share": 0.02979
+    "share": 0.02828
    },
    {
     "player": "Elliot ANDERSON",
     "shirt": 8,
-    "matches": 6,
-    "starts": 6,
+    "matches": 7,
+    "starts": 7,
     "attempts": 7,
     "on_target": 1,
     "goals": 0,
-    "share": 0.02979
+    "share": 0.02828
    },
    {
     "player": "Noni MADUEKE",
@@ -737,47 +747,47 @@
     "attempts": 6,
     "on_target": 1,
     "goals": 0,
-    "share": 0.02553
-   },
-   {
-    "player": "Anthony GORDON",
-    "shirt": 18,
-    "matches": 5,
-    "starts": 4,
-    "attempts": 5,
-    "on_target": 3,
-    "goals": 0,
-    "share": 0.02128
+    "share": 0.02424
    },
    {
     "player": "Declan RICE",
     "shirt": 4,
-    "matches": 5,
-    "starts": 5,
-    "attempts": 4,
-    "on_target": 1,
+    "matches": 6,
+    "starts": 6,
+    "attempts": 5,
+    "on_target": 2,
     "goals": 0,
-    "share": 0.01702
+    "share": 0.0202
    },
    {
     "player": "Ezri KONSA",
     "shirt": 2,
-    "matches": 6,
+    "matches": 7,
     "starts": 6,
     "attempts": 2,
     "on_target": 1,
     "goals": 0,
-    "share": 0.00851
+    "share": 0.00808
+   },
+   {
+    "player": "Morgan ROGERS",
+    "shirt": 17,
+    "matches": 6,
+    "starts": 2,
+    "attempts": 2,
+    "on_target": 1,
+    "goals": 0,
+    "share": 0.00808
    },
    {
     "player": "Djed SPENCE",
     "shirt": 25,
-    "matches": 6,
-    "starts": 2,
+    "matches": 7,
+    "starts": 3,
     "attempts": 2,
     "on_target": 2,
     "goals": 0,
-    "share": 0.00851
+    "share": 0.00808
    },
    {
     "player": "Eberechi EZE",
@@ -787,53 +797,43 @@
     "attempts": 2,
     "on_target": 0,
     "goals": 0,
-    "share": 0.00851
-   },
-   {
-    "player": "Marc GUEHI",
-    "shirt": 6,
-    "matches": 6,
-    "starts": 5,
-    "attempts": 1,
-    "on_target": 0,
-    "goals": 0,
-    "share": 0.00426
-   },
-   {
-    "player": "Morgan ROGERS",
-    "shirt": 17,
-    "matches": 5,
-    "starts": 1,
-    "attempts": 1,
-    "on_target": 1,
-    "goals": 0,
-    "share": 0.00426
-   },
-   {
-    "player": "Reece JAMES",
-    "shirt": 24,
-    "matches": 3,
-    "starts": 2,
-    "attempts": 1,
-    "on_target": 0,
-    "goals": 0,
-    "share": 0.00426
-   },
-   {
-    "player": "Jordan PICKFORD",
-    "shirt": 1,
-    "matches": 6,
-    "starts": 6,
-    "attempts": 0,
-    "on_target": 0,
-    "goals": 0,
-    "share": 0.0
+    "share": 0.00808
    },
    {
     "player": "John STONES",
     "shirt": 5,
+    "matches": 5,
+    "starts": 3,
+    "attempts": 1,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.00404
+   },
+   {
+    "player": "Marc GUEHI",
+    "shirt": 6,
+    "matches": 7,
+    "starts": 6,
+    "attempts": 1,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.00404
+   },
+   {
+    "player": "Reece JAMES",
+    "shirt": 24,
     "matches": 4,
-    "starts": 2,
+    "starts": 3,
+    "attempts": 1,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.00404
+   },
+   {
+    "player": "Jordan PICKFORD",
+    "shirt": 1,
+    "matches": 7,
+    "starts": 7,
     "attempts": 0,
     "on_target": 0,
     "goals": 0,
@@ -872,7 +872,17 @@
    {
     "player": "Dan BURN",
     "shirt": 15,
-    "matches": 2,
+    "matches": 3,
+    "starts": 0,
+    "attempts": 0,
+    "on_target": 0,
+    "goals": 0,
+    "share": 0.0
+   },
+   {
+    "player": "Ivan TONEY",
+    "shirt": 22,
+    "matches": 1,
     "starts": 0,
     "attempts": 0,
     "on_target": 0,
