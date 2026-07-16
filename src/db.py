@@ -187,6 +187,31 @@ class LiveSignal(Base):
     __table_args__ = (Index("ix_signal_created", "created_at"),)
 
 
+class BotPosition(Base):
+    """One paper position for the strategy-lab bots: YES contracts bought at
+    entry_price, cost inclusive of the modelled Kalshi fee. Open until an
+    early exit (WIRE) or settlement from the closing snapshot. pnl is the
+    GROSS return of the close (proceeds or payout); net = pnl - cost."""
+    __tablename__ = "bot_positions"
+
+    id = Column(Integer, primary_key=True)
+    bot = Column(String(16), nullable=False)
+    match_id = Column(String(64), nullable=False)
+    market_id = Column(String(128), nullable=False)
+    market_title = Column(String(256))
+    entry_price = Column(Float, nullable=False)
+    contracts = Column(Integer, nullable=False)
+    cost = Column(Float, nullable=False)
+    note = Column(String(256))
+    opened_at = Column(DateTime(timezone=True), default=utcnow)
+    closed_at = Column(DateTime(timezone=True))
+    close_price = Column(Float)
+    close_reason = Column(String(64))
+    pnl = Column(Float)
+
+    __table_args__ = (Index("ix_bot_positions", "bot", "match_id"),)
+
+
 class MarketClosing(Base):
     """Post-match snapshot of every Kalshi market on a finished match —
     settlement result + closing book, captured once at freeze time (and

@@ -700,6 +700,57 @@ def get_timing(match_id: str, market_id: str):
     return compute_timing(market_id, match.kickoff)
 
 
+@app.get("/api/bots")
+def bots_ledger():
+    """The strategy-lab: five paper bots, their bankrolls and ledgers.
+    Hypothetical money betting real books — a laboratory for which betting
+    philosophy actually pays, scored with the same fee model as the
+    strategy page."""
+    from src.bots import PERSONAS, START_BANKROLL, bankroll
+    from src.db import BotPosition
+    out = []
+    with SessionLocal() as session:
+        for bot, persona in PERSONAS.items():
+            rows = session.execute(
+                select(BotPosition).where(BotPosition.bot == bot)
+                .order_by(BotPosition.opened_at.desc())
+            ).scalars().all()
+            open_pos, closed_pos = [], []
+            for r in rows:
+                item = {
+                    "match_id": r.match_id, "market_id": r.market_id,
+                    "market_title": r.market_title,
+                    "entry_price": r.entry_price, "contracts": r.contracts,
+                    "cost": r.cost, "note": r.note,
+                    "opened_at": r.opened_at.isoformat() if r.opened_at else None,
+                }
+                if r.closed_at is None:
+                    open_pos.append(item)
+                else:
+                    item.update({
+                        "closed_at": r.closed_at.isoformat(),
+                        "close_price": r.close_price,
+                        "close_reason": r.close_reason,
+                        "net": round((r.pnl or 0.0) - r.cost, 2),
+                    })
+                    closed_pos.append(item)
+            wins = sum(1 for c in closed_pos if c["net"] > 0)
+            cash = bankroll(bot, session)
+            equity = cash + sum(p["cost"] for p in open_pos)
+            out.append({
+                "bot": bot, **persona,
+                "bankroll": cash,
+                "equity": round(equity, 2),
+                "net_pnl": round(equity - START_BANKROLL, 2),
+                "open": open_pos,
+                "closed": closed_pos[:20],
+                "trades": len(closed_pos),
+                "wins": wins,
+            })
+    return {"start_bankroll": START_BANKROLL, "bots": out,
+            "generated_at": utcnow().isoformat()}
+
+
 @app.get("/api/live-signals")
 def live_signals(match_id: str | None = Query(None),
                  limit: int = Query(30, ge=1, le=200)):

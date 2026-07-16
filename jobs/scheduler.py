@@ -150,6 +150,19 @@ def live_signals_job() -> None:
         print(f"[live-signals] pass error: {exc}")
 
 
+def bots_job() -> None:
+    """The strategy-lab bots' pass: entries, exits, settlements. Rides the
+    same cached prediction/live cycles everything else reads."""
+    try:
+        from src.bots import bots_tick
+        r = bots_tick(engine)
+        if r["opened"] or r["closed"] or r["settled"]:
+            print(f"[bots] tick: {r['opened']} opened, {r['closed']} closed, "
+                  f"{r['settled']} settled")
+    except Exception as exc:
+        print(f"[bots] tick error: {exc}")
+
+
 def resolve_bracket_job() -> None:
     """Fill QF placeholder slots as R16 results land (fixtures only; team
     stats stay hand-sourced). Cheap and idempotent: does nothing once the
@@ -212,6 +225,10 @@ def start_scheduler() -> BackgroundScheduler:
     scheduler.add_job(live_signals_job, "interval",
                       seconds=config.LIVE_SIGNAL_POLL_SECONDS,
                       id="live_signals", coalesce=True, max_instances=1)
+    # Paper-trading bots: instant no-op with no trackable matches, cheap
+    # otherwise (cached predictions + cached live cycle + signal rows).
+    scheduler.add_job(bots_job, "interval", seconds=60,
+                      id="bots", coalesce=True, max_instances=1)
     # Bracket resolution: low frequency (the bracket changes at most a handful
     # of times all tournament) and self-skipping once fully known, so it's
     # nearly free. boot_sequence covers the boot-time resolve.
