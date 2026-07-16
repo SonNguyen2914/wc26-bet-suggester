@@ -56,7 +56,7 @@ PERSONAS = {
                   "tagline": "The model-weighted refinement of the Crew recipe: only the tightest cluster, dutched by probability.",
                   "style": "exact-score cluster"},
     "CREW": {"name": "The Crew", "emoji": "🤝",
-             "tagline": "Son & friends' real recipe: tight two-goal ladder in even games (with draw insurance), strong side only up to 3 in mismatches.",
+             "tagline": "Son & friends' recipe v3: two-mode ladders, permanent knockout draw insurance, stakes follow belief.",
              "style": "score ladder + insurance"},
 }
 
@@ -203,53 +203,72 @@ def sweetspot_entries(rows, cash):
     return out
 
 
-# Son's crew, two modes.
-# EVEN game: the tight decisive ladder both ways, max 2 goals — "no team
-# got to 3 yet, so we are safe" — with 1-1/2-2 insurance when a draw
-# smells likely.
+# Son's crew, two modes — v3 carries the three evidence-backed upgrades
+# from the 2026-07-16 review: (1) knockout draw insurance is PERMANENT
+# (both backtest losses were 1-1 at 90; underdogs play for pens), plus 0-0
+# when the model reads a cagey game; (2) stakes follow BELIEF (model
+# probability), not an even split — most of the cluster bot's edge was
+# sizing; (3) the mismatch ladder keeps one 1-1 rung in knockouts
+# (ARG-SUI: ten men parked the bus to 1-1 anyway).
 CREW_EVEN_LADDER = ["score_1_0", "score_0_1", "score_2_0", "score_0_2",
                     "score_2_1", "score_1_2"]
-CREW_INSURANCE = ["score_1_1", "score_2_2"]
-# UNEVEN game: only the much stronger side's wins, extended to 3 — and
-# 1-0, 0-1 and the draws dropped altogether.
 CREW_STRONG_HOME = ["score_2_0", "score_2_1", "score_3_0", "score_3_1",
                     "score_3_2"]
 CREW_STRONG_AWAY = ["score_0_2", "score_1_2", "score_0_3", "score_1_3",
                     "score_2_3"]
 CREW_UNEVEN_GAP = 0.20       # win90 gap that makes a game "so un-even"
-CREW_DRAW_TRIGGER = 0.25     # model draw-after-90 that makes a draw "smell likely"
+CREW_DRAW_TRIGGER = 0.25     # group-stage insurance stays feel-based; 2-2 always is
+CREW_ZERO_ZERO_MIN = 0.06    # model P(0-0) that reads "two good defences"
 
 
-def crew_entries(rows, cash):
-    """Son & friends' strategy, as they actually play it. Judge the game
-    first: roughly even -> the tight two-goal ladder both ways, with 1-1/
-    2-2 insurance when a draw could happen; clearly un-even -> only the
-    stronger side's wins, extended to 3, ones and draws dropped. Budget
-    $60 split (almost) evenly across whatever's picked."""
+def crew_entries(rows, cash, stage="knockout"):
+    """Son & friends' recipe, v3. Judge the game first: roughly even ->
+    the tight two-goal ladder both ways; clearly un-even -> the stronger
+    side's wins up to 3. Knockouts always carry 1-1 (draws at 90 killed
+    every backtest loss) and add 0-0 when the model calls the game cagey;
+    2-2 stays a judgment call (draw read >= trigger). $60 per match,
+    staked proportional to the model's belief in each rung."""
     by_key = {r.get("outcome_key"): r for r in rows}
     hw = (by_key.get("home_win") or {}).get("model_probability") or 0
     aw = (by_key.get("away_win") or {}).get("model_probability") or 0
+    draw_p = (by_key.get("draw") or {}).get("model_probability") or 0
+    knockout = stage == "knockout"
+
     if abs(hw - aw) >= CREW_UNEVEN_GAP:
         want = list(CREW_STRONG_HOME if hw > aw else CREW_STRONG_AWAY)
         mode = "strong-side ladder"
+        if knockout:
+            want.append("score_1_1")        # the parked-bus hedge
     else:
         want = list(CREW_EVEN_LADDER)
         mode = "even ladder"
-        draw = by_key.get("draw")
-        if draw and (draw.get("model_probability") or 0) >= CREW_DRAW_TRIGGER:
-            want += CREW_INSURANCE
+        if knockout or draw_p >= CREW_DRAW_TRIGGER:
+            want.append("score_1_1")
+        if draw_p >= CREW_DRAW_TRIGGER:
+            want.append("score_2_2")
+    zz = by_key.get("score_0_0")
+    if (knockout and zz
+            and (zz.get("model_probability") or 0) >= CREW_ZERO_ZERO_MIN):
+        want.append("score_0_0")
+
     picked = []
-    for k in want:
+    for k in dict.fromkeys(want):           # de-dupe, keep order
         r = by_key.get(k)
-        if r and (r.get("implied_probability") or 0) > 0:
+        if r and (r.get("implied_probability") or 0) > 0 \
+                and (r.get("model_probability") or 0) > 0:
             picked.append(r)
     if not picked:
         return []
-    per = 60.0 / len(picked)
-    return [(r["market_id"], r["market_title"], r["implied_probability"],
-             per, mode + (" + insurance" if r["outcome_key"] in
-                          CREW_INSURANCE else ""))
-            for r in picked]
+    psum = sum(r["model_probability"] for r in picked)
+    out = []
+    for r in picked:
+        stake = 60.0 * r["model_probability"] / psum
+        tag = mode
+        if r["outcome_key"] in ("score_1_1", "score_2_2", "score_0_0"):
+            tag += " + insurance"
+        out.append((r["market_id"], r["market_title"],
+                    r["implied_probability"], stake, tag))
+    return out
 
 
 def wire_entries(signals, cash):
@@ -442,7 +461,7 @@ def bots_tick(engine) -> dict:
                                  ("CHALK", chalk_entries(rows, cash["CHALK"])),
                                  ("MOONSHOT", moonshot_entries(rows, cash["MOONSHOT"])),
                                  ("SWEETSPOT", sweetspot_entries(rows, cash["SWEETSPOT"])),
-                                 ("CREW", crew_entries(rows, cash["CREW"]))):
+                                 ("CREW", crew_entries(rows, cash["CREW"], stage=m.stage))):
                 for mk, title, price, stake, note in entries:
                     if open_position(bot, m.match_id, mk, title, price,
                                      stake, note):

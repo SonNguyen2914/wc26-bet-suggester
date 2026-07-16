@@ -200,12 +200,15 @@ class TestSweetspot:
 
 
 class TestCrew:
+    """v3 contract: two modes + permanent knockout draw insurance +
+    model-read 0-0 + belief-weighted stakes."""
+
     def _score(self, key, implied, model_p=0.05):
         return {"market_id": f"KX-{key}", "market_title": key,
                 "outcome_key": key,
                 "model_probability": model_p, "implied_probability": implied}
 
-    def _board(self, hw=0.36, aw=0.34, draw_p=0.20, missing=()):
+    def _board(self, hw=0.36, aw=0.34, draw_p=0.20, zz_p=0.04, missing=()):
         rows = [
             {"market_id": "KX-HW", "market_title": "home win",
              "outcome_key": "home_win", "model_probability": hw,
@@ -216,42 +219,65 @@ class TestCrew:
             {"market_id": "KX-D", "market_title": "Draw",
              "outcome_key": "draw", "model_probability": draw_p,
              "implied_probability": 0.25},
+            self._score("score_0_0", 0.07, model_p=zz_p),
         ]
-        keys = set(bots.CREW_EVEN_LADDER + bots.CREW_INSURANCE +
+        keys = set(bots.CREW_EVEN_LADDER + ["score_1_1", "score_2_2"] +
                    bots.CREW_STRONG_HOME + bots.CREW_STRONG_AWAY)
         for k in keys:
             if k not in missing:
                 rows.append(self._score(k, 0.06))
         return rows
 
-    def test_even_game_tight_ladder_no_insurance(self):
-        entries = bots.crew_entries(self._board(hw=0.36, aw=0.34,
-                                                draw_p=0.20), 1000)
+    def test_knockout_even_always_carries_one_one(self):
+        # draw read UNDER the trigger — knockout still buys 1-1
+        entries = bots.crew_entries(self._board(draw_p=0.20), 1000,
+                                    stage="knockout")
         keys = {e[0] for e in entries}
-        assert keys == {f"KX-{k}" for k in bots.CREW_EVEN_LADDER}
-        assert all(abs(e[3] - 10.0) < 0.01 for e in entries)     # 60/6
+        assert "KX-score_1_1" in keys
+        assert "KX-score_2_2" not in keys       # 2-2 stays feel-based
 
-    def test_even_game_with_insurance(self):
-        entries = bots.crew_entries(self._board(draw_p=0.28), 1000)
+    def test_group_even_insurance_stays_feel_based(self):
+        low = bots.crew_entries(self._board(draw_p=0.20), 1000, stage="group")
+        hot = bots.crew_entries(self._board(draw_p=0.28), 1000, stage="group")
+        assert "KX-score_1_1" not in {e[0] for e in low}
+        assert {"KX-score_1_1", "KX-score_2_2"} <= {e[0] for e in hot}
+
+    def test_zero_zero_when_model_reads_cagey(self):
+        quiet = bots.crew_entries(self._board(zz_p=0.08), 1000,
+                                  stage="knockout")
+        open_ = bots.crew_entries(self._board(zz_p=0.03), 1000,
+                                  stage="knockout")
+        assert "KX-score_0_0" in {e[0] for e in quiet}
+        assert "KX-score_0_0" not in {e[0] for e in open_}
+
+    def test_uneven_knockout_keeps_parked_bus_hedge(self):
+        entries = bots.crew_entries(self._board(hw=0.55, aw=0.20), 1000,
+                                    stage="knockout")
         keys = {e[0] for e in entries}
-        assert "KX-score_1_1" in keys and "KX-score_2_2" in keys
-        assert len(entries) == 8
+        assert {f"KX-{k}" for k in bots.CREW_STRONG_HOME} <= keys
+        assert "KX-score_1_1" in keys           # the hedge
+        assert "KX-score_1_0" not in keys       # ones still dropped
 
-    def test_uneven_game_strong_home_only(self):
-        entries = bots.crew_entries(self._board(hw=0.55, aw=0.20,
-                                                draw_p=0.30), 1000)
-        keys = {e[0] for e in entries}
-        assert keys == {f"KX-{k}" for k in bots.CREW_STRONG_HOME}
-        # draws and ones dropped even though the draw trigger was hot
-        assert "KX-score_1_1" not in keys and "KX-score_1_0" not in keys
-
-    def test_uneven_game_strong_away_only(self):
-        entries = bots.crew_entries(self._board(hw=0.20, aw=0.55), 1000)
+    def test_uneven_group_drops_draws_entirely(self):
+        entries = bots.crew_entries(self._board(hw=0.20, aw=0.55), 1000,
+                                    stage="group")
         assert {e[0] for e in entries} == \
             {f"KX-{k}" for k in bots.CREW_STRONG_AWAY}
 
+    def test_stakes_follow_belief_and_sum_to_budget(self):
+        board = self._board(draw_p=0.28)
+        # make 2-1 the crew's conviction score
+        for r in board:
+            if r["outcome_key"] == "score_2_1":
+                r["model_probability"] = 0.15
+        entries = bots.crew_entries(board, 1000, stage="knockout")
+        stakes = {e[0]: e[3] for e in entries}
+        assert abs(sum(stakes.values()) - 60.0) < 0.01
+        assert stakes["KX-score_2_1"] == max(stakes.values())
+
     def test_unpriced_rungs_skipped_budget_redistributed(self):
         entries = bots.crew_entries(
-            self._board(missing=("score_2_0", "score_0_2")), 1000)
+            self._board(missing=("score_2_0", "score_0_2")), 1000,
+            stage="group")
         assert len(entries) == 4
-        assert abs(entries[0][3] - 15.0) < 0.01                  # 60/4
+        assert abs(sum(e[3] for e in entries) - 60.0) < 0.01
