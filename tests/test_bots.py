@@ -197,3 +197,39 @@ class TestSweetspot:
                  "outcome_key": "home_win",
                  "model_probability": 0.6, "implied_probability": 0.5}]
         assert bots.sweetspot_entries(rows, 1000) == []
+
+
+class TestCrew:
+    def _score(self, key, implied, model_p=0.05):
+        return {"market_id": f"KX-{key}", "market_title": key,
+                "outcome_key": key,
+                "model_probability": model_p, "implied_probability": implied}
+
+    def _board(self, draw_p, missing=()):
+        rows = [{"market_id": "KX-D", "market_title": "Draw",
+                 "outcome_key": "draw", "model_probability": draw_p,
+                 "implied_probability": 0.25}]
+        for k in bots.CREW_LADDER + bots.CREW_INSURANCE:
+            if k not in missing:
+                rows.append(self._score(k, 0.06))
+        return rows
+
+    def test_full_ladder_even_split_no_insurance(self):
+        entries = bots.crew_entries(self._board(draw_p=0.20), 1000)
+        keys = {e[0] for e in entries}
+        assert keys == {f"KX-{k}" for k in bots.CREW_LADDER}
+        stakes = [e[3] for e in entries]
+        assert all(abs(x - 5.0) < 0.01 for x in stakes)      # 60/12
+
+    def test_insurance_added_when_draw_smells_likely(self):
+        entries = bots.crew_entries(self._board(draw_p=0.28), 1000)
+        keys = {e[0] for e in entries}
+        assert "KX-score_1_1" in keys and "KX-score_2_2" in keys
+        assert len(entries) == 14
+        assert abs(entries[0][3] - 60.0 / 14) < 0.01
+
+    def test_unpriced_rungs_skipped_budget_redistributed(self):
+        entries = bots.crew_entries(
+            self._board(draw_p=0.10, missing=("score_3_0", "score_0_3")), 1000)
+        assert len(entries) == 10
+        assert abs(entries[0][3] - 6.0) < 0.01               # 60/10

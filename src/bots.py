@@ -53,8 +53,11 @@ PERSONAS = {
              "tagline": "Buys the panic when the live model disagrees. Holds. Everyone overreacts.",
              "style": "in-play contrarian"},
     "SWEETSPOT": {"name": "Sweetspot", "emoji": "🍯",
-                  "tagline": "The house recipe: find the score the match wants, buy the neighbourhood. Dutched, patient.",
+                  "tagline": "The model-weighted refinement of the Crew recipe: only the tightest cluster, dutched by probability.",
                   "style": "exact-score cluster"},
+    "CREW": {"name": "The Crew", "emoji": "🤝",
+             "tagline": "Son & friends' recipe, verbatim: the six win-scores both ways, split even. 1-1 and 2-2 insurance when a draw smells likely.",
+             "style": "score ladder + insurance"},
 }
 
 
@@ -198,6 +201,38 @@ def sweetspot_entries(rows, cash):
         out.append((r["market_id"], r["market_title"], c, stake,
                     f"cluster {p:.0%} model vs {c:.0%} implied"))
     return out
+
+
+# the ladder Son's crew bets: every decisive score up to 3-2, BOTH ways —
+# a bet against 0-0, 3-3 and blowouts, with the payout set by which rung hits
+CREW_LADDER = ["score_1_0", "score_0_1", "score_2_0", "score_0_2",
+               "score_2_1", "score_1_2", "score_3_0", "score_0_3",
+               "score_3_1", "score_1_3", "score_3_2", "score_2_3"]
+CREW_INSURANCE = ["score_1_1", "score_2_2"]
+CREW_DRAW_TRIGGER = 0.25     # model draw-after-90 that makes a draw "smell likely"
+
+
+def crew_entries(rows, cash):
+    """Son & friends' strategy, verbatim: judge the game, then buy the
+    whole decisive-score ladder both ways with the budget split (almost)
+    evenly; when a draw could happen, add 1-1 and 2-2 as insurance."""
+    by_key = {r.get("outcome_key"): r for r in rows}
+    draw = by_key.get("draw")
+    want = list(CREW_LADDER)
+    if draw and (draw.get("model_probability") or 0) >= CREW_DRAW_TRIGGER:
+        want += CREW_INSURANCE
+    picked = []
+    for k in want:
+        r = by_key.get(k)
+        if r and (r.get("implied_probability") or 0) > 0:
+            picked.append(r)
+    if not picked:
+        return []
+    per = 60.0 / len(picked)
+    return [(r["market_id"], r["market_title"], r["implied_probability"],
+             per, "crew ladder" + (" + insurance" if r["outcome_key"] in
+                                   CREW_INSURANCE else ""))
+            for r in picked]
 
 
 def wire_entries(signals, cash):
@@ -384,11 +419,13 @@ def bots_tick(engine) -> dict:
                     if r.get("implied_probability") is not None]
             with SessionLocal() as s:
                 cash = {b: bankroll(b, s)
-                        for b in ("KELLY", "CHALK", "MOONSHOT", "SWEETSPOT")}
+                        for b in ("KELLY", "CHALK", "MOONSHOT", "SWEETSPOT",
+                                  "CREW")}
             for bot, entries in (("KELLY", kelly_entries(rows, cash["KELLY"])),
                                  ("CHALK", chalk_entries(rows, cash["CHALK"])),
                                  ("MOONSHOT", moonshot_entries(rows, cash["MOONSHOT"])),
-                                 ("SWEETSPOT", sweetspot_entries(rows, cash["SWEETSPOT"]))):
+                                 ("SWEETSPOT", sweetspot_entries(rows, cash["SWEETSPOT"])),
+                                 ("CREW", crew_entries(rows, cash["CREW"]))):
                 for mk, title, price, stake, note in entries:
                     if open_position(bot, m.match_id, mk, title, price,
                                      stake, note):
