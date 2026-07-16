@@ -46,11 +46,14 @@ _OUT_TTL = 25
 
 
 def suggest_levers(xg_home: float | None, xg_away: float | None,
-                   stats: dict, minutes: float) -> dict:
+                   stats: dict, minutes: float,
+                   plays: list[dict] | None = None) -> dict:
     """Attack multipliers from live shots-on-target share vs the share the
     pre-match xG implied, plus symmetric DEFENCE multipliers from total shot
-    volume vs expected (game openness). Returns neutral levers with the
-    reason when the inputs aren't there to justify anything else."""
+    volume vs expected (game openness), plus — when play-by-play is
+    available — a bounded MOMENTUM tilt from the recent threat pattern
+    (who is attacking NOW vs the match-long share). Returns neutral levers
+    with the reason when the inputs aren't there to justify anything else."""
     neutral = {"home": 1.0, "away": 1.0, "def_home": 1.0, "def_away": 1.0,
                "source": "neutral", "basis": None}
     if not stats.get("available") or not xg_home or not xg_away:
@@ -89,12 +92,26 @@ def suggest_levers(xg_home: float | None, xg_away: float | None,
     openness = round(max(DEF_CAP_LO, min(
         DEF_CAP_HI, openness_raw ** weight if openness_raw > 0 else 1.0)), 3)
 
+    # momentum: the play-by-play pattern of the LAST ~12 minutes tilts the
+    # cumulative attack levers toward whoever is generating threat right
+    # now — capped tight (see live_plays) because pressure mean-reverts.
+    from src.live_plays import momentum
+    mom = momentum(plays or [], act_share)
+    lever_home = lever(act_share, exp_share)
+    lever_away = lever(1 - act_share, 1 - exp_share)
+    if mom:
+        lever_home = round(max(LEVER_CAP_LO, min(
+            LEVER_CAP_HI, lever_home * mom["mult_home"])), 3)
+        lever_away = round(max(LEVER_CAP_LO, min(
+            LEVER_CAP_HI, lever_away * mom["mult_away"])), 3)
+
     return {
-        "home": lever(act_share, exp_share),
-        "away": lever(1 - act_share, 1 - exp_share),
+        "home": lever_home,
+        "away": lever_away,
         "def_home": openness,
         "def_away": openness,
-        "source": "live shots",
+        "source": "live shots + plays" if mom else "live shots",
+        "momentum": mom,
         "basis": {
             "sot_home": _num(sot, "home"), "sot_away": _num(sot, "away"),
             "shots_home": _num(shots, "home"), "shots_away": _num(shots, "away"),
@@ -175,7 +192,11 @@ def live_auto(match, engine, prematch_xg: dict | None) -> dict:
     stats = espn_match_stats(match.home, match.away)
     xg_h = (prematch_xg or {}).get("home")
     xg_a = (prematch_xg or {}).get("away")
-    levers = suggest_levers(xg_h, xg_a, stats, state["minutes"])
+    from src.live_feed import espn_commentary
+    from src.live_plays import parse_plays
+    plays = parse_plays(espn_commentary(match.home, match.away),
+                        match.home, match.away)
+    levers = suggest_levers(xg_h, xg_a, stats, state["minutes"], plays=plays)
 
     mhit = _markets_cache.get(match.match_id)
     if mhit and time.time() - mhit[0] < _MARKETS_TTL:
@@ -200,6 +221,9 @@ def live_auto(match, engine, prematch_xg: dict | None) -> dict:
            "levers": levers,
            "status_short": state["status_short"],
            "goals_list": state["goals_list"],
+           # the last few threat events, newest first — the UI's pattern
+           # ticker ("what has been happening"), straight from the parse
+           "recent_plays": list(reversed(plays[-8:])),
            "stats_available": bool(stats.get("available"))}
     _out_cache[match.match_id] = (time.time(), out)
     return out

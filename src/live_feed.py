@@ -558,3 +558,26 @@ def espn_match_stats(home: str, away: str) -> dict:
         print(f"[live_feed] espn match stats failed: {exc}")
     _cache[key] = (time.time(), out)
     return out
+
+
+def espn_commentary(home: str, away: str) -> list[dict]:
+    """Raw play-by-play commentary items for a fixture, from the same ESPN
+    summary the stats card reads (keyless). Cached 30s; empty list until
+    ESPN starts the feed or on any failure — callers treat 'no commentary'
+    as 'no pattern read', never an error."""
+    key = f"__comm__{_norm(home)}|{_norm(away)}"
+    hit = _cache.get(key)
+    if hit and (time.time() - hit[0]) < 30:
+        return hit[1]
+    out: list[dict] = []
+    try:
+        ev = _espn_event_id(home, away)
+        if ev:
+            r = requests.get(ESPN_SUMMARY, params={"event": ev}, timeout=8,
+                             headers={"User-Agent": "wc26-suggester/0.3"})
+            r.raise_for_status()
+            out = r.json().get("commentary") or []
+    except Exception as exc:
+        print(f"[live_feed] espn commentary failed: {exc}")
+    _cache[key] = (time.time(), out)
+    return out
