@@ -205,31 +205,53 @@ class TestCrew:
                 "outcome_key": key,
                 "model_probability": model_p, "implied_probability": implied}
 
-    def _board(self, draw_p, missing=()):
-        rows = [{"market_id": "KX-D", "market_title": "Draw",
-                 "outcome_key": "draw", "model_probability": draw_p,
-                 "implied_probability": 0.25}]
-        for k in bots.CREW_LADDER + bots.CREW_INSURANCE:
+    def _board(self, hw=0.36, aw=0.34, draw_p=0.20, missing=()):
+        rows = [
+            {"market_id": "KX-HW", "market_title": "home win",
+             "outcome_key": "home_win", "model_probability": hw,
+             "implied_probability": hw},
+            {"market_id": "KX-AW", "market_title": "away win",
+             "outcome_key": "away_win", "model_probability": aw,
+             "implied_probability": aw},
+            {"market_id": "KX-D", "market_title": "Draw",
+             "outcome_key": "draw", "model_probability": draw_p,
+             "implied_probability": 0.25},
+        ]
+        keys = set(bots.CREW_EVEN_LADDER + bots.CREW_INSURANCE +
+                   bots.CREW_STRONG_HOME + bots.CREW_STRONG_AWAY)
+        for k in keys:
             if k not in missing:
                 rows.append(self._score(k, 0.06))
         return rows
 
-    def test_full_ladder_even_split_no_insurance(self):
-        entries = bots.crew_entries(self._board(draw_p=0.20), 1000)
+    def test_even_game_tight_ladder_no_insurance(self):
+        entries = bots.crew_entries(self._board(hw=0.36, aw=0.34,
+                                                draw_p=0.20), 1000)
         keys = {e[0] for e in entries}
-        assert keys == {f"KX-{k}" for k in bots.CREW_LADDER}
-        stakes = [e[3] for e in entries]
-        assert all(abs(x - 5.0) < 0.01 for x in stakes)      # 60/12
+        assert keys == {f"KX-{k}" for k in bots.CREW_EVEN_LADDER}
+        assert all(abs(e[3] - 10.0) < 0.01 for e in entries)     # 60/6
 
-    def test_insurance_added_when_draw_smells_likely(self):
+    def test_even_game_with_insurance(self):
         entries = bots.crew_entries(self._board(draw_p=0.28), 1000)
         keys = {e[0] for e in entries}
         assert "KX-score_1_1" in keys and "KX-score_2_2" in keys
-        assert len(entries) == 14
-        assert abs(entries[0][3] - 60.0 / 14) < 0.01
+        assert len(entries) == 8
+
+    def test_uneven_game_strong_home_only(self):
+        entries = bots.crew_entries(self._board(hw=0.55, aw=0.20,
+                                                draw_p=0.30), 1000)
+        keys = {e[0] for e in entries}
+        assert keys == {f"KX-{k}" for k in bots.CREW_STRONG_HOME}
+        # draws and ones dropped even though the draw trigger was hot
+        assert "KX-score_1_1" not in keys and "KX-score_1_0" not in keys
+
+    def test_uneven_game_strong_away_only(self):
+        entries = bots.crew_entries(self._board(hw=0.20, aw=0.55), 1000)
+        assert {e[0] for e in entries} == \
+            {f"KX-{k}" for k in bots.CREW_STRONG_AWAY}
 
     def test_unpriced_rungs_skipped_budget_redistributed(self):
         entries = bots.crew_entries(
-            self._board(draw_p=0.10, missing=("score_3_0", "score_0_3")), 1000)
-        assert len(entries) == 10
-        assert abs(entries[0][3] - 6.0) < 0.01               # 60/10
+            self._board(missing=("score_2_0", "score_0_2")), 1000)
+        assert len(entries) == 4
+        assert abs(entries[0][3] - 15.0) < 0.01                  # 60/4

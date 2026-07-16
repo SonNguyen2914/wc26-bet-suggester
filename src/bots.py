@@ -56,7 +56,7 @@ PERSONAS = {
                   "tagline": "The model-weighted refinement of the Crew recipe: only the tightest cluster, dutched by probability.",
                   "style": "exact-score cluster"},
     "CREW": {"name": "The Crew", "emoji": "🤝",
-             "tagline": "Son & friends' recipe, verbatim: the six win-scores both ways, split even. 1-1 and 2-2 insurance when a draw smells likely.",
+             "tagline": "Son & friends' real recipe: tight two-goal ladder in even games (with draw insurance), strong side only up to 3 in mismatches.",
              "style": "score ladder + insurance"},
 }
 
@@ -203,24 +203,41 @@ def sweetspot_entries(rows, cash):
     return out
 
 
-# the ladder Son's crew bets: every decisive score up to 3-2, BOTH ways —
-# a bet against 0-0, 3-3 and blowouts, with the payout set by which rung hits
-CREW_LADDER = ["score_1_0", "score_0_1", "score_2_0", "score_0_2",
-               "score_2_1", "score_1_2", "score_3_0", "score_0_3",
-               "score_3_1", "score_1_3", "score_3_2", "score_2_3"]
+# Son's crew, two modes.
+# EVEN game: the tight decisive ladder both ways, max 2 goals — "no team
+# got to 3 yet, so we are safe" — with 1-1/2-2 insurance when a draw
+# smells likely.
+CREW_EVEN_LADDER = ["score_1_0", "score_0_1", "score_2_0", "score_0_2",
+                    "score_2_1", "score_1_2"]
 CREW_INSURANCE = ["score_1_1", "score_2_2"]
+# UNEVEN game: only the much stronger side's wins, extended to 3 — and
+# 1-0, 0-1 and the draws dropped altogether.
+CREW_STRONG_HOME = ["score_2_0", "score_2_1", "score_3_0", "score_3_1",
+                    "score_3_2"]
+CREW_STRONG_AWAY = ["score_0_2", "score_1_2", "score_0_3", "score_1_3",
+                    "score_2_3"]
+CREW_UNEVEN_GAP = 0.20       # win90 gap that makes a game "so un-even"
 CREW_DRAW_TRIGGER = 0.25     # model draw-after-90 that makes a draw "smell likely"
 
 
 def crew_entries(rows, cash):
-    """Son & friends' strategy, verbatim: judge the game, then buy the
-    whole decisive-score ladder both ways with the budget split (almost)
-    evenly; when a draw could happen, add 1-1 and 2-2 as insurance."""
+    """Son & friends' strategy, as they actually play it. Judge the game
+    first: roughly even -> the tight two-goal ladder both ways, with 1-1/
+    2-2 insurance when a draw could happen; clearly un-even -> only the
+    stronger side's wins, extended to 3, ones and draws dropped. Budget
+    $60 split (almost) evenly across whatever's picked."""
     by_key = {r.get("outcome_key"): r for r in rows}
-    draw = by_key.get("draw")
-    want = list(CREW_LADDER)
-    if draw and (draw.get("model_probability") or 0) >= CREW_DRAW_TRIGGER:
-        want += CREW_INSURANCE
+    hw = (by_key.get("home_win") or {}).get("model_probability") or 0
+    aw = (by_key.get("away_win") or {}).get("model_probability") or 0
+    if abs(hw - aw) >= CREW_UNEVEN_GAP:
+        want = list(CREW_STRONG_HOME if hw > aw else CREW_STRONG_AWAY)
+        mode = "strong-side ladder"
+    else:
+        want = list(CREW_EVEN_LADDER)
+        mode = "even ladder"
+        draw = by_key.get("draw")
+        if draw and (draw.get("model_probability") or 0) >= CREW_DRAW_TRIGGER:
+            want += CREW_INSURANCE
     picked = []
     for k in want:
         r = by_key.get(k)
@@ -230,8 +247,8 @@ def crew_entries(rows, cash):
         return []
     per = 60.0 / len(picked)
     return [(r["market_id"], r["market_title"], r["implied_probability"],
-             per, "crew ladder" + (" + insurance" if r["outcome_key"] in
-                                   CREW_INSURANCE else ""))
+             per, mode + (" + insurance" if r["outcome_key"] in
+                          CREW_INSURANCE else ""))
             for r in picked]
 
 
