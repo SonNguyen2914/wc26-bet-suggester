@@ -20,7 +20,7 @@ from pathlib import Path
 SRC = Path(sys.argv[1] if len(sys.argv) > 1
            else "/Users/ns/Desktop/Projects/WC26 Predictor/match_pdfs/extracted")
 OUT = Path(__file__).resolve().parents[1] / "src" / "data" / "player_rates.json"
-REMAINING = {"France", "Spain", "England", "Argentina"}   # semifinalists
+REMAINING = {"France", "Spain", "England", "Argentina"}   # teams with matches LEFT (finalists + 3P participants)
 
 rows = list(csv.DictReader(open(SRC / "player_match_stats.csv")))
 players: dict = defaultdict(lambda: {"matches": 0, "starts": 0, "attempts": 0,

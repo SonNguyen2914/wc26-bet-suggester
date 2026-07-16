@@ -287,7 +287,7 @@ TEAM_STATS: dict[str, dict] = {
     # Group-opponent Elos are documented ESTIMATES (Croatia 1810, Ghana
     # 1590, Panama 1565, Congo DR 1525, anchor 1650).
     "England":       {"attack": 1.45, "defence": 0.86, "form": 0.90, "set_piece_threat": 0.30, "red_card_risk": 0.04, "fatigue": 0.22, "elo": 1871,
-        "scouting": "Eliminated by Argentina in the SF (1-2; led through Gordon 55' until Enzo Fernández 85' and a 90+2 Lautaro winner)."},
+        "scouting": "Out in the SF the cruellest way — led Argentina through Gordon's 55th until Enzo Fernández (85') and a 90+2 Lautaro header flipped it. The pattern held all tournament: comeback pragmatists who cede the ball, strike in transition through Bellingham and Kane (6 goals each), and defend far better than the early read suggested (one bad night in seven). First time all tournament they conceded first WITHOUT winning. Third-place games reward whoever still wants to run — England's press volume makes them the fitter-looking side on paper."},
     # --- Brazil: eliminated (lost to Norway R16). Kept for reference/opponent calc.
     "Brazil":        {"attack": 1.45, "defence": 0.80, "form": 0.70, "set_piece_threat": 0.27, "red_card_risk": 0.05, "fatigue": 0.24, "elo": 1805,
         "scouting": "Eliminated by Norway in the R16."},
@@ -325,7 +325,7 @@ TEAM_STATS: dict[str, dict] = {
     # 1.45 cap (3.52 xG vs Morocco, Elo-adj 3.85, pushes further past it);
     # defence 0.75->0.73 (0.16 xGA vs the QF's best-organised opponent).
     "France":        {"attack": 1.45, "defence": 0.73, "form": 0.95, "set_piece_threat": 0.25, "red_card_risk": 0.05, "fatigue": 0.18, "elo": 1926,
-        "scouting": "Eliminated by Spain in the SF (0-2, out-created 2.21 xG to 0.48)."},
+        "scouting": "Out in the SF — Spain beat them 2-0 and out-created them 2.21 xG to 0.48, the first time all tournament France lost the chance count. Still the most dangerous transition side left when they play: tournament-leading 16 goals (Mbappé 8, Dembélé 5), devastating in space, happy without the ball. Elite defence all month (≈0.6 xG/game allowed before the SF). One eye on the exit in a third-place game is the classic risk — but the front line's individual quality travels regardless."},
     # --- Morocco: OPP-ADJUSTED (3 PDFs). attack raw 0.86 nudged to 1.05:
     # out-CREATED Brazil (xG 1.33-0.99) and finishing beats xG (3 goals/0.85
     # vs Canada). Genuine dark horse, not just a bus-park. Set-piece threat +.
