@@ -281,3 +281,141 @@ class TestCrew:
             stage="group")
         assert len(entries) == 4
         assert abs(sum(e[3] for e in entries) - 60.0) < 0.01
+
+
+class TestNewBotEntryRules:
+    def test_coin_is_seeded_deterministic_and_bounded(self):
+        rows = [_row(0.5, 0.02 + i * 0.06, market_id=f"M{i}") for i in range(10)]
+        a = bots.coin_entries(rows, 1000, "THIRD")
+        assert a == bots.coin_entries(rows, 1000, "THIRD")   # stable per match
+        assert len(a) == bots.COIN_PICKS
+        assert all(s == bots.COIN_STAKE for _, _, _, s, _ in a)
+        assert all(bots.COIN_BAND[0] <= p <= bots.COIN_BAND[1]
+                   for _, _, p, _, _ in a)
+
+    def test_sheep_follows_risers_and_ignores_the_model(self):
+        rows = [_row(0.01, 0.50, market_id="UP"),     # model hates it; rising
+                _row(0.99, 0.50, market_id="DOWN"),   # model loves it; falling
+                _row(0.50, 0.50, market_id="FLAT")]
+        trends = {"UP": 0.06, "DOWN": -0.06, "FLAT": 0.01}
+        entries = bots.sheep_entries(rows, 1000, trends)
+        assert [e[0] for e in entries] == ["UP"]
+        assert entries[0][3] == bots.SHEEP_STAKE
+
+    def test_sheep_caps_at_the_strongest_risers(self):
+        rows = [_row(0.5, 0.5, market_id=f"R{i}") for i in range(5)]
+        trends = {f"R{i}": 0.04 + i * 0.01 for i in range(5)}
+        entries = bots.sheep_entries(rows, 1000, trends)
+        assert len(entries) == bots.SHEEP_MAX
+        assert entries[0][0] == "R4"                  # biggest riser first
+
+    def test_sniper_is_kelly_with_a_window_tag(self):
+        rows = [_row(0.62, 0.54)]
+        k = bots.kelly_entries(rows, 1000)
+        s = bots.sniper_entries(rows, 1000)
+        assert [(e[0], e[2], e[3]) for e in k] == [(e[0], e[2], e[3]) for e in s]
+        assert s[0][4].startswith("T-10 strike")
+
+    @staticmethod
+    def _fav(key, implied, market_id):
+        r = _row(0.5, implied, market_id=market_id)
+        r["outcome_key"] = key
+        return r
+
+    def test_tilt_backs_the_favourite_and_doubles(self):
+        rows = [self._fav("home_win", 0.55, "H"),
+                self._fav("away_win", 0.30, "A"),
+                self._fav("draw", 0.60, "D")]         # draws never count
+        (mk, _, _, stake, _), = bots.tilt_entries(rows, 1000, 0)
+        assert mk == "H" and stake == bots.TILT_BASE
+        (_, _, _, stake3, _), = bots.tilt_entries(rows, 1000, 3)
+        assert stake3 == bots.TILT_BASE * 8
+        (_, _, _, capped, _), = bots.tilt_entries(rows, 1000, 9)
+        assert capped == bots.TILT_CAP
+
+    def test_tilt_skips_when_no_favourite_pays(self):
+        assert not bots.tilt_entries([self._fav("home_win", 0.85, "H")], 1000, 0)
+
+    def test_scholar_copies_consensus_not_thin_support(self):
+        rows = [_row(0.5, 0.40, market_id="POP-X"),
+                _row(0.5, 0.40, market_id="THIN-X")]
+        support = {"POP-X": 3.0, "THIN-X": 2.0}
+        entries = bots.scholar_entries(rows, 1000, support, {}, set())
+        assert [e[0] for e in entries] == ["POP-X"]
+        assert "consensus" in entries[0][4]
+
+    def test_scholar_refuses_the_banned_family(self):
+        rows = [_row(0.5, 0.40, market_id="KXWCTOTAL-X")]
+        assert not bots.scholar_entries(rows, 1000, {"KXWCTOTAL-X": 5.0}, {},
+                                        {"KXWCTOTAL"})
+
+    def test_scholar_dutches_budget_by_support(self):
+        rows = [_row(0.5, 0.40, market_id="A-X"),
+                _row(0.5, 0.40, market_id="B-X")]
+        support = {"A-X": 6.0, "B-X": 3.0}
+        entries = bots.scholar_entries(rows, 1000, support, {"A-X": True},
+                                       set())
+        stakes = {e[0]: e[3] for e in entries}
+        assert round(stakes["A-X"], 2) == 40.0
+        assert round(stakes["B-X"], 2) == 20.0
+        notes = {e[0]: e[4] for e in entries}
+        assert "mentor-led" in notes["A-X"] and "consensus" in notes["B-X"]
+
+
+class TestLearnerHelpers:
+    def setup_method(self):
+        init_db()
+        with SessionLocal() as s:
+            s.query(BotPosition).delete()
+            s.commit()
+
+    def test_tilt_streak_counts_trailing_losses_only(self):
+        from datetime import timedelta as _td
+        t0 = utcnow()
+        with SessionLocal() as s:
+            s.add_all([
+                BotPosition(bot="TILT", match_id="TS", market_id="T1",
+                            market_title="t", entry_price=0.5, contracts=10,
+                            cost=5.0, pnl=10.0, closed_at=t0 - _td(hours=3),
+                            close_reason="settled yes"),
+                BotPosition(bot="TILT", match_id="TS", market_id="T2",
+                            market_title="t", entry_price=0.5, contracts=10,
+                            cost=5.0, pnl=0.0, closed_at=t0 - _td(hours=2),
+                            close_reason="settled no"),
+                BotPosition(bot="TILT", match_id="TS", market_id="T3",
+                            market_title="t", entry_price=0.5, contracts=10,
+                            cost=5.0, pnl=0.0, closed_at=t0 - _td(hours=1),
+                            close_reason="settled no"),
+            ])
+            s.commit()
+            assert bots._tilt_streak(s) == 2          # win resets the count
+
+    def test_scholar_context_weights_winners_and_bans_loser_families(self):
+        with SessionLocal() as s:
+            s.add_all([
+                # PEERWIN settled +100 -> weight 1 + 100/50 = 3.0
+                BotPosition(bot="PEERWIN", match_id="OLD", market_id="W-1",
+                            market_title="t", entry_price=0.5, contracts=10,
+                            cost=50.0, pnl=150.0, closed_at=utcnow(),
+                            close_reason="settled yes"),
+                # the room dropped $20 on family LOSSFAM -> banned
+                BotPosition(bot="PEERLOSE", match_id="OLD",
+                            market_id="LOSSFAM-1", market_title="t",
+                            entry_price=0.5, contracts=10, cost=20.0, pnl=0.0,
+                            closed_at=utcnow(), close_reason="settled no"),
+                # open positions on the target match
+                BotPosition(bot="PEERWIN", match_id="TGT", market_id="X-1",
+                            market_title="t", entry_price=0.5, contracts=10,
+                            cost=5.0),
+                BotPosition(bot="PEERCOLD", match_id="TGT", market_id="X-1",
+                            market_title="t", entry_price=0.5, contracts=10,
+                            cost=5.0),
+                BotPosition(bot="SCHOLAR", match_id="TGT", market_id="X-1",
+                            market_title="t", entry_price=0.5, contracts=10,
+                            cost=5.0),                # self never counts
+            ])
+            s.commit()
+            support, mentor_led, banned = bots._scholar_context("TGT", s)
+        assert round(support["X-1"], 2) == 4.0        # 3.0 mentor + 1.0 cold
+        assert mentor_led.get("X-1") is True
+        assert "LOSSFAM" in banned

@@ -1,6 +1,6 @@
 """The strategy-lab bots, each with its own strategy and temperament,
 betting the REAL Kalshi books through the model. Hypothetical money only —
-this is a strategy laboratory: five different philosophies running against
+this is a strategy laboratory: twelve philosophies running against
 the same markets, so their ledgers show which instincts actually pay.
 
   KELLY     the quant. Pre-match only; bets model-vs-price edge >= 5pts,
@@ -19,6 +19,23 @@ the same markets, so their ledgers show which instincts actually pay.
   SWEETSPOT Son's own recipe: the model's modal exact score plus its
             neighbourhood (>=60% of the mode, max 4 books), $60 dutched
             by model probability. Patient, cluster-shaped.
+  COIN      the placebo. Three seeded-random books per match, $20 flat,
+            no model, no market read. If COIN keeps up, nothing else here
+            means anything.
+  SHEEP     the herd. Model-blind: buys whatever the market itself has been
+            bidding up (price risers over the trailing hours). The
+            anti-model control — if SHEEP beats KELLY, the edge thesis is
+            in trouble.
+  SNIPER    KELLY's exact rule, but only inside the last 15 minutes before
+            kickoff. Settles the bet-early-vs-bet-late question the whole
+            ripeness system was built around.
+  TILT      the cautionary ledger. Backs the market favourite with
+            martingale staking: doubles after every settled loss, resets on
+            a win. Watch the staircase.
+  SCHOLAR   the meta-bot. Scores every peer by realized P&L, copies the
+            open positions the (weighted) room agrees on, and refuses
+            market families where settled bets have collectively lost.
+            Learns from everyone's gains and mistakes; owns nothing else.
 
 Costs are modelled like the strategy page: Kalshi taker fee 0.07*P*(1-P)
 per contract on entry AND on an early exit. Settlement uses the closing
@@ -57,6 +74,21 @@ PERSONAS = {
     "CREW": {"name": "The Crew", "emoji": "🤝",
              "tagline": "Son & friends' recipe v3: two-mode ladders, permanent knockout draw insurance, stakes follow belief.",
              "style": "score ladder + insurance"},
+    "COIN": {"name": "Coin", "emoji": "🪙",
+             "tagline": "Three random books a match, $20 each. The placebo every lab needs.",
+             "style": "random control"},
+    "SHEEP": {"name": "Sheep", "emoji": "🐑",
+              "tagline": "Buys whatever the market's been buying. Never met the model.",
+              "style": "price momentum, model-blind"},
+    "SNIPER": {"name": "Sniper", "emoji": "🎯",
+               "tagline": "Kelly's rule, but only in the last 15 minutes before kickoff. One window, one shot.",
+               "style": "late value"},
+    "TILT": {"name": "Tilt", "emoji": "😤",
+             "tagline": "Doubles after every loss. It always works until it doesn't.",
+             "style": "martingale favourite-backer"},
+    "SCHOLAR": {"name": "Scholar", "emoji": "🧠",
+                "tagline": "Reads every ledger, copies what the winners hold, dodges what the room lost on.",
+                "style": "meta / learns from peers"},
 }
 
 
@@ -298,6 +330,204 @@ def fade_entries(live_rows, ref_prices, cash):
     return out
 
 
+COIN_PICKS = 3               # books per match
+COIN_STAKE = 20.0
+COIN_BAND = (0.05, 0.95)     # skip dust and near-settled books
+
+SHEEP_RISE = 0.04            # price climb that reads as "the herd is on it"
+SHEEP_STAKE = 40.0
+SHEEP_MAX = 3                # strongest risers only
+SHEEP_BAND = (0.10, 0.90)
+
+SNIPER_WINDOW_MIN = 15       # minutes before kickoff the window opens
+
+TILT_BASE = 10.0
+TILT_CAP = 160.0             # even the martingale has a table limit
+TILT_BAND = (0.30, 0.75)     # favourites that still pay something
+
+SCHOLAR_BUDGET = 60.0        # per match, dutched over the copied markets
+SCHOLAR_MIN_SUPPORT = 3.0    # weighted holders needed before copying
+SCHOLAR_MAX = 4
+SCHOLAR_MENTOR_DIV = 50.0    # $50 realized net = +1 vote of extra weight
+SCHOLAR_BAN_NET = -15.0      # family aggregate loss that reads "mistake"
+
+
+def coin_entries(rows, cash, match_id):
+    """The placebo: a seeded-random draw per match, so every DB re-entry
+    (and every tick) lands the same 'random' books — random with respect
+    to signal, deterministic with respect to state."""
+    import random as _random
+    cands = sorted((r for r in rows
+                    if r.get("implied_probability") is not None
+                    and COIN_BAND[0] <= r["implied_probability"] <= COIN_BAND[1]),
+                   key=lambda r: r["market_id"])
+    if not cands:
+        return []
+    rng = _random.Random(f"coin:{match_id}")
+    picks = rng.sample(cands, min(COIN_PICKS, len(cands)))
+    return [(r["market_id"], r["market_title"], r["implied_probability"],
+             COIN_STAKE, "coin flip (seeded)") for r in picks]
+
+
+def sheep_entries(rows, cash, trends):
+    """Model-blind price-follower: buy what the market itself has been
+    bidding up. `trends` maps market_id -> price change since the baseline
+    reading (computed from OddsReading history by the tick)."""
+    risers = []
+    for r in rows:
+        c = r.get("implied_probability")
+        d = trends.get(r["market_id"])
+        if c is None or d is None or not (SHEEP_BAND[0] <= c <= SHEEP_BAND[1]):
+            continue
+        if d >= SHEEP_RISE:
+            risers.append((d, r, c))
+    risers.sort(key=lambda x: -x[0])
+    return [(r["market_id"], r["market_title"], c, SHEEP_STAKE,
+             f"herd bid it {d:+.2f}")
+            for d, r, c in risers[:SHEEP_MAX]]
+
+
+def sniper_entries(rows, cash):
+    """KELLY's rule verbatim — the tick only calls this inside the last
+    SNIPER_WINDOW_MIN minutes before kickoff, so the ledger difference
+    between the two IS the early-vs-late answer."""
+    return [(mk, title, price, stake, f"T-10 strike: {note}")
+            for mk, title, price, stake, note in kelly_entries(rows, cash)]
+
+
+def tilt_entries(rows, cash, streak):
+    """One bet per match on the market favourite (to win, no draws),
+    martingale-staked: base doubles per trailing settled loss, capped."""
+    best = None
+    for r in rows:
+        if r.get("outcome_key") not in ("home_win", "away_win"):
+            continue
+        c = r.get("implied_probability")
+        if c is None or not (TILT_BAND[0] <= c <= TILT_BAND[1]):
+            continue
+        if best is None or c > best[1]:
+            best = (r, c)
+    if best is None:
+        return []
+    r, c = best
+    stake = min(TILT_BASE * (2 ** streak), TILT_CAP)
+    return [(r["market_id"], r["market_title"], c, stake,
+             f"martingale step {streak + 1}, favourite @ {c:.0%}")]
+
+
+def scholar_entries(rows, cash, support, mentor_led, banned_families):
+    """The learner. `support` maps market_id -> weighted count of peers
+    holding it (weight 1 + realized_net/SCHOLAR_MENTOR_DIV for profitable
+    peers): cold ledgers make this pure consensus, warm ledgers make it
+    follow the winners. Families the room has collectively lost money on
+    are refused — the 'learned mistake' half of the brief."""
+    by_id = {r["market_id"]: r for r in rows
+             if r.get("implied_probability") is not None}
+    cands = []
+    for mk, sup in support.items():
+        r = by_id.get(mk)
+        if r is None or sup < SCHOLAR_MIN_SUPPORT:
+            continue
+        if _family(mk) in banned_families:
+            continue
+        cands.append((sup, r))
+    if not cands:
+        return []
+    cands.sort(key=lambda x: (-x[0], x[1]["market_id"]))
+    cands = cands[:SCHOLAR_MAX]
+    supsum = sum(s for s, _ in cands) or 1.0
+    out = []
+    for sup, r in cands:
+        stake = SCHOLAR_BUDGET * sup / supsum
+        tag = "mentor-led" if mentor_led.get(r["market_id"]) else "consensus"
+        out.append((r["market_id"], r["market_title"],
+                    r["implied_probability"], stake,
+                    f"learned: support {sup:.1f} ({tag})"))
+    return out
+
+
+def _family(market_id: str) -> str:
+    """Kalshi ticker family — 'KXWCGAME-26JUL19ESPARG-ESP' -> 'KXWCGAME'."""
+    return (market_id or "").split("-", 1)[0]
+
+
+def _price_trends(match_id: str, rows, session) -> dict:
+    """market_id -> implied-price change vs a baseline OddsReading: the
+    newest reading older than 6h, else the oldest one at least 1h old.
+    Quiet books (no usable baseline) simply produce no trend."""
+    from src.db import OddsReading
+    ids = [r["market_id"] for r in rows]
+    if not ids:
+        return {}
+    cutoff_6h = utcnow() - timedelta(hours=6)
+    cutoff_1h = utcnow() - timedelta(hours=1)
+    readings = session.execute(
+        select(OddsReading)
+        .where(OddsReading.match_id == match_id,
+               OddsReading.market_id.in_(ids))
+        .order_by(OddsReading.created_at)
+    ).scalars().all()
+    baseline: dict[str, float] = {}
+    for rd in readings:
+        if rd.yes_price is None or rd.created_at is None:
+            continue
+        if rd.created_at <= cutoff_6h:
+            baseline[rd.market_id] = rd.yes_price      # newest pre-6h wins
+        elif rd.market_id not in baseline and rd.created_at <= cutoff_1h:
+            baseline[rd.market_id] = rd.yes_price      # oldest 1h+ fallback
+    out = {}
+    for r in rows:
+        c, b = r.get("implied_probability"), baseline.get(r["market_id"])
+        if c is not None and b is not None:
+            out[r["market_id"]] = round(c - b, 4)
+    return out
+
+
+def _tilt_streak(session) -> int:
+    """Trailing count of consecutive settled losses on TILT's ledger."""
+    closed = session.execute(
+        select(BotPosition)
+        .where(BotPosition.bot == "TILT", BotPosition.closed_at.is_not(None))
+        .order_by(BotPosition.closed_at.desc())
+    ).scalars().all()
+    streak = 0
+    for pos in closed:
+        if (pos.pnl or 0.0) - pos.cost < 0:
+            streak += 1
+        else:
+            break
+    return streak
+
+
+def _scholar_context(match_id: str, session) -> tuple[dict, dict, set]:
+    """(support, mentor_led, banned_families) for SCHOLAR's tick.
+    Support counts every OTHER bot's open position on this match, weighted
+    by that bot's realized net; families with aggregate settled losses
+    beyond SCHOLAR_BAN_NET are banned."""
+    all_pos = session.execute(select(BotPosition)).scalars().all()
+    realized: dict[str, float] = {}
+    fam_net: dict[str, float] = {}
+    for p in all_pos:
+        if p.closed_at is not None:
+            net = (p.pnl or 0.0) - p.cost
+            realized[p.bot] = realized.get(p.bot, 0.0) + net
+            if (p.close_reason or "").startswith("settled"):
+                fam = _family(p.market_id)
+                fam_net[fam] = fam_net.get(fam, 0.0) + net
+    banned = {f for f, n in fam_net.items() if n <= SCHOLAR_BAN_NET}
+    support: dict[str, float] = {}
+    mentor_led: dict[str, bool] = {}
+    for p in all_pos:
+        if (p.bot == "SCHOLAR" or p.closed_at is not None
+                or p.match_id != match_id):
+            continue
+        w = 1.0 + max(0.0, realized.get(p.bot, 0.0)) / SCHOLAR_MENTOR_DIV
+        support[p.market_id] = support.get(p.market_id, 0.0) + w
+        if w > 1.0:
+            mentor_led[p.market_id] = True
+    return support, mentor_led, banned
+
+
 def wire_exits(open_positions, live_rows, sell_signal_ids):
     """(pos, price, reason) for WIRE's exit rules: SELL flip or +20c."""
     price_by_id = {r["market_id"]: r.get("market_probability")
@@ -375,7 +605,7 @@ def settle_match(match_id: str) -> int:
 # ---------------------------------------------------------------------------
 
 def bots_tick(engine) -> dict:
-    """Entries, exits and settlements for all five bots. Cheap: reuses the
+    """Entries, exits and settlements for all twelve bots. Cheap: reuses the
     cached prediction batch pre-match, the cached live_auto cycle in play,
     and the LiveSignal rows the signal job already wrote."""
     from src.cache import latest_for_match
@@ -446,7 +676,7 @@ def bots_tick(engine) -> dict:
                                  stake, note):
                     opened += 1
         else:
-            # ---- pre-match: KELLY / CHALK / MOONSHOT ---------------------
+            # ---- pre-match: everyone except WIRE/FADE --------------------
             batch = latest_for_match(m.match_id)
             if not batch:
                 continue
@@ -455,15 +685,34 @@ def bots_tick(engine) -> dict:
             with SessionLocal() as s:
                 cash = {b: bankroll(b, s)
                         for b in ("KELLY", "CHALK", "MOONSHOT", "SWEETSPOT",
-                                  "CREW")}
-            for bot, entries in (("KELLY", kelly_entries(rows, cash["KELLY"])),
-                                 ("CHALK", chalk_entries(rows, cash["CHALK"])),
-                                 ("MOONSHOT", moonshot_entries(rows, cash["MOONSHOT"])),
-                                 ("SWEETSPOT", sweetspot_entries(rows, cash["SWEETSPOT"])),
-                                 ("CREW", crew_entries(rows, cash["CREW"], stage=m.stage))):
+                                  "CREW", "COIN", "SHEEP", "SNIPER", "TILT",
+                                  "SCHOLAR")}
+                trends = _price_trends(m.match_id, rows, s)
+                tilt_streak = _tilt_streak(s)
+            in_sniper_window = (timedelta(0) < (m.kickoff - now)
+                                <= timedelta(minutes=SNIPER_WINDOW_MIN))
+            plan = [("KELLY", kelly_entries(rows, cash["KELLY"])),
+                    ("CHALK", chalk_entries(rows, cash["CHALK"])),
+                    ("MOONSHOT", moonshot_entries(rows, cash["MOONSHOT"])),
+                    ("SWEETSPOT", sweetspot_entries(rows, cash["SWEETSPOT"])),
+                    ("CREW", crew_entries(rows, cash["CREW"], stage=m.stage)),
+                    ("COIN", coin_entries(rows, cash["COIN"], m.match_id)),
+                    ("SHEEP", sheep_entries(rows, cash["SHEEP"], trends)),
+                    ("TILT", tilt_entries(rows, cash["TILT"], tilt_streak))]
+            if in_sniper_window:
+                plan.append(("SNIPER", sniper_entries(rows, cash["SNIPER"])))
+            for bot, entries in plan:
                 for mk, title, price, stake, note in entries:
                     if open_position(bot, m.match_id, mk, title, price,
                                      stake, note):
                         opened += 1
+            # SCHOLAR runs last so this tick's entries count toward support
+            with SessionLocal() as s:
+                support, mentor_led, banned = _scholar_context(m.match_id, s)
+            for mk, title, price, stake, note in scholar_entries(
+                    rows, cash["SCHOLAR"], support, mentor_led, banned):
+                if open_position("SCHOLAR", m.match_id, mk, title, price,
+                                 stake, note):
+                    opened += 1
 
     return {"opened": opened, "closed": closed, "settled": settled}
