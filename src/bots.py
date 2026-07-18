@@ -27,7 +27,6 @@ snapshot was taken before Kalshi settled.
 """
 from __future__ import annotations
 
-import math
 from datetime import timedelta
 
 from sqlalchemy import select
