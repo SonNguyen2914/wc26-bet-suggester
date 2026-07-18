@@ -18,7 +18,7 @@ from collections import defaultdict
 from pathlib import Path
 
 SRC = Path(sys.argv[1] if len(sys.argv) > 1
-           else "/Users/ns/Desktop/Projects/WC26 Predictor/match_pdfs/extracted")
+           else str(Path.home() / "dev/wc26-match-pdfs/extracted"))
 OUT = Path(__file__).resolve().parents[1] / "src" / "data" / "player_rates.json"
 REMAINING = {"France", "Spain", "England", "Argentina"}   # teams with matches LEFT (finalists + 3P participants)
 

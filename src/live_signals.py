@@ -180,6 +180,11 @@ def evaluate_live_signals(engine) -> dict:
                   fallback_title=w["market_title"])
 
         # -- scan 2: EASY WIN across every other open book ----------------
+        # Kalshi can list one outcome under two families (KXWCGAME 3-way +
+        # KXWCMOV moneyline). Collapse candidates per outcome_key to the
+        # cheapest book and key the cooldown on match+outcome, so a single
+        # outcome can never double-ping across families.
+        easy_best: dict[str, tuple[dict, str, float]] = {}
         for mkt_id, row in rows.items():
             if mkt_id in watched_ids:
                 continue
@@ -187,7 +192,12 @@ def evaluate_live_signals(engine) -> dict:
             if verdict is None:
                 continue
             side, diff = verdict
-            key = f"easy:{mkt_id}"
+            okey = row.get("outcome_key") or mkt_id
+            best = easy_best.get(okey)
+            if best is None or row["market_probability"] < best[0]["market_probability"]:
+                easy_best[okey] = (row, side, diff)
+        for okey, (row, side, diff) in easy_best.items():
+            key = f"easy:{match.match_id}:{okey}"
             if not _should_fire(key, side, diff):
                 continue
             _mark_fired(key, side, diff)

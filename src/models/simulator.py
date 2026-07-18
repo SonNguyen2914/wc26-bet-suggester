@@ -369,8 +369,13 @@ class MatchSimulator:
             minutes_remaining = 120.0 - minute
             lam_home = rate_home * minutes_remaining / 90.0
             lam_away = rate_away * minutes_remaining / 90.0
-            et_home = current_home + self.rng.poisson(lam_home, self.n)
-            et_away = current_away + self.rng.poisson(lam_away, self.n)
+            # same performance variance in the ET remainder as regulation
+            # and pre-match — advancement rides these tails too (the echo
+            # below stays the scalar expectation)
+            lam_h, lam_a = self._dispersed(np.full(self.n, lam_home),
+                                           np.full(self.n, lam_away))
+            et_home = current_home + self.rng.poisson(lam_h, self.n)
+            et_away = current_away + self.rng.poisson(lam_a, self.n)
             level = et_home == et_away
             pens_home = self.rng.random(self.n) < PENALTY_HOME_WIN_P
             home_adv = (et_home > et_away) | (level & pens_home)

@@ -706,10 +706,27 @@ def bots_ledger():
     Hypothetical money betting real books — a laboratory for which betting
     philosophy actually pays, scored with the same fee model as the
     strategy page."""
+    from sqlalchemy import func
     from src.bots import PERSONAS, START_BANKROLL, bankroll
-    from src.db import BotPosition
+    from src.db import BotPosition, OddsReading
     out = []
     with SessionLocal() as session:
+        # newest odds reading per market holding an open position — the 30s
+        # poll keeps these fresh near matches; a market with no reading
+        # falls back to cost, so equity never invents a price
+        open_mids = set(session.execute(
+            select(BotPosition.market_id)
+            .where(BotPosition.closed_at.is_(None))).scalars())
+        marks: dict[str, float] = {}
+        if open_mids:
+            latest_ids = (select(func.max(OddsReading.id))
+                          .where(OddsReading.market_id.in_(open_mids))
+                          .group_by(OddsReading.market_id))
+            for rd in session.execute(
+                    select(OddsReading)
+                    .where(OddsReading.id.in_(latest_ids))).scalars():
+                if rd.yes_price is not None:
+                    marks[rd.market_id] = float(rd.yes_price)
         for bot, persona in PERSONAS.items():
             rows = session.execute(
                 select(BotPosition).where(BotPosition.bot == bot)
@@ -725,6 +742,10 @@ def bots_ledger():
                     "opened_at": r.opened_at.isoformat() if r.opened_at else None,
                 }
                 if r.closed_at is None:
+                    mark = marks.get(r.market_id)
+                    item["mark_price"] = mark
+                    item["market_value"] = (round(r.contracts * mark, 2)
+                                            if mark is not None else r.cost)
                     open_pos.append(item)
                 else:
                     item.update({
@@ -736,7 +757,9 @@ def bots_ledger():
                     closed_pos.append(item)
             wins = sum(1 for c in closed_pos if c["net"] > 0)
             cash = bankroll(bot, session)
-            equity = cash + sum(p["cost"] for p in open_pos)
+            # mark-to-market: open positions at the newest polled price
+            # (fee-free mark; realized fees still hit on exit/settlement)
+            equity = cash + sum(p["market_value"] for p in open_pos)
             out.append({
                 "bot": bot, **persona,
                 "bankroll": cash,
