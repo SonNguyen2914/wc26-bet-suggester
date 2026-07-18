@@ -419,3 +419,16 @@ class TestLearnerHelpers:
         assert round(support["X-1"], 2) == 4.0        # 3.0 mentor + 1.0 cold
         assert mentor_led.get("X-1") is True
         assert "LOSSFAM" in banned
+
+    def test_price_trends_tolerates_sqlite_naive_datetimes(self):
+        from datetime import timedelta as _td
+        from src.db import OddsReading
+        with SessionLocal() as s:
+            s.query(OddsReading).delete()
+            s.add(OddsReading(match_id="PT", market_id="P-1", yes_price=0.40,
+                              decimal_odds=2.5,
+                              created_at=utcnow() - _td(hours=7)))
+            s.commit()
+            trends = bots._price_trends(
+                "PT", [{"market_id": "P-1", "implied_probability": 0.46}], s)
+        assert trends == {"P-1": 0.06}

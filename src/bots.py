@@ -467,13 +467,17 @@ def _price_trends(match_id: str, rows, session) -> dict:
                OddsReading.market_id.in_(ids))
         .order_by(OddsReading.created_at)
     ).scalars().all()
+    from datetime import timezone as _tz
     baseline: dict[str, float] = {}
     for rd in readings:
         if rd.yes_price is None or rd.created_at is None:
             continue
-        if rd.created_at <= cutoff_6h:
+        ca = rd.created_at
+        if ca.tzinfo is None:              # SQLite round-trips naive UTC
+            ca = ca.replace(tzinfo=_tz.utc)
+        if ca <= cutoff_6h:
             baseline[rd.market_id] = rd.yes_price      # newest pre-6h wins
-        elif rd.market_id not in baseline and rd.created_at <= cutoff_1h:
+        elif rd.market_id not in baseline and ca <= cutoff_1h:
             baseline[rd.market_id] = rd.yes_price      # oldest 1h+ fallback
     out = {}
     for r in rows:
