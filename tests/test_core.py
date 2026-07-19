@@ -83,8 +83,15 @@ class TestAPI:
         assert self.client.get("/api/health").json()["status"] == "ok"
 
     def test_upcoming(self):
+        # after the FINAL the schedule is exhausted forever — the endpoint
+        # must still answer cleanly with however many fixtures remain
+        from datetime import timedelta
+        from src.db import utcnow
         data = self.client.get("/api/matches/upcoming?hours_ahead=72").json()
-        assert len(data["matches"]) >= 1
+        still_playing = any(m.kickoff > utcnow() for m in load_schedule())
+        assert isinstance(data["matches"], list)
+        if still_playing:
+            assert len(data["matches"]) >= 1
 
     def test_on_demand_prediction(self):
         match_id = load_schedule()[0].match_id

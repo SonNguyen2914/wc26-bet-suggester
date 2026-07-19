@@ -31,7 +31,11 @@ from src.kalshi_client import _get_with_backoff, _name_variants
 # value against the locked model numbers. Player-prop and novelty families
 # are excluded on purpose (no model number to line them up against).
 FAMILIES = ("KXWCGAME", "KXWCMOV", "KXWCADVANCE", "KXWCSCORE",
-            "KXWCTOTAL", "KXWCSPREAD", "KXWCBTTS", "KXWCFTTS")
+            "KXWCTOTAL", "KXWCSPREAD", "KXWCBTTS", "KXWCFTTS",
+            # championship series: priced on the FINAL (as advance) since
+            # the KXMENWORLDCUP classifier fix — without it here, bot
+            # positions on champion books had no closing row to settle from
+            "KXMENWORLDCUP")
 
 
 def _fetch_family_markets(sess, family: str, home: str,
