@@ -582,8 +582,11 @@ def settle_match(match_id: str) -> int:
                 continue
             result = (data.get("result") or "").lower()
             if result not in ("yes", "no"):
+                # raw Kalshi rows carry last_price_dollars; last_price is
+                # the legacy key (same fallback research.py renders with)
                 try:
-                    last = float(data.get("last_price") or "")
+                    last = float(data.get("last_price_dollars",
+                                          data.get("last_price")) or "")
                 except (TypeError, ValueError):
                     continue
                 if last >= 0.95:

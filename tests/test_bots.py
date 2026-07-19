@@ -432,3 +432,63 @@ class TestLearnerHelpers:
             trends = bots._price_trends(
                 "PT", [{"market_id": "P-1", "implied_probability": 0.46}], s)
         assert trends == {"P-1": 0.06}
+
+
+class TestSettleAndRestore:
+    def setup_method(self):
+        init_db()
+        with SessionLocal() as s:
+            s.query(BotPosition).delete()
+            s.query(MarketClosing).delete()
+            s.commit()
+
+    def test_settle_reads_last_price_dollars(self):
+        with SessionLocal() as s:
+            s.add(BotPosition(bot="KELLY", match_id="SM", market_id="SM-1",
+                              market_title="t", entry_price=0.4, contracts=10,
+                              cost=4.2))
+            # fresh Kalshi rows carry last_price_dollars, result unset
+            s.add(MarketClosing(match_id="SM", market_id="SM-1",
+                                event_ticker="E",
+                                data_json=json.dumps(
+                                    {"result": "",
+                                     "last_price_dollars": 0.99})))
+            s.commit()
+        assert bots.settle_match("SM") == 1
+        with SessionLocal() as s:
+            pos = s.query(BotPosition).filter_by(market_id="SM-1").one()
+            assert pos.close_reason == "settled yes"
+            assert pos.pnl == 10.0
+
+    def test_restore_round_trips_the_ledger_export(self):
+        from fastapi.testclient import TestClient
+        from api.main import app
+        client = TestClient(app)
+        payload = {"bots": [
+            {"bot": "KELLY", "open": [
+                {"match_id": "RT", "market_id": "RT-OPEN",
+                 "market_title": "open one", "entry_price": 0.38,
+                 "contracts": 98, "cost": 38.86, "note": "edge",
+                 "opened_at": "2026-07-16T16:00:19"}],
+             "closed": [
+                {"match_id": "RT", "market_id": "RT-DONE",
+                 "market_title": "done one", "entry_price": 0.26,
+                 "contracts": 134, "cost": 36.64, "note": "",
+                 "opened_at": "2026-07-16T15:56:19",
+                 "closed_at": "2026-07-18T23:05:00",
+                 "close_price": 1.0, "close_reason": "settled yes",
+                 "net": 97.36}]}]}
+        r = client.post("/api/bots/restore", json=payload)
+        assert r.status_code == 200
+        assert r.json() == {"inserted": 2, "skipped": 0}
+        # replay is a no-op
+        r2 = client.post("/api/bots/restore", json=payload)
+        assert r2.json() == {"inserted": 0, "skipped": 2}
+        with SessionLocal() as s:
+            done = s.query(BotPosition).filter_by(market_id="RT-DONE").one()
+            assert done.pnl == 134.0            # net 97.36 + cost 36.64
+            assert done.close_reason == "settled yes"
+            open_ = s.query(BotPosition).filter_by(market_id="RT-OPEN").one()
+            assert open_.closed_at is None
+            assert bots.bankroll("KELLY", s) == round(
+                1000.0 - 38.86 + 134.0, 2)

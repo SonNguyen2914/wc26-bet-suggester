@@ -774,6 +774,65 @@ def bots_ledger():
             "generated_at": utcnow().isoformat()}
 
 
+@app.post("/api/bots/restore")
+def bots_restore(payload: dict):
+    """Re-insert archived bot positions after a DB wipe — the ledgers are
+    the one table the boot self-heal cannot rebuild. Accepts the /api/bots
+    response shape (bots[].open/closed) or a bare {"positions": [...]}.
+    (bot, market_id) duplicates are skipped, so replay is idempotent and
+    it composes with the tick's own deterministic re-entry."""
+    from datetime import datetime
+    from src.bots import PERSONAS
+    from src.db import BotPosition
+
+    def _dt(v):
+        if not v:
+            return None
+        try:
+            return datetime.fromisoformat(v)
+        except (TypeError, ValueError):
+            return None
+
+    items = list(payload.get("positions") or [])
+    for b in payload.get("bots") or []:
+        for p in (b.get("open") or []):
+            items.append({**p, "bot": b.get("bot")})
+        for p in (b.get("closed") or []):
+            items.append({**p, "bot": b.get("bot")})
+
+    inserted = skipped = 0
+    with SessionLocal() as session:
+        have = {(r.bot, r.market_id)
+                for r in session.execute(select(BotPosition)).scalars()}
+        for p in items:
+            bot, mk = p.get("bot"), p.get("market_id")
+            if bot not in PERSONAS or not mk or (bot, mk) in have:
+                skipped += 1
+                continue
+            pnl = p.get("pnl")
+            if pnl is None and p.get("net") is not None:
+                # /api/bots renders net = pnl - cost; recover the gross
+                pnl = round(p["net"] + (p.get("cost") or 0.0), 2)
+            kw = dict(bot=bot, match_id=p.get("match_id") or "?",
+                      market_id=mk,
+                      market_title=p.get("market_title") or "",
+                      entry_price=float(p.get("entry_price") or 0.0),
+                      contracts=int(p.get("contracts") or 0),
+                      cost=float(p.get("cost") or 0.0),
+                      note=p.get("note") or "",
+                      closed_at=_dt(p.get("closed_at")),
+                      close_price=p.get("close_price"),
+                      close_reason=p.get("close_reason"), pnl=pnl)
+            opened = _dt(p.get("opened_at"))
+            if opened is not None:      # omit -> column default (utcnow)
+                kw["opened_at"] = opened
+            session.add(BotPosition(**kw))
+            have.add((bot, mk))
+            inserted += 1
+        session.commit()
+    return {"inserted": inserted, "skipped": skipped}
+
+
 @app.get("/api/live-signals")
 def live_signals(match_id: str | None = Query(None),
                  limit: int = Query(30, ge=1, le=200)):
