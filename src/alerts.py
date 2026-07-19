@@ -46,3 +46,26 @@ def alert_final_lock(match_name: str, best_bet: dict | None) -> None:
         )
     else:
         send_discord(f"🔴 **FINAL DECISION LOCKED** — {match_name}: no bets clear the bar. SKIP all.")
+
+
+def send_ntfy(message: str, title: str = "WC26", priority: str = "high") -> bool:
+    """Instant phone push via ntfy.sh — no account, no open page, no RC.
+    Silently no-ops when the topic is unset."""
+    if not config.NTFY_TOPIC:
+        return False
+    try:
+        resp = requests.post(
+            f"https://ntfy.sh/{config.NTFY_TOPIC}",
+            data=message[:1900].encode("utf-8"),
+            headers={"Title": title, "Priority": priority, "Tags": "soccer"},
+            timeout=8)
+        return resp.status_code == 200
+    except requests.RequestException as exc:
+        print(f"[ntfy failed] {exc}")
+        return False
+
+
+def send_alert(message: str, title: str = "WC26") -> None:
+    """Fan-out: every channel that's configured gets the message."""
+    send_discord(message)
+    send_ntfy(message, title=title)

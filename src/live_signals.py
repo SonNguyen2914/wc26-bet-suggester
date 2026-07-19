@@ -34,10 +34,11 @@ import time
 from sqlalchemy import select
 
 import config
-from src.alerts import send_discord
+from src.alerts import send_alert
 from src.cache import latest_for_match
 from src.db import LiveSignal, MatchLiveSnapshot, SessionLocal, WatchlistItem
 from src.live_auto import live_auto
+from src.positions import evaluate_positions
 from src.schedule_data import load_schedule
 
 # A repeat signal on the same side needs the divergence to have grown by at
@@ -120,7 +121,7 @@ def _fire(match, row: dict, side: str, diff: float, kind: str,
     else:
         head = f"{'🟢' if side == 'BUY' else '🔴'} **{side} SIGNAL**"
     min_str = f" ({minute:.0f}')" if minute is not None else ""
-    send_discord(
+    send_alert(
         f"{head} — {match.home} vs {match.away}{min_str}\n"
         f"**{title}**\n"
         f"Live model {row['live_model_probability']:.0%} vs "
@@ -178,6 +179,12 @@ def evaluate_live_signals(engine) -> dict:
             fired += 1
             _fire(match, row, side, diff, "watched", minute,
                   fallback_title=w["market_title"])
+
+        # -- position tracker: hold-vs-cashout reads on Son's REAL bets ---
+        try:
+            evaluate_positions(rows, match.match_id, minute, alert=True)
+        except Exception as exc:
+            print(f"[positions] {match.match_id} eval failed: {exc}")
 
         # -- scan 2: EASY WIN across every other open book ----------------
         # Kalshi can list one outcome under two families (KXWCGAME 3-way +

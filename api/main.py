@@ -774,6 +774,85 @@ def bots_ledger():
             "generated_at": utcnow().isoformat()}
 
 
+@app.get("/api/positions")
+def positions_list():
+    """Son's real tracked positions with live HOLD/EXIT verdicts. In play,
+    prices come from the live_auto cycle; pre-match, from the latest
+    prediction batch. Read-only: never fires alerts."""
+    from src.cache import latest_for_match
+    from src.db import MatchLiveSnapshot, TrackedPosition
+    from src.live_auto import live_auto
+    from src.positions import evaluate_positions
+    from src.schedule_data import load_schedule
+    out = []
+    with SessionLocal() as session:
+        match_ids = set(session.execute(
+            select(TrackedPosition.match_id)
+            .where(TrackedPosition.closed_at.is_(None))).scalars())
+        live_ids = set(session.execute(
+            select(MatchLiveSnapshot.match_id)).scalars())
+    for m in load_schedule():
+        if m.match_id not in match_ids:
+            continue
+        rows = {}
+        minute = None
+        if m.match_id in live_ids:
+            try:
+                la = live_auto(m, engine,
+                               (latest_for_match(m.match_id) or {}).get("xg"))
+                if la.get("available"):
+                    rows = {r["market_id"]: r for r in la.get("markets", [])}
+                    minute = (la.get("live_state") or {}).get("minutes_elapsed")
+            except Exception:
+                rows = {}
+        if not rows:
+            batch = latest_for_match(m.match_id) or {}
+            rows = {r["market_id"]: r for r in batch.get("markets", [])}
+        out.extend(evaluate_positions(rows, m.match_id, minute))
+    return {"positions": out, "generated_at": utcnow().isoformat()}
+
+
+@app.post("/api/positions")
+def positions_add(payload: dict):
+    """Record real positions: {"positions": [{match_id, market_id,
+    market_title?, entry_price, contracts, cost?, note?}]}. cost defaults
+    to contracts*entry_price + the modelled fee."""
+    from src.db import TrackedPosition
+    added = []
+    with SessionLocal() as session:
+        for p in payload.get("positions") or []:
+            if not p.get("market_id") or not p.get("match_id"):
+                continue
+            ep = float(p["entry_price"]); n = int(p["contracts"])
+            cost = p.get("cost")
+            if cost is None:
+                cost = round(n * (ep + 0.07 * ep * (1 - ep)), 2)
+            pos = TrackedPosition(
+                match_id=p["match_id"], market_id=p["market_id"],
+                market_title=p.get("market_title") or p["market_id"],
+                entry_price=ep, contracts=n, cost=float(cost),
+                note=p.get("note") or "")
+            session.add(pos)
+            session.flush()
+            added.append(pos.id)
+        session.commit()
+    return {"added": len(added), "ids": added}
+
+
+@app.delete("/api/positions/{pos_id}")
+def positions_close(pos_id: int, note: str = Query("closed by user")):
+    """Mark a tracked position closed (you exited / it settled)."""
+    from src.db import TrackedPosition
+    with SessionLocal() as session:
+        pos = session.get(TrackedPosition, pos_id)
+        if pos is None:
+            raise HTTPException(404, f"no tracked position {pos_id}")
+        pos.closed_at = utcnow()
+        pos.close_note = note
+        session.commit()
+    return {"closed": pos_id, "note": note}
+
+
 @app.post("/api/bots/restore")
 def bots_restore(payload: dict):
     """Re-insert archived bot positions after a DB wipe — the ledgers are

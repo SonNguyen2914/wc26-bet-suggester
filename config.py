@@ -150,3 +150,12 @@ LIVE_POLL_LEAD_MINUTES = int(os.getenv("LIVE_POLL_LEAD_MINUTES", "15"))
 # most a handful of times all tournament, and the job self-skips (zero feed
 # calls) once every slot is resolved, so this is nearly free.
 BRACKET_RESOLVE_MINUTES = int(os.getenv("BRACKET_RESOLVE_MINUTES", "30"))
+
+# --- Position tracker + alert fan-out ------------------------------------
+# Cash-out-vs-hold verdicts flip when the better side wins by this fraction
+# of the position's cost (hysteresis against book wobble).
+POSITION_FLIP_MARGIN = float(os.getenv("POSITION_FLIP_MARGIN", "0.05"))
+# ntfy.sh topic for instant phone pushes, independent of Remote Control and
+# any open page. The default topic ships in a PUBLIC repo — treat it as a
+# temporary channel for the final and rotate/override via env after.
+NTFY_TOPIC = os.getenv("NTFY_TOPIC", "wc26-son-final-kj7f2p9qx4")

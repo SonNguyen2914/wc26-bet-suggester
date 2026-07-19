@@ -300,3 +300,22 @@ def set_setting(session, key: str, value) -> None:
     else:
         session.add(Setting(key=key, value=str(value)))
     session.commit()
+
+
+class TrackedPosition(Base):
+    """Son's REAL Kalshi positions (the position tracker): YES contracts at
+    entry_price, cost as actually paid. The live cycle prices each open row's
+    hold-to-settlement EV vs cash-out-now and alerts on flips."""
+    __tablename__ = "tracked_positions"
+
+    id = Column(Integer, primary_key=True)
+    match_id = Column(String(64), nullable=False)
+    market_id = Column(String(128), nullable=False)
+    market_title = Column(String(256))
+    entry_price = Column(Float, nullable=False)
+    contracts = Column(Integer, nullable=False)
+    cost = Column(Float, nullable=False)
+    note = Column(String(256))
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+    closed_at = Column(DateTime(timezone=True))
+    close_note = Column(String(256))
