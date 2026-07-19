@@ -490,5 +490,27 @@ class TestSettleAndRestore:
             assert done.close_reason == "settled yes"
             open_ = s.query(BotPosition).filter_by(market_id="RT-OPEN").one()
             assert open_.closed_at is None
+            # open cost locked + closed cost spent + gross payout returned
             assert bots.bankroll("KELLY", s) == round(
-                1000.0 - 38.86 + 134.0, 2)
+                1000.0 - 38.86 - 36.64 + 134.0, 2)
+
+    def test_bankroll_charges_closed_losses(self):
+        with SessionLocal() as s:
+            s.add_all([
+                # settled loss: $40 gone forever
+                BotPosition(bot="CHALK", match_id="BR", market_id="BR-L",
+                            market_title="t", entry_price=0.5, contracts=80,
+                            cost=40.0, pnl=0.0, closed_at=utcnow(),
+                            close_reason="settled no"),
+                # settled win: cost 30, payout 60 -> +30 net
+                BotPosition(bot="CHALK", match_id="BR", market_id="BR-W",
+                            market_title="t", entry_price=0.5, contracts=60,
+                            cost=30.0, pnl=60.0, closed_at=utcnow(),
+                            close_reason="settled yes"),
+                # open: cost locked
+                BotPosition(bot="CHALK", match_id="BR", market_id="BR-O",
+                            market_title="t", entry_price=0.5, contracts=20,
+                            cost=10.0),
+            ])
+            s.commit()
+            assert bots.bankroll("CHALK", s) == 1000.0 - 40.0 + 30.0 - 10.0

@@ -103,10 +103,9 @@ def bankroll(bot: str, session) -> float:
         select(BotPosition).where(BotPosition.bot == bot)).scalars().all()
     cash = START_BANKROLL
     for r in rows:
-        if r.closed_at is None:
-            cash -= r.cost
-        else:
-            cash += r.pnl
+        cash -= r.cost                  # every stake leaves the bankroll…
+        if r.closed_at is not None:
+            cash += r.pnl               # …and only closes bring money back
     return round(cash, 2)
 
 
