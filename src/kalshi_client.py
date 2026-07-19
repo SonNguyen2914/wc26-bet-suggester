@@ -350,6 +350,24 @@ def _classify_outcome(match: Match, market: dict,
     if family.startswith("KXWC"):
         return None
 
+    # ---- Championship series (KXMENWORLDCUP...): the TOURNAMENT winner.
+    # On the FINAL that is exactly "to advance" (ET + pens included) —
+    # never the 90-minute outcome. This series isn't KXWC*, so it slipped
+    # past the deny above and into the winner-event fallback, which keyed
+    # champion books as win90. On any other fixture a champion market is
+    # not a match outcome at all: deny rather than mislabel. ----
+    if (family.startswith("KXMENWORLDCUP") or "world cup" in text
+            or "champion" in text):
+        if match.match_id != "FINAL":
+            return None
+        side = ticker.rsplit("-", 1)[-1]
+        for key, team in (("home_advance", match.home),
+                          ("away_advance", match.away)):
+            if _code_is(side, team) or any(
+                    v.lower() in text for v in _name_variants(team)):
+                return key
+        return None
+
     # ---- Fallback for non-KXWC events only ----
     # Guards FIRST: never map partial-match or prop language via fallback,
     # no matter what the subtitle says (a "1st half Draw 2-2" market must

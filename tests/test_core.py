@@ -309,3 +309,38 @@ class TestFirstGoalHotfix:
         out = SuggesterEngine._dedupe_markets([real, prop])
         ids = {m["market_id"] for m in out}
         assert len(out) == 2 and real["market_id"] in ids  # moneyline survives
+
+
+class TestChampionshipSeries:
+    """Regression: KXMENWORLDCUP (tournament winner) isn't a KXWC* family,
+    so it bypassed the unknown-family deny and the winner-event fallback
+    keyed champion books as 90-minute wins. On the FINAL, champion ==
+    advance (ET + pens); anywhere else it maps to nothing."""
+
+    def _final(self):
+        # constructed resolved fixture: load_schedule()'s FINAL carries
+        # placeholder names until the bracket resolves from DB results,
+        # which the test environment doesn't have
+        from datetime import datetime, timezone
+        from src.schedule_data import Match
+        return Match("FINAL", "Spain", "Argentina", "F",
+                     datetime(2026, 7, 19, 19, tzinfo=timezone.utc),
+                     stage="knockout")
+
+    def test_champion_books_key_as_advance_on_the_final(self):
+        from src.kalshi_client import _classify_outcome
+        m = self._final()
+        es = {"ticker": "KXMENWORLDCUP-26-ES",
+              "title": "Will Spain win the Men's World Cup?"}
+        ar = {"ticker": "KXMENWORLDCUP-26-AR",
+              "title": "Will Argentina win the Men's World Cup?"}
+        assert _classify_outcome(m, es, "KXMENWORLDCUP-26") == "home_advance"
+        assert _classify_outcome(m, ar, "KXMENWORLDCUP-26") == "away_advance"
+
+    def test_champion_books_deny_on_any_other_fixture(self):
+        from src.kalshi_client import _classify_outcome
+        from src.schedule_data import load_schedule
+        third = [m for m in load_schedule() if m.match_id == "THIRD"][0]
+        mkt = {"ticker": "KXMENWORLDCUP-26-EN",
+               "title": "Will England win the Men's World Cup?"}
+        assert _classify_outcome(third, mkt, "KXMENWORLDCUP-26") is None
