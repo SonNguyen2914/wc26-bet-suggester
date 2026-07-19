@@ -774,6 +774,19 @@ def bots_ledger():
             "generated_at": utcnow().isoformat()}
 
 
+@app.post("/api/alerts/test")
+def alerts_test():
+    """Fire a test message through every configured alert channel, so the
+    Discord webhook / ntfy topic can be proven before a match, not during."""
+    from src.alerts import send_alert
+    send_alert("✅ Alert channel test — if you can read this, "
+               "match-day pushes will reach you here.",
+               title="WC26 channel test")
+    return {"sent": True,
+            "discord_configured": bool(config.DISCORD_WEBHOOK_URL),
+            "ntfy_configured": bool(config.NTFY_TOPIC)}
+
+
 @app.get("/api/positions")
 def positions_list():
     """Son's real tracked positions with live HOLD/EXIT verdicts. In play,
