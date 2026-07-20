@@ -779,11 +779,15 @@ def alerts_test():
     """Fire a test message through every configured alert channel, so the
     Discord webhook / ntfy topic can be proven before a match, not during."""
     from src.alerts import send_alert
-    send_alert("✅ Alert channel test — if you can read this, "
-               "match-day pushes will reach you here.",
-               title="WC26 channel test")
+    send_alert("⚡ ACTION channel test — act-now pings (signals, tracker "
+               "flips, goals) arrive here.", title="WC26 channel test")
+    send_alert("📊 DETAIL channel test — the narrator posts live briefs, "
+               "goal analyses and your position table here.", kind="detail")
     return {"sent": True,
-            "discord_configured": bool(config.DISCORD_WEBHOOK_URL),
+            "action_configured": bool(config.DISCORD_ACTION_WEBHOOK_URL),
+            "detail_configured": bool(config.DISCORD_DETAIL_WEBHOOK_URL),
+            "split": (config.DISCORD_ACTION_WEBHOOK_URL
+                      != config.DISCORD_DETAIL_WEBHOOK_URL),
             "ntfy_configured": bool(config.NTFY_TOPIC)}
 
 

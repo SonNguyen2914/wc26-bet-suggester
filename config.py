@@ -159,3 +159,15 @@ POSITION_FLIP_MARGIN = float(os.getenv("POSITION_FLIP_MARGIN", "0.05"))
 # any open page. The default topic ships in a PUBLIC repo — treat it as a
 # temporary channel for the final and rotate/override via env after.
 NTFY_TOPIC = os.getenv("NTFY_TOPIC", "wc26-son-final-kj7f2p9qx4")
+
+# --- Two-channel Discord routing + the narrator ---------------------------
+# ACTION channel: terse, act-now pings (signals, tracker flips, goals, T-10).
+# DETAIL channel: the narrator's full live briefs + rich event analyses.
+# Either falls back to the original DISCORD_WEBHOOK_URL so a single-channel
+# setup keeps working untouched.
+DISCORD_ACTION_WEBHOOK_URL = os.getenv("DISCORD_ACTION_WEBHOOK_URL",
+                                       os.getenv("DISCORD_WEBHOOK_URL", ""))
+DISCORD_DETAIL_WEBHOOK_URL = os.getenv("DISCORD_DETAIL_WEBHOOK_URL",
+                                       os.getenv("DISCORD_WEBHOOK_URL", ""))
+# Minutes between periodic in-play live briefs on the detail channel.
+NARRATOR_INTERVAL_MINUTES = int(os.getenv("NARRATOR_INTERVAL_MINUTES", "5"))

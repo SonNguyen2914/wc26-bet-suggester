@@ -6,13 +6,17 @@ import requests
 import config
 
 
-def send_discord(message: str) -> bool:
-    if not config.DISCORD_WEBHOOK_URL:
-        print(f"[alert skipped - no webhook] {message}")
+def send_discord(message: str, channel: str = "action") -> bool:
+    """Post to one of the two Discord channels: "action" (terse, act-now)
+    or "detail" (the narrator's full briefs). Both fall back to the single
+    DISCORD_WEBHOOK_URL when the split isn't configured."""
+    url = (config.DISCORD_DETAIL_WEBHOOK_URL if channel == "detail"
+           else config.DISCORD_ACTION_WEBHOOK_URL)
+    if not url:
+        print(f"[alert skipped - no webhook/{channel}] {message[:80]}")
         return False
     try:
-        resp = requests.post(config.DISCORD_WEBHOOK_URL,
-                             json={"content": message[:1900]}, timeout=8)
+        resp = requests.post(url, json={"content": message[:1900]}, timeout=8)
         return resp.status_code in (200, 204)
     except requests.RequestException as exc:
         print(f"[alert failed] {exc}")
@@ -65,7 +69,15 @@ def send_ntfy(message: str, title: str = "WC26", priority: str = "high") -> bool
         return False
 
 
-def send_alert(message: str, title: str = "WC26") -> None:
-    """Fan-out: every channel that's configured gets the message."""
-    send_discord(message)
+def send_alert(message: str, title: str = "WC26",
+               kind: str = "action") -> None:
+    """Fan-out by kind. "action": the act-now channel + phone push, and a
+    copy to detail so that channel reads as a complete log. "detail": the
+    narrator's channel only — the phone stays quiet."""
+    if kind == "detail":
+        send_discord(message, channel="detail")
+        return
+    send_discord(message, channel="action")
+    if config.DISCORD_DETAIL_WEBHOOK_URL != config.DISCORD_ACTION_WEBHOOK_URL:
+        send_discord(message, channel="detail")
     send_ntfy(message, title=title)

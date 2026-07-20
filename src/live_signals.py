@@ -181,10 +181,19 @@ def evaluate_live_signals(engine) -> dict:
                   fallback_title=w["market_title"])
 
         # -- position tracker: hold-vs-cashout reads on Son's REAL bets ---
+        pos_reads: list = []
         try:
-            evaluate_positions(rows, match.match_id, minute, alert=True)
+            pos_reads = evaluate_positions(rows, match.match_id, minute,
+                                           alert=True)
         except Exception as exc:
             print(f"[positions] {match.match_id} eval failed: {exc}")
+
+        # -- narrator: the live read, posted to the detail channel --------
+        try:
+            from src.narrator import narrate
+            narrate(match, out, pos_reads)
+        except Exception as exc:
+            print(f"[narrator] {match.match_id} failed: {exc}")
 
         # -- scan 2: EASY WIN across every other open book ----------------
         # Kalshi can list one outcome under two families (KXWCGAME 3-way +
