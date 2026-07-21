@@ -1,0 +1,269 @@
+{
+ "method": "raw simulator @ last commit authored before kickoff (recon) / recovered raw from T-10 lock (frozen)",
+ "reconstructed": {
+  "BRA_NOR": {
+   "commit": "baebb8b",
+   "home": "Brazil",
+   "away": "Norway",
+   "adv_home": 0.6208,
+   "note": "pre-ET era: advance = win90 + draw90/2",
+   "win90": [
+    0.5088,
+    0.2239,
+    0.2673
+   ],
+   "xg": [
+    2.227,
+    1.507
+   ],
+   "top": [
+    "1-1",
+    "2-1",
+    "1-0"
+   ],
+   "result": "1-2 FT",
+   "adv_y": 0,
+   "pick": "Brazil",
+   "pick_p": 0.621,
+   "hit": false
+  },
+  "MEX_ENG": {
+   "commit": "baebb8b",
+   "home": "Mexico",
+   "away": "England",
+   "adv_home": 0.4789,
+   "note": "pre-ET era: advance = win90 + draw90/2",
+   "win90": [
+    0.3387,
+    0.2804,
+    0.3809
+   ],
+   "xg": [
+    1.377,
+    1.432
+   ],
+   "top": [
+    "1-1",
+    "0-1",
+    "1-0"
+   ],
+   "result": "2-3 FT",
+   "adv_y": 0,
+   "pick": "England",
+   "pick_p": 0.521,
+   "hit": true
+  },
+  "POR_ESP": {
+   "commit": "1826061",
+   "home": "Portugal",
+   "away": "Spain",
+   "adv_home": 0.2972,
+   "win90": [
+    0.2042,
+    0.2246,
+    0.5712
+   ],
+   "xg": [
+    1.23,
+    2.213
+   ],
+   "top": [
+    "1-1",
+    "0-2",
+    "0-1"
+   ],
+   "result": "0-1 FT",
+   "adv_y": 0,
+   "pick": "Spain",
+   "pick_p": 0.703,
+   "hit": true
+  },
+  "USA_BEL": {
+   "commit": "e4e6040",
+   "home": "United States",
+   "away": "Belgium",
+   "adv_home": 0.3987,
+   "win90": [
+    0.2917,
+    0.2384,
+    0.4699
+   ],
+   "xg": [
+    1.502,
+    1.957
+   ],
+   "top": [
+    "1-1",
+    "0-1",
+    "1-2"
+   ],
+   "result": "1-4 FT",
+   "adv_y": 0,
+   "pick": "Belgium",
+   "pick_p": 0.601,
+   "hit": true
+  },
+  "ARG_EGY": {
+   "commit": "f821f77",
+   "home": "Argentina",
+   "away": "Egypt",
+   "adv_home": 0.6864,
+   "win90": [
+    0.5466,
+    0.2411,
+    0.2123
+   ],
+   "xg": [
+    1.907,
+    1.046
+   ],
+   "top": [
+    "1-0",
+    "1-1",
+    "2-0"
+   ],
+   "result": "3-2 FT",
+   "adv_y": 1,
+   "pick": "Argentina",
+   "pick_p": 0.686,
+   "hit": true
+  },
+  "SUI_COL": {
+   "commit": "f821f77",
+   "home": "Switzerland",
+   "away": "Colombia",
+   "adv_home": 0.5082,
+   "win90": [
+    0.3591,
+    0.2954,
+    0.3455
+   ],
+   "xg": [
+    1.261,
+    1.247
+   ],
+   "top": [
+    "1-1",
+    "1-0",
+    "0-1"
+   ],
+   "result": "0-0 PEN (SUI)",
+   "adv_y": 1,
+   "pick": "Switzerland",
+   "pick_p": 0.508,
+   "hit": true
+  },
+  "MAR_FRA": {
+   "commit": "4243d77",
+   "home": "Morocco",
+   "away": "France",
+   "adv_home": 0.385,
+   "win90": [
+    0.2666,
+    0.2542,
+    0.4792
+   ],
+   "xg": [
+    1.294,
+    1.802
+   ],
+   "top": [
+    "1-1",
+    "0-1",
+    "0-2"
+   ],
+   "result": "0-2 FT",
+   "adv_y": 0,
+   "pick": "France",
+   "pick_p": 0.615,
+   "hit": true
+  },
+  "ESP_BEL": {
+   "commit": "d106194",
+   "home": "Spain",
+   "away": "Belgium",
+   "adv_home": 0.5678,
+   "win90": [
+    0.4108,
+    0.2974,
+    0.2918
+   ],
+   "xg": [
+    1.36,
+    1.092
+   ],
+   "top": [
+    "1-0",
+    "1-1",
+    "0-0"
+   ],
+   "result": "2-1 FT",
+   "adv_y": 1,
+   "pick": "Spain",
+   "pick_p": 0.568,
+   "hit": true
+  }
+ },
+ "frozen": {
+  "NOR_ENG": {
+   "home": "Norway",
+   "away": "England",
+   "adv_home": 0.447,
+   "result": "1-2 AET",
+   "adv_y": 0,
+   "pick": "England",
+   "pick_p": 0.553,
+   "hit": true
+  },
+  "ARG_SUI": {
+   "home": "Argentina",
+   "away": "Switzerland",
+   "adv_home": 0.545,
+   "result": "3-1 AET",
+   "adv_y": 1,
+   "pick": "Argentina",
+   "pick_p": 0.545,
+   "hit": true
+  },
+  "SF1": {
+   "home": "France",
+   "away": "Spain",
+   "adv_home": 0.526,
+   "result": "0-2 FT",
+   "adv_y": 0,
+   "pick": "France",
+   "pick_p": 0.526,
+   "hit": false
+  },
+  "SF2": {
+   "home": "England",
+   "away": "Argentina",
+   "adv_home": 0.48,
+   "result": "1-2 FT",
+   "adv_y": 0,
+   "pick": "Argentina",
+   "pick_p": 0.52,
+   "hit": true
+  },
+  "THIRD": {
+   "home": "France",
+   "away": "England",
+   "adv_home": 0.529,
+   "result": "4-6 FT",
+   "adv_y": 0,
+   "pick": "France",
+   "pick_p": 0.529,
+   "hit": false
+  },
+  "FINAL": {
+   "home": "Spain",
+   "away": "Argentina",
+   "adv_home": 0.547,
+   "result": "1-0 AET",
+   "adv_y": 1,
+   "pick": "Spain",
+   "pick_p": 0.547,
+   "hit": true
+  }
+ }
+}

@@ -158,6 +158,60 @@ n=28.
 - The pooled Brier is exact-score-heavy (155/293 rows); prefer the per-family view.
 - Skill margins (+1.4%/+1.7%) are well within what luck produces at this n.
 
+## Addendum: the sixteen-match scorecard (R16 → FINAL)
+
+The market-level scoring above covers the six matches with frozen locks. For the
+whole knockout stage, the model's **match-winner call** can be reconstructed for the
+pre-lock matches: the team stats and simulator code deployed at each kickoff are in
+git history, so each pairing was re-simulated with **exactly that commit's code and
+stats** (raw stream, no market anchor — pre-lock market prices weren't archived).
+Reconstructions are labeled; they are faithful re-runs, not tamper-proof freezes.
+
+**Coverage honesty:** the repo's first commit landed Jul 5 02:36 UTC — *after* the
+first two R16 kickoffs. CAN_MAR and PAR_FRA predate the model's existence and are
+excluded. The model was born mid-round; the scorecard is the **14 matches it lived
+through**.
+
+| match | model pick (raw p) | result | call | source |
+|---|---|---|---|---|
+| BRA_NOR | Brazil 62.1% | **Norway 2-1** | ❌ | recon `baebb8b`¹ |
+| MEX_ENG | England 52.1% | England 3-2 | ✅ | recon `baebb8b`¹ |
+| POR_ESP | Spain 70.3% | Spain 1-0 | ✅ | recon `1826061` |
+| USA_BEL | Belgium 60.1% | Belgium 4-1 | ✅ | recon `e4e6040` |
+| ARG_EGY | Argentina 68.6% | Argentina 3-2 | ✅ | recon `f821f77` |
+| SUI_COL | Switzerland **50.8%** | **0-0, pens** (SUI) | ✅ | recon `f821f77` |
+| MAR_FRA | France 61.5% | France 2-0 | ✅ | recon `4243d77` |
+| ESP_BEL | Spain 56.8% | Spain 2-1 | ✅ | recon `d106194` |
+| NOR_ENG | England 55.3% | England 2-1 AET | ✅ | frozen lock |
+| ARG_SUI | Argentina 54.5% | Argentina 3-1 AET | ✅ | frozen lock |
+| SF1 | France 52.6% | **Spain 2-0** | ❌ | frozen lock |
+| SF2 | Argentina 52.0% | Argentina 2-1 | ✅ | frozen lock |
+| THIRD | France 52.9% | **England 6-4** | ❌ | frozen lock |
+| FINAL | Spain 54.7% | Spain 1-0 AET | ✅ | frozen lock |
+
+¹ pre-ET-era code (the extra-time simulation shipped Jul 6, 80 minutes before
+POR_ESP); advance for these two = win90 + draw90/2.
+
+**Totals: 11 of 14 winner calls (78.6%).** Advance-probability Brier **0.2097** vs
+the coin-flip baseline's 0.2500 — **+16.1% skill** on 14 *independent* samples (one
+per match, unlike the correlated market rows above). Reconstructed era: 7/8; frozen
+era: 4/6.
+
+Texture worth keeping:
+- The only reconstruction miss is the tournament's biggest upset — Norway over
+  Brazil — with the model at a moderate 62%, its most confident call being POR_ESP
+  at 70.3% (hit).
+- **SUI_COL is the calibration poster child:** the model said 50.8/49.2 — the match
+  finished 0-0 and went to penalties. It called a coin flip a coin flip.
+- Confidence on hits (57.9%) barely exceeds confidence on misses (55.9%): knockout
+  football between elite sides IS close to a coin flip, and the model's honesty
+  about that — against a market that priced 70% on France twice and lost both —
+  is where its Brier skill lives.
+- Reconstruction caveats: commit-time ≈ deploy-time is assumed (pushes were prompt;
+  in the tightest case the ET-continuation commit preceded kickoff by 80 minutes);
+  Monte Carlo noise on re-run probabilities is ±~1pt; raw stream only.
+  Inputs + outputs archived: `research_archive/knockout_recon_2026-07-21.json`.
+
 ## Reproduce it
 
 ```
