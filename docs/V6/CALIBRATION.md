@@ -212,6 +212,25 @@ Texture worth keeping:
   Monte Carlo noise on re-run probabilities is ±~1pt; raw stream only.
   Inputs + outputs archived: `research_archive/knockout_recon_2026-07-21.json`.
 
+## Addendum 2: statistical significance (the evaluation's teeth)
+
+| test | result | verdict |
+|---|---|---|
+| Winner calls vs coin flip | 11/14, binomial p = **0.029** | significant at 5% |
+| Advance Brier vs coin flip (bootstrap, 14 indep.) | skill 95% CI [+0.3%, +31.4%], P(better) = 98% | significant — barely, honestly |
+| Raw model vs market, 293 rows (6-match cluster bootstrap) | +1.4% point, 95% CI [−10.0%, +12.0%], P(better) = 60% | indistinguishable |
+| Anchored vs market (same bootstrap) | +1.7% point, 95% CI [−4.8%, +7.8%], P(better) = 68% | indistinguishable, leaning model |
+| Expected calibration error | raw **0.0269** vs market 0.0388 | model better-calibrated than the exchange |
+| Discrimination (AUC) | raw 0.893 / anchored 0.894 / market 0.890 | identical |
+
+Reading: the model is **provably better than chance** (both match-level tests clear
+5%), **statistically indistinguishable from the market** on probability quality
+(point estimates ahead, intervals straddle zero at n=6 matches), **better
+calibrated** than the market's own prices (ECE), with **equal discrimination**
+(AUC). Its skill concentrates in humility: every miss came at ≤62% confidence
+while the market lost two ~70% calls on France. Weakest spot: the 40–50% band
+overconfidence and the totals family. Bootstrap seed 26, 10k resamples.
+
 ## Reproduce it
 
 ```
