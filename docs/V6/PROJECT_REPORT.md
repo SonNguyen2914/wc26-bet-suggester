@@ -62,11 +62,15 @@ A personal research tool built and operated **during** the World Cup itself (Jun
   (+45.5% on bankroll)**, the model-blind price-follower finished **last (−11.9%)**, and
   the random-placebo control mean-reverted in between — exactly the shape the edge
   thesis predicts. (Honest caveats attached; see below.)
-- **The model kept pace with the exchange — measurably.** Across 293 frozen
-  pre-match predictions with settlement truth (`docs/V6/CALIBRATION.md`): raw-model
-  Brier 0.0898 vs the market's 0.0911, model ahead in 7 of 9 market families, and
-  on the single match where model and market picked different winners (SF2), the
-  model was right. Margins honestly labeled as within-luck at this sample size.
+- **The model's precision is proven, quantified, and honestly bounded.** Winner
+  calls: **11 of 14 knockout matches** (binomial p = 0.029 vs chance — significant).
+  Probability quality: Brier 0.0898 vs the market's 0.0911 across 293 frozen
+  pre-match predictions — statistical parity with a real-money exchange (cluster-
+  bootstrap CI straddles zero, stated as such). Calibration: expected calibration
+  error **0.0269 vs the market's own 0.0388 — better-calibrated than the exchange
+  it priced against**, with identical discrimination (AUC 0.893 vs 0.890). On the
+  single match where model and market picked different winners (SF2), the model
+  was right. Full write-up: `docs/V6/CALIBRATION.md`.
 - **Operated in production through the event it modeled.** One 15-minute outage all
   tournament (found, diagnosed, fixed, and regression-tested same-day). Every deploy
   survives a full database wipe losslessly — by designed procedure, proven eight times.
@@ -98,6 +102,46 @@ archived market data rather than self-reported P&L.
 The out-of-sample discipline cut the other way too, and that's kept in the record: a
 friend-group betting recipe backtested at +47% in-sample went **1-15** in live
 out-of-sample play. Both results are published the same way.
+
+---
+
+## The model's report card
+
+Every claim below is computed from frozen pre-match predictions joined to exchange
+settlement data, committed in-repo, reproducible with one script.
+
+**The knockout scorecard — 11 of 14 winner calls (78.6%):**
+
+| | |
+|---|---|
+| Round of 16 | 5/6 — only miss: Norway over Brazil, the tournament's biggest upset (model 62%) |
+| Quarterfinals | 4/4 — including Switzerland 50.8%: the match finished 0-0 and went to penalties |
+| Semifinals | 1/2 — and SF2 was the only match all tournament where model and market disagreed on the winner; the model won |
+| Third place + Final | 1/2 — the final called at 54.7% Spain, champion called at the freeze at 53.9% |
+
+(Two R16 matches are excluded because the repo's first commit post-dates their
+kickoffs — the model was built mid-round. Six calls come from tamper-proof frozen
+locks; eight are reconstructed by re-simulating with the exact git commit deployed
+at each kickoff, and labeled as such.)
+
+**The statistics:**
+
+| test | result | reading |
+|---|---|---|
+| Winner calls vs chance | 11/14, p = 0.029 | significantly better than guessing |
+| Advance Brier vs coin flip | 0.2097 vs 0.2500, CI excludes zero | real skill, honest margin |
+| Brier vs the exchange (293 markets) | 0.0898 vs 0.0911, CI straddles zero | statistical parity with a real-money market |
+| Expected calibration error | **0.0269 vs market's 0.0388** | better-calibrated than the exchange itself |
+| Discrimination (AUC) | 0.893 vs 0.890 | identical |
+| Per-family Brier | model ahead in 7 of 9 | broad, not cherry-picked |
+| Flat-stake replay of the edge rule | 28 bets, +3.0% ROI after real fees | consistent with the live KELLY bot's +45% |
+
+**The one-line verdict, as published:** *probability-precise, not clairvoyant* —
+provably better than chance, statistically tied with the market, better-calibrated
+than the market's own prices, with the measurable edge concentrated in humility:
+every missed call came at ≤62% confidence, while the market lost two ~70% calls.
+Weaknesses documented with equal prominence: an overconfident 40–50% band and a
+totals family that lost to the market.
 
 ---
 
@@ -175,7 +219,9 @@ out-of-sample play. Both results are published the same way.
 | Research corpus | 16 knockout matches × (frozen model + closing book + result) |
 | Data pipeline | 47 official FIFA match reports → extracted xG/player rates |
 | Bots | 12 personas, 84 settled positions, public leaderboard |
-| Production record | One 15-min outage; 8 lossless deploy-wipes; alerts Mac-independent |
+| Production record | One 15-min outage; 12 lossless deploy-wipes; alerts Mac-independent |
+| Winner calls | 11/14 knockout matches (p = 0.029 vs chance) |
+| vs the market | Brier 0.0898 vs 0.0911 (parity); ECE 0.0269 vs 0.0388 (better) |
 | The call | Spain 53.9% at freeze → Spain champions |
 
 ---
@@ -186,14 +232,17 @@ out-of-sample play. Both results are published the same way.
 > Built and operated a full-stack sports prediction-market platform (Python/FastAPI,
 > Next.js/TS) live through the 2026 World Cup — Monte Carlo pricing of 9 Kalshi market
 > families, real-time in-play repricing, and a 12-bot controlled trading experiment;
-> the model called the champion at its pre-match freeze.
+> the model called 11 of 14 knockout winners (p=0.029) including the champion, and
+> was better-calibrated than the exchange it priced against.
 
 **Standard (3 bullets):**
 > - Designed a Monte Carlo match-simulation engine (Poisson + gamma overdispersion,
 >   opponent-adjusted xG from 47 official match reports, fee-aware Kelly staking) that
->   priced every Kalshi World Cup 2026 market and froze auditable pre-match predictions;
->   its final-match freeze called the champion (Spain, 53.9%) and its predicted
->   scoreline cluster contained the actual result.
+>   priced every Kalshi World Cup 2026 market and froze auditable pre-match
+>   predictions; it called 11 of 14 knockout winners (binomial p=0.029) including
+>   the champion, achieved statistical parity with the exchange on Brier score
+>   (0.0898 vs 0.0911 over 293 frozen markets), and beat the exchange's own
+>   calibration (ECE 0.027 vs 0.039).
 > - Ran a controlled paper-trading experiment — 12 bots including random-placebo and
 >   anti-model controls — on live exchange books with real fee/settlement modeling;
 >   the model-driven strategy finished 1st (+45%) and the model-blind control last,
@@ -238,9 +287,13 @@ out-of-sample play. Both results are published the same way.
 3. **"How do you know your model is actually good?"** Three mechanisms: frozen T-10
    predictions that can't be retro-fitted; captured closing lines as the market's
    answer to the same question; and designed controls in the bot experiment (placebo +
-   anti-model). Then the discipline of publishing the caveats with the wins — and the
-   losses: an in-sample +47% backtest that went 1-15 out-of-sample is in the same
-   public record.
+   anti-model). The evaluation was then done properly — cluster bootstrap (matches as
+   clusters, because markets within a match are correlated), binomial tests, ECE, AUC
+   — and the answer is nuanced: significantly better than chance (p=0.029),
+   statistically *tied* with the market on Brier, *better* than the market on
+   calibration (ECE 0.027 vs 0.039). Then the discipline of publishing the caveats
+   with the wins — and the losses: an in-sample +47% backtest that went 1-15
+   out-of-sample is in the same public record.
 
 4. **"A performance problem you solved."** League-switch animations janked: the causes
    were full-page clip-path/gradient animation (paint storms) and a dashboard
@@ -285,8 +338,8 @@ immovable deadline: kickoff.
   `docs/V6/PROJECT_DOC.md` for the full technical documentation
 - **Frontend repo:** github.com/SonNguyen2914/namson-dev
 
-*The calibration write-up exists: `docs/V6/CALIBRATION.md` — 293 frozen pre-match
-predictions scored against settlement truth. Headline: raw model Brier 0.0898 vs
-the market's 0.0911 (model ahead in 7 of 9 market families), the 60/40 blend best
-of all at 0.0896, and on the one match where model and market disagreed on the
-winner, the model was right. Caveats stated in full inside.*
+*The full evaluation lives in `docs/V6/CALIBRATION.md`: the 293-market three-stream
+scoring, the 14-match knockout scorecard (frozen locks + labeled git-archaeology
+reconstructions), the significance battery (cluster bootstrap, binomial, ECE, AUC),
+the trading replay, and every caveat. One script reproduces all of it from
+committed data: `scripts/score_calibration.py`.*

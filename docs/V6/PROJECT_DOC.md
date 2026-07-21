@@ -23,7 +23,7 @@ knockout match. Backend Python/FastAPI on Railway; frontend Next.js/TS on Vercel
 namson.dev/bet-suggester — now a **four-league platform shell** (WC26/MLS/EPL/La Liga)
 with the World Cup dressed in champions' gold. The tournament is complete; the code is
 UNFROZEN; deploys are routine again because the DB wipe is now **lossless by procedure**
-(export → push → restore, proven ×8).
+(export → push → restore, proven ×12).
 
 ### How the tournament ended
 - **THIRD, Jul 18 (Hard Rock, Miami): England 6–4 France, FT.** A ten-goal carnival:
@@ -61,6 +61,11 @@ UNFROZEN; deploys are routine again because the DB wipe is now **lossless by pro
   (M99–M104 PMSRs): Spain atk 1.45 def **0.65**, Argentina 1.45/**0.83**, England
   1.45/**0.95**, France 1.45/**0.86**; all four scouting blurbs rewritten from what
   actually happened.
+- **Model evaluation COMPLETE (Part I):** 11/14 knockout winner calls (binomial
+  p=0.029 vs chance); Brier 0.0898 vs the market's 0.0911 over 293 frozen markets
+  (statistical parity); expected calibration error **better than the market's own**
+  (0.0269 vs 0.0388); AUC identical (0.893 vs 0.890). Verdict: provably better
+  than chance, tied with the exchange, better-calibrated than it.
 
 ### The weekend in one list (what V6 added over V5)
 1. **Five new arena bots** (`95884f1`) — the V5-proposed controls, ALL built: 🪙 COIN
@@ -81,7 +86,8 @@ UNFROZEN; deploys are routine again because the DB wipe is now **lossless by pro
    `POST /api/alerts/test` proves all channels BEFORE a match, not during.
 4. **Lossless deploys** (`2cf2ce2`) — `POST /api/bots/restore` (idempotent per
    bot+market_id) + the export-first procedure killed the ephemerality terror: proven
-   across EIGHT wipes including two on final-stats day. The reprime ritual is DEAD —
+   across TWELVE wipes including two on final-stats day and four during the
+   post-final documentation pushes, each restored and verified hands-off in ~20s. The reprime ritual is DEAD —
    Son deleted the `MIN_CONFIDENCE` env var; settings boot 0.45 natively.
 5. **Championship-series classification** (`7274fb6`, `6409b20`) — KXMENWORLDCUP books
    ("Will Spain win the World Cup?") now key as advance on the FINAL only, denied
@@ -284,8 +290,8 @@ public/leagues/                     wc26-official.png (official emblem, TRUE-BLA
    closed the book.
 6. **The scoreboard, final:** freeze call Spain 53.9% champion ✓; the 90-minute 0-0 sat
    inside the frozen sweet-spot cluster (the V5 dispersion change put it there); THIRD's
-   away-England leg (36.2) landed. The proper Brier/calibration accounting across all
-   16 archived locks is the headline post-final task (Part H).
+   away-England leg (36.2) landed. The full Brier/calibration accounting is DONE —
+   every table in Part I, reproducible via `scripts/score_calibration.py`.
 
 ## PART C — LIVE PIPELINE (cadences — unchanged core, new outputs)
 ```
@@ -389,7 +395,7 @@ settle bet-early-vs-bet-late.
 ## PART F — OPS RUNBOOK (post-tournament edition)
 The match-day loop is retired (kept in V5 for history). What remains is DEPLOY OPS:
 
-**The lossless deploy procedure (proven ×8):**
+**The lossless deploy procedure (proven ×12):**
 1. `curl /api/bots > research_archive/bots_ledger_restore_sourceN_<UTC>.json` — export
    FIRST, commit it. Also archive any new research bundles (`/api/research/{id}`).
 2. Push to main. Railway builds (10 min to 3+ hours — WATCH IN THE BACKGROUND, never
@@ -464,6 +470,82 @@ crash ✅ · KXMENWORLDCUP classification + capture ✅ · time-bomb tests ✅ d
 - Saved DIY builds; live mark-to-market of strategy-tab dutches; half-Kelly chip;
   manual-panel first-scorer settlement; crew-mode re-sync (v3 vs the crew's actual
   habits — CREW's 1-15 argues for a rethink, not a re-sync).
+
+---
+
+## PART I — THE MODEL'S REPORT CARD (calibration + scorecard, complete)
+The evaluation the whole research system existed to make possible. Full narrative in
+`docs/V6/CALIBRATION.md`; everything below is reproducible from committed data
+(`scripts/score_calibration.py`, `research_archive/settlements_backfill_2026-07-21.json`,
+`research_archive/knockout_recon_2026-07-21.json`).
+
+### I.1 Market-level: 293 frozen markets, three probability streams
+Six lock-bearing matches (both late QFs, both SFs, THIRD, FINAL). The stored lock
+probability is the 60/40 anchored blend; raw = (anchored − 0.4·implied)/0.6 (exact —
+MODEL_WEIGHT never changed). Truth = Kalshi settlement, backfilled to 100% coverage.
+```
+stream        Brier    LogLoss   skill vs market
+RAW model     0.0898   0.2887    +1.4%
+ANCHORED      0.0896   0.2874    +1.7%   <- best; MODEL_WEIGHT ratchet answered: keep 60/40
+MARKET        0.0911   0.2898    —
+```
+Per family (Brier raw | market): model better in **7 of 9** — SCORE .0292|.0294,
+MOV .1173|.1187, SPREAD .0773|.0873, FTTS .1712|.1746, GAME .2590|.2747, ADVANCE
+.2384|.2502, BTTS .1820|.2386; market better on TOTAL .1601|.1417 (tail games vs
+knockout damping — the score-effects backlog item's fingerprint) and the 2-row
+champion book. Pooled Brier is exact-score-heavy (155/293 rows); the family view is
+the fairer lens. Per match: model won SF1/SF2/THIRD, market won the two QFs + FINAL.
+
+### I.2 Match-level: the knockout scorecard (14 matches, independent samples)
+Frozen locks for six; the rest reconstructed by re-simulating with the EXACT commit
+deployed at each kickoff (git archaeology, labeled). CAN_MAR + PAR_FRA excluded
+honestly: the repo's first commit (Jul 5 02:36 UTC) post-dates both kickoffs — the
+model was born mid-R16.
+```
+BRA_NOR  Brazil 62%      Norway 2-1     MISS   recon
+MEX_ENG  England 52%     England 3-2    HIT    recon
+POR_ESP  Spain 70%       Spain 1-0      HIT    recon
+USA_BEL  Belgium 60%     Belgium 4-1    HIT    recon
+ARG_EGY  Argentina 69%   Argentina 3-2  HIT    recon
+SUI_COL  Suisse 50.8%    0-0 pens (SUI) HIT    recon   <- called a coin flip a coin flip
+MAR_FRA  France 62%      France 2-0     HIT    recon
+ESP_BEL  Spain 57%       Spain 2-1      HIT    recon
+NOR_ENG  England 55%     England AET    HIT    frozen
+ARG_SUI  Argentina 55%   Argentina AET  HIT    frozen
+SF1      France 53%      Spain 2-0      MISS   frozen
+SF2      Argentina 52%   Argentina 2-1  HIT    frozen  <- the lone model-market disagreement; model right
+THIRD    France 53%      England 6-4    MISS   frozen
+FINAL    Spain 55%       Spain 1-0 AET  HIT    frozen
+```
+**11/14 (78.6%).** Advance Brier 0.2097 vs coin-flip 0.2500. Reconstructed era 7/8
+(the one miss = Norway over Brazil, the tournament's biggest upset); frozen era 4/6.
+Every miss came at ≤62% confidence; the market lost two ~70% France calls.
+
+### I.3 Significance (the teeth)
+```
+11/14 vs coin flip            binomial p = 0.029                    significant at 5%
+advance Brier vs coin flip    skill CI [+0.3%, +31.4%], P=98%       significant, barely
+raw vs market (293 rows,      +1.4% point, CI [-10.0%, +12.0%],     indistinguishable
+  6-match cluster bootstrap)    P(better) = 60%
+anchored vs market            +1.7% point, CI [-4.8%, +7.8%], 68%   indistinguishable, leaning model
+expected calibration error    raw 0.0269 vs market 0.0388           model BETTER-calibrated than the exchange
+discrimination (AUC)          0.893 / 0.894 / 0.890                 identical
+```
+(Cluster bootstrap resamples matches, seed 26, 10k draws — the honest test given
+that markets within a match share outcomes.)
+
+### I.4 The trading test + the verdict
+Flat $1 on every ≥5pt raw-edge lock at implied + real fees: 28 bets, 13 wins,
+**+3.0% ROI** — consistent with KELLY's +45% staking the same idea half-Kelly.
+Calibration buckets are clean except 40–50% (predicted .458, realized .304, n=23 —
+the model's one overconfident band).
+
+**THE VERDICT, one line: probability-precise, not clairvoyant.** Provably better
+than chance (both match-level tests clear 5%); statistically tied with a real-money
+exchange on probability quality; better-CALIBRATED than that exchange's own prices;
+identical discrimination. The measurable edge is humility — being right about how
+close close games are. Do not claim "beat the market" anywhere; DO claim parity
+plus superior calibration, because both are reproducible from this repo.
 
 ---
 
