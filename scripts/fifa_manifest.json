@@ -1,10 +1,10 @@
 {
- "note": "Authoritative per-team PMSR manifest (user-verified 2026-07-08, post-R16; QFs M97-M100 added as played, SFs M101+M102 added; finalists have 7 through the SFs). Completeness rule through the QFs: every semifinalist has 3 group + 1 R32 + 1 R16 + 1 QF; knockout matches append as they are played.",
+ "note": "Authoritative per-team PMSR manifest (user-verified 2026-07-08, post-R16; QFs M97-M100 added as played, SFs M101+M102 added; finalists have 7 through the SFs). Completeness rule through the QFs: every semifinalist has 3 group + 1 R32 + 1 R16 + 1 QF; knockout matches append as they are played. TOURNAMENT COMPLETE: M103 (FRA 4-6 ENG) + M104 (ESP 1-0 ARG aet) appended 2026-07-21; finalists have 8.",
  "remaining_team_codes": [
   "ESP",
   "ARG"
  ],
- "expected_per_team": 7,
+ "expected_per_team": 8,
  "matches": [
   {
    "match_no": 17,
@@ -410,6 +410,24 @@
     "ARG"
    ],
    "url": "https://www.fifatrainingcentre.com/media/native/tournaments/fifa-world-cup/2026/PMSR-M102-ENG-V-ARG.pdf"
+  },
+  {
+   "match_no": 103,
+   "stage": "Third place",
+   "teams": [
+    "FRA",
+    "ENG"
+   ],
+   "url": "https://www.fifatrainingcentre.com/media/native/tournaments/fifa-world-cup/2026/PMSR-M103-FRA-V-ENG.pdf"
+  },
+  {
+   "match_no": 104,
+   "stage": "Final",
+   "teams": [
+    "ESP",
+    "ARG"
+   ],
+   "url": "https://www.fifatrainingcentre.com/media/native/tournaments/fifa-world-cup/2026/PMSR-M104-ESP-V-ARG.pdf"
   }
  ]
 }

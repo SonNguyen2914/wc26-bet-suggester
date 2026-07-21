@@ -51,8 +51,11 @@ class TestSimulator:
         assert p is not None and 0.0 <= p <= 1.0
 
     def test_even_match_is_uncertain(self):
-        even = self.sim.simulate(get_team_stats("Portugal"), get_team_stats("Spain"))
-        lopsided = self.sim.simulate(get_team_stats("France"), get_team_stats("Egypt"))
+        # a team against itself is even by definition — immune to stats
+        # drifting as tournaments get folded in (Portugal-Spain stopped
+        # being "even" the day Spain became champions)
+        even = self.sim.simulate(get_team_stats("Spain"), get_team_stats("Spain"))
+        lopsided = self.sim.simulate(get_team_stats("Spain"), get_team_stats("Egypt"))
         assert even["confidence"] < lopsided["confidence"]
 
 

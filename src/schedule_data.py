@@ -263,34 +263,34 @@ TEAM_STATS: dict[str, dict] = {
     # ===== OPPONENT-ADJUSTED from FIFA Post-Match PDFs (July 7) =====
     # These 5 teams' attack/defence were recomputed from per-match xG weighted
     # by opponent Elo (see docstring). "scouting" = match-page blurb.
-    # --- Spain: OPP-ADJUSTED through the SF (7 PDFs). attack 1.26->1.45 cap:
-    # 2.18 adj xGF/game — 2.21 xG hung on FRANCE's elite defence in the SF
-    # (Elo-adj 2.58) settles the conversion question. defence 0.67->0.66,
-    # still the tournament's best (0.32 adj xGA/game). form 0.85->0.90:
-    # seven straight wins, the last a 2-0 dismantling of the pre-final
-    # favourite. Saudi Arabia group-opponent Elo is a documented ESTIMATE
-    # (1470, anchor 1650).
-    "Spain":         {"attack": 1.45, "defence": 0.66, "form": 0.90, "set_piece_threat": 0.20, "red_card_risk": 0.04, "fatigue": 0.20, "elo": 1912,
-        "scouting": "Total control, and now total ruthlessness. Dismantled France 2-0 in the semifinal with 2.21 xG against the tournament's meanest defence — the 'streaky conversion' caveat is dead. Rodri and Pedri suffocate games behind the tournament's best line-breaking passing; 0.32 opponent-adjusted xGA per game and just two goals conceded in seven matches (Unai Simón barely worked). Seven straight wins, zero minutes of extra time all tournament, and a full day more rest than Argentina before the final. The complete team of this World Cup — the only question left is Messi."},
-    # --- Argentina: OPP-ADJUSTED through the SF (7 PDFs). attack holds the
-    # 1.45 cap (2.16 adj xGF/game — 1.47 xG vs England, adj 1.67). defence
-    # 0.77->0.76 (0.46 xGA vs England; 0.61 adj/game). form 0.80->0.85:
-    # seven straight, the SF won in regulation from behind. fatigue eases
-    # 0.34->0.28 — the double-ET load is two matches back now and the SF
-    # stayed at 90; four days' rest before the final (Spain gets five).
-    # Group-opponent Elos are documented ESTIMATES (Algeria 1635, Austria
-    # 1760, Jordan 1455, Cabo Verde 1470, anchor 1650).
-    "Argentina":     {"attack": 1.45, "defence": 0.76, "form": 0.85, "set_piece_threat": 0.27, "red_card_risk": 0.06, "fatigue": 0.28, "elo": 1914,
-        "scouting": "Messi-driven elite attack, and the knack for the decisive late blow is now a pattern: trailed England 1-0 after Gordon's 55th, then Enzo Fernández (85') and ANOTHER stoppage-time Lautaro header (90+2) turned it in regulation — no extra time needed this round. Third straight knockout win via goals after the 84th minute. Set pieces and crosses remain the weapon (three headed knockout goals). Through seven matches the numbers hold elite: attack at the model's cap, 0.61 opponent-adjusted xGA/game (only Spain concedes less among the finalists' opponents). One day less rest than Spain, but the legs are fresher than feared — the SF stayed at 90 minutes and the double-ET load is two rounds back."},
-    # --- England: OPP-ADJUSTED through the SF (7 PDFs). attack 1.45->1.42,
-    # BELOW the cap for the first time: 0.46 xGF vs Argentina (adj 0.53)
-    # drags the 7-game avg to 1.85 adj xGF/game. defence 0.86->0.88
-    # (1.47 xGA vs Argentina, adj 1.27; 0.94 adj xGA/game). 6-PDF basis
-    # reproduced exactly (2.07/0.89) before folding the SF in.
-    # Group-opponent Elos are documented ESTIMATES (Croatia 1810, Ghana
-    # 1590, Panama 1565, Congo DR 1525, anchor 1650).
-    "England":       {"attack": 1.42, "defence": 0.88, "form": 0.90, "set_piece_threat": 0.30, "red_card_risk": 0.04, "fatigue": 0.22, "elo": 1871,
-        "scouting": "Out in the SF the cruellest way — led Argentina through Gordon's 55th until Enzo Fernández (85') and a 90+2 Lautaro header flipped it. The pattern held all tournament: comeback pragmatists who cede the ball, strike in transition through Bellingham and Kane (6 goals each), and defend far better than the early read suggested (one bad night in seven). First time all tournament they conceded first WITHOUT winning. Third-place games reward whoever still wants to run — England's press volume makes them the fitter-looking side on paper."},
+    # --- Spain: WORLD CHAMPIONS. OPP-ADJUSTED through the FINAL (8 PDFs).
+    # attack holds the cap deeper than ever: 2.52 xGF vs Argentina in the
+    # final (adj 2.92) lifts the 8-game avg to 2.27 adj xGF/game. defence
+    # 0.66->0.65 — Argentina was held to 0.07 xG across 120 minutes of a
+    # World Cup FINAL (adj 0.06), the most complete suffocation in the
+    # dataset; 0.29 adj xGA/game across the whole tournament. Saudi Arabia
+    # group-opponent Elo remains a documented ESTIMATE (1470, anchor 1650).
+    "Spain":         {"attack": 1.45, "defence": 0.65, "form": 0.90, "set_piece_threat": 0.20, "red_card_risk": 0.04, "fatigue": 0.20, "elo": 1912,
+        "scouting": "CAMPEONES DEL MUNDO. The final was the thesis made flesh: 120 minutes, 2.52 xG created, 0.07 conceded — Argentina never truly touched the ball — settled by Ferran Torres in the 106th. Rodri's midfield strangled every opponent behind the tournament's best line-breaking passing; two goals conceded in EIGHT matches, 0.29 opponent-adjusted xGA per game, eight straight wins. The most complete champion of the modern era: total control, total ruthlessness, and when the game demanded patience against ten men, total calm. Second star earned — 2010's heirs delivered."},
+    # --- Argentina: RUNNERS-UP. OPP-ADJUSTED through the FINAL (8 PDFs).
+    # attack clings to the cap by a hair: the 0.07 xGF final blank (adj
+    # 0.08) drags the 8-game avg to 1.90 adj xGF/game vs the 1.885 cap
+    # threshold. defence 0.76->0.83 (2.52 xGA in the final, adj 2.17;
+    # 0.81 adj/game through 8). Group-opponent Elos are documented
+    # ESTIMATES (Algeria 1635, Austria 1760, Jordan 1455, Cabo Verde
+    # 1470, anchor 1650).
+    "Argentina":     {"attack": 1.45, "defence": 0.83, "form": 0.85, "set_piece_threat": 0.27, "red_card_risk": 0.06, "fatigue": 0.28, "elo": 1914,
+        "scouting": "Runners-up, and the final was the one night the late-goal magic had no fuel: 0.07 xG in 120 minutes against Spain's press, a red card in extra time, and no 84th-minute miracle left in the tank — the three-match pattern of decisive late blows (Egypt, Switzerland, England) died where it mattered most. Through the tournament the machine was still elite: Messi's 8 goals, the attack at the model's cap through eight matches, set pieces and crosses the signature weapon. But the closing read is honest — the deep-tournament defence leaked (0.81 adj xGA/game after the final's 2.52) and the title went to the side that never needed rescuing."},
+    # --- England: THIRD PLACE. OPP-ADJUSTED through 8 PDFs. attack returns
+    # to the 1.45 cap: 2.34 xGF in the 6-4 third-place win (adj 2.73)
+    # lifts the 8-game avg to 1.96. defence 0.88->0.95 (2.99 xGA vs
+    # France, adj 2.56; 1.14 adj/game) — the exhibition-chaos skew is
+    # real and noted: the number describes the tournament ledger, not a
+    # competitive-stakes defence. Full 8-game recompute matches the
+    # incremental fold to 4 decimals. Group-opponent Elos are documented
+    # ESTIMATES (Croatia 1810, Ghana 1590, Panama 1565, Congo DR 1525).
+    "England":       {"attack": 1.45, "defence": 0.95, "form": 0.90, "set_piece_threat": 0.30, "red_card_risk": 0.04, "fatigue": 0.22, "elo": 1871,
+        "scouting": "Third place, won by winning the maddest match of the tournament 6-4 — a ten-goal shootout with France where Saka finished with a hat-trick (37', 46', 87') after Rice and Konsa struck early. The tournament pattern completed itself: transition brilliance through Bellingham, Kane and Saka whenever space existed, defensive abandon whenever it didn't matter — 2.99 xG conceded in an exhibition tells you about the party, not the project. The honest ledger: elite attack (back at the model's cap through eight), a defence that had exactly one truly bad competitive night, and the SF exit to a 90+2 header as the only wound that counts."},
     # --- Brazil: eliminated (lost to Norway R16). Kept for reference/opponent calc.
     "Brazil":        {"attack": 1.45, "defence": 0.80, "form": 0.70, "set_piece_threat": 0.27, "red_card_risk": 0.05, "fatigue": 0.24, "elo": 1805,
         "scouting": "Eliminated by Norway in the R16."},
@@ -324,15 +324,15 @@ TEAM_STATS: dict[str, dict] = {
     "Egypt":         {"attack": 0.88, "defence": 0.97, "form": 0.60, "set_piece_threat": 0.21, "red_card_risk": 0.07, "fatigue": 0.30, "elo": 1597,
         "scouting": "Eliminated by Argentina in the R16 (lost 3-2)."},
     # ===== QF teams still pending deep review =====
-    # --- France: OPP-ADJUSTED through the SF (7 PDFs). Attack HOLDS the
-    # 1.45 cap despite the blank vs Spain (0.48 xGF, adj 0.56): 7-game avg
-    # ~2.01 adj xGF/game, still past the 1.885 cap threshold — robust even
-    # with the undocumented SEN/IRQ/SWE group Elos floored at 1450 (1.895).
-    # defence 0.73->0.80: 2.21 xGA to Spain (adj 1.91) folded into the
-    # committed 6-game basis (0.52/game), same incremental method as the
-    # documented 0.75->0.73 QF step; 0.72 adj xGA/game through 7.
-    "France":        {"attack": 1.45, "defence": 0.80, "form": 0.95, "set_piece_threat": 0.25, "red_card_risk": 0.05, "fatigue": 0.18, "elo": 1926,
-        "scouting": "Out in the SF — Spain beat them 2-0 and out-created them 2.21 xG to 0.48, the first time all tournament France lost the chance count. Still the most dangerous transition side left when they play: tournament-leading 16 goals (Mbappé 8, Dembélé 5), devastating in space, happy without the ball. Elite defence all month (≈0.6 xG/game allowed before the SF). One eye on the exit in a third-place game is the classic risk — but the front line's individual quality travels regardless."},
+    # --- France: FOURTH. OPP-ADJUSTED through 8 PDFs. Attack secure at the
+    # cap again: 2.99 xGF in the third-place game (adj 3.39, their best
+    # single-match creation of the tournament) lifts the 8-game avg to
+    # 2.19. defence 0.80->0.86 (2.34 xGA vs England, adj 2.06; 0.89
+    # adj/game) — same exhibition-chaos caveat as England's number.
+    # Incremental folds from the committed basis throughout (SEN/IRQ/SWE
+    # group Elos remain undocumented estimates).
+    "France":        {"attack": 1.45, "defence": 0.86, "form": 0.95, "set_piece_threat": 0.25, "red_card_risk": 0.05, "fatigue": 0.18, "elo": 1926,
+        "scouting": "Fourth, in the strangest way possible: out-created England 2.99 to 2.34 in the third-place game and still lost it 4-6 — Mbappé twice and Barcola scored, but every French mistake was punished at maximum price. The tournament read stands: the most dangerous transition attack in the field (Mbappé finished with 10 goals across the month, the tournament's top scorer), elite defensive numbers until the last two matches, and an ending — 0.48 xG managed against Spain, then carnival defending against England — that says the legs and the focus emptied together. The talent travels to 2030 intact; the question is everything around it."},
     # --- Morocco: OPP-ADJUSTED (3 PDFs). attack raw 0.86 nudged to 1.05:
     # out-CREATED Brazil (xG 1.33-0.99) and finishing beats xG (3 goals/0.85
     # vs Canada). Genuine dark horse, not just a bus-park. Set-piece threat +.
