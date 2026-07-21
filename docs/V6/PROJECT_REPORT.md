@@ -62,6 +62,11 @@ A personal research tool built and operated **during** the World Cup itself (Jun
   (+45.5% on bankroll)**, the model-blind price-follower finished **last (−11.9%)**, and
   the random-placebo control mean-reverted in between — exactly the shape the edge
   thesis predicts. (Honest caveats attached; see below.)
+- **The model kept pace with the exchange — measurably.** Across 293 frozen
+  pre-match predictions with settlement truth (`docs/V6/CALIBRATION.md`): raw-model
+  Brier 0.0898 vs the market's 0.0911, model ahead in 7 of 9 market families, and
+  on the single match where model and market picked different winners (SF2), the
+  model was right. Margins honestly labeled as within-luck at this sample size.
 - **Operated in production through the event it modeled.** One 15-minute outage all
   tournament (found, diagnosed, fixed, and regression-tested same-day). Every deploy
   survives a full database wipe losslessly — by designed procedure, proven eight times.
@@ -280,6 +285,8 @@ immovable deadline: kickoff.
   `docs/V6/PROJECT_DOC.md` for the full technical documentation
 - **Frontend repo:** github.com/SonNguyen2914/namson-dev
 
-*Suggested next artifact (data is ready in-repo): the Brier/calibration write-up —
-"my model vs. the closing line across a World Cup knockout stage" — turns the
-leaderboard anecdote into a statistical result and would headline the README.*
+*The calibration write-up exists: `docs/V6/CALIBRATION.md` — 293 frozen pre-match
+predictions scored against settlement truth. Headline: raw model Brier 0.0898 vs
+the market's 0.0911 (model ahead in 7 of 9 market families), the 60/40 blend best
+of all at 0.0896, and on the one match where model and market disagreed on the
+winner, the model was right. Caveats stated in full inside.*

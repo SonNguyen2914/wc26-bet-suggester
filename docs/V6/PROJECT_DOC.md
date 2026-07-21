@@ -441,10 +441,11 @@ crash ✅ · KXMENWORLDCUP classification + capture ✅ · time-bomb tests ✅ d
 
 ## PART H — FUTURE: THE POST-TOURNAMENT AGENDA
 ### H1. The harvest (data's ready, commission at will)
-- **Brier/calibration write-up** — the flagship: locked model vs closing line vs result,
-  16 matches × 9 families, from research_archive. Answers "did the model beat the
-  market?" with numbers instead of a leaderboard anecdote. Feeds the MODEL_WEIGHT
-  ratchet decision (still 60/40).
+- **Brier/calibration write-up — ✅ DONE (Jul 21, `docs/V6/CALIBRATION.md`):** 293
+  locked markets scored against backfilled settlement truth. Raw model Brier 0.0898
+  vs market 0.0911 (model ahead 7/9 families); the 60/40 blend best at 0.0896 —
+  which ANSWERS the MODEL_WEIGHT ratchet question: don't ratchet, the blend won.
+  Reproduce: `scripts/score_calibration.py`.
 - **Public README + case study** — the repo tells a complete story now: built during
   the tournament, called the champion, ran twelve bots in public, survived its own
   infrastructure. Write it down.
