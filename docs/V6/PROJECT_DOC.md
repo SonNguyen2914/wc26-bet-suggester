@@ -23,7 +23,7 @@ knockout match. Backend Python/FastAPI on Railway; frontend Next.js/TS on Vercel
 namson.dev/bet-suggester — now a **four-league platform shell** (WC26/MLS/EPL/La Liga)
 with the World Cup dressed in champions' gold. The tournament is complete; the code is
 UNFROZEN; deploys are routine again because the DB wipe is now **lossless by procedure**
-(export → push → restore, proven ×12).
+(export → push → restore, proven ×12 and counting).
 
 ### How the tournament ended
 - **THIRD, Jul 18 (Hard Rock, Miami): England 6–4 France, FT.** A ten-goal carnival:

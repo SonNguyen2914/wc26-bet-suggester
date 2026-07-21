@@ -62,8 +62,15 @@ class TestResolution:
         import importlib
         importlib.reload(bracket)
 
-    def test_no_key_is_noop(self):
+    def test_no_key_no_sources_is_noop(self):
+        # The API-key gate is gone (V5): the resolver is key-agnostic and a
+        # no-op only when NO source has a result. The feeder lookup must be
+        # stubbed here — post-tournament every kickoff is in the past, so the
+        # unstubbed fall-through reaches live ESPN and the test's outcome
+        # rides on network luck (flaked in the Jul 21 audit: real results
+        # exist now, so a successful fetch legitimately resolves the slot).
         config.API_FOOTBALL_KEY = ""
+        bracket._feeder_result = lambda f: None
         assert bracket.resolve_bracket() == []
         assert not sd.get_match("SF1").fully_resolved
 
