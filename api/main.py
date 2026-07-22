@@ -850,19 +850,28 @@ def bots_ledger():
 
 @app.post("/api/alerts/test")
 def alerts_test():
-    """Fire a test message through every configured alert channel, so the
-    Discord webhook / ntfy topic can be proven before a match, not during."""
-    from src.alerts import send_alert
-    send_alert("⚡ ACTION channel test — act-now pings (signals, tracker "
-               "flips, goals) arrive here.", title="WC26 channel test")
-    send_alert("📊 DETAIL channel test — the narrator posts live briefs, "
-               "goal analyses and your position table here.", kind="detail")
+    """Fire a test message through every configured alert channel and
+    report PER-LEG delivery, so a silent failure (bad webhook, mistyped
+    ntfy topic, whitespace in an env var) is visible in the response
+    instead of only in server logs. Each leg is exercised directly —
+    the fan-out copy-to-detail is send_alert's concern, not this probe's."""
+    from src.alerts import send_discord, send_ntfy
+    a = send_discord("⚡ ACTION channel test — act-now pings (signals, "
+                     "tracker flips, goals) arrive here.", channel="action")
+    d = send_discord("📊 DETAIL channel test — the narrator posts live "
+                     "briefs, goal analyses and your position table here.",
+                     channel="detail")
+    n = send_ntfy("📱 ntfy path test — if this reached your phone, the "
+                  "push loop is closed.", title="WC26 channel test")
     return {"sent": True,
             "action_configured": bool(config.DISCORD_ACTION_WEBHOOK_URL),
             "detail_configured": bool(config.DISCORD_DETAIL_WEBHOOK_URL),
             "split": (config.DISCORD_ACTION_WEBHOOK_URL
                       != config.DISCORD_DETAIL_WEBHOOK_URL),
-            "ntfy_configured": bool(config.NTFY_TOPIC)}
+            "ntfy_configured": bool(config.NTFY_TOPIC),
+            "action_delivered": a,
+            "detail_delivered": d,
+            "ntfy_delivered": n}
 
 
 @app.get("/api/positions")
