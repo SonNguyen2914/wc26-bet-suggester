@@ -156,9 +156,21 @@ BRACKET_RESOLVE_MINUTES = int(os.getenv("BRACKET_RESOLVE_MINUTES", "30"))
 # of the position's cost (hysteresis against book wobble).
 POSITION_FLIP_MARGIN = float(os.getenv("POSITION_FLIP_MARGIN", "0.05"))
 # ntfy.sh topic for instant phone pushes, independent of Remote Control and
-# any open page. The default topic ships in a PUBLIC repo — treat it as a
-# temporary channel for the final and rotate/override via env after.
-NTFY_TOPIC = os.getenv("NTFY_TOPIC", "wc26-son-final-kj7f2p9qx4")
+# any open page. NO default: a topic committed to a public repo is a public
+# channel (the tournament-weekend default was exactly that, by documented
+# tradeoff — retired Jul 21). Set NTFY_TOPIC in the deployment environment
+# and subscribe to the same topic in the ntfy app; unset, pushes no-op.
+NTFY_TOPIC = os.getenv("NTFY_TOPIC", "")
+
+# --- Post-tournament public lockdown (Jul 21 evaluation, P0) --------------
+# PUBLIC_READ_ONLY=true turns every mutating route off for the public;
+# ADMIN_TOKEN (server-held, never shipped to a browser bundle) re-enables
+# them for operator tooling via the X-Admin-Token header. RATE_LIMIT_SECONDS
+# spaces calls to expensive recompute routes regardless of mode.
+PUBLIC_READ_ONLY = os.getenv("PUBLIC_READ_ONLY", "").lower() in (
+    "1", "true", "yes")
+ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "")
+RATE_LIMIT_SECONDS = float(os.getenv("RATE_LIMIT_SECONDS", "30"))
 
 # --- Two-channel Discord routing + the narrator ---------------------------
 # ACTION channel: terse, act-now pings (signals, tracker flips, goals, T-10).

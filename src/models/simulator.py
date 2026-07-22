@@ -155,16 +155,25 @@ class MatchSimulator:
             props[f"under_{line}_5"] = round(1 - p_over, 4)
         # First-goal race (prices Kalshi KXWCFTTS: "team records the first
         # goal" / "no goal"): independent Poisson processes — P(team first)
-        # = (lam_t/lam_tot)·P(any goal). Uses mean effective rates.
+        # = (lam_t/lam_tot)·P(any goal), computed PER LATENT-RATE DRAW and
+        # then averaged. The old mean-rate shortcut exp(-mean(λ)) discarded
+        # the gamma mixture's extra zero mass (E[exp(-λ)] > exp(-E[λ]),
+        # Jensen), understating no_goal on every FTTS book. The three
+        # outcomes sum to one by construction, per draw and in the mean.
         if lam90_home is not None and lam90_away is not None:
-            lh = float(np.mean(np.asarray(lam90_home, dtype=float)))
-            la = float(np.mean(np.asarray(lam90_away, dtype=float)))
+            lh = np.asarray(lam90_home, dtype=float)
+            la = np.asarray(lam90_away, dtype=float)
             lt = lh + la
-            if lt > 0:
-                p_any = 1.0 - float(np.exp(-lt))
-                props["home_first_goal"] = round(lh / lt * p_any, 4)
-                props["away_first_goal"] = round(la / lt * p_any, 4)
-                props["no_goal"] = round(1.0 - p_any, 4)
+            if float(np.mean(lt)) > 0:
+                safe_lt = np.where(lt > 0, lt, 1.0)
+                p_any_i = 1.0 - np.exp(-lt)
+                props["home_first_goal"] = round(
+                    float(np.mean(np.where(lt > 0, lh / safe_lt * p_any_i,
+                                           0.0))), 4)
+                props["away_first_goal"] = round(
+                    float(np.mean(np.where(lt > 0, la / safe_lt * p_any_i,
+                                           0.0))), 4)
+                props["no_goal"] = round(float(np.mean(np.exp(-lt))), 4)
 
         # Winning margins (matches Kalshi's KXWCSPREAD markets, "wins by 1.5+/2.5+")
         for m_line in (2, 3):

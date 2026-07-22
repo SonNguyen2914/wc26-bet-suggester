@@ -46,6 +46,54 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# In-process last-fired timestamps for the expensive-route rate limit.
+# Process-local by design (single-worker deployment); a restart resets it,
+# which only ever errs permissive for one call.
+_rate_last: dict[str, float] = {}
+
+# Route prefixes whose recomputation is expensive enough to rate-limit
+# even for reads (refresh-all fans out simulations + provider calls).
+_EXPENSIVE_PREFIXES = ("/api/refresh-all",)
+
+
+@app.middleware("http")
+async def _public_guard(request, call_next):
+    """Post-tournament lockdown (Jul 21 evaluation, P0):
+
+    - PUBLIC_READ_ONLY=true rejects every mutating verb with 403 unless
+      the request carries the server-held ADMIN_TOKEN header. The token
+      lives only in the deployment environment and operator tooling —
+      NEVER in the browser bundle, which is why this is a header check
+      rather than anything cookie- or client-config-based.
+    - Expensive recompute routes are rate-limited per process regardless
+      of mode (RATE_LIMIT_SECONDS apart), 429 otherwise.
+    """
+    import time as _t
+
+    from fastapi.responses import JSONResponse
+
+    path = request.url.path
+    if request.method in ("POST", "PUT", "PATCH", "DELETE") \
+            and config.PUBLIC_READ_ONLY:
+        token = request.headers.get("x-admin-token", "")
+        if not (config.ADMIN_TOKEN and token == config.ADMIN_TOKEN):
+            return JSONResponse(
+                {"detail": "read-only mode: the tournament is over; "
+                           "mutations require operator credentials"},
+                status_code=403)
+    if config.RATE_LIMIT_SECONDS > 0:      # <=0 disables (tests, dev)
+        for prefix in _EXPENSIVE_PREFIXES:
+            if path.startswith(prefix):
+                now = _t.monotonic()
+                last = _rate_last.get(prefix)
+                if last is not None and now - last < config.RATE_LIMIT_SECONDS:
+                    return JSONResponse(
+                        {"detail": "rate limited: expensive route"},
+                        status_code=429)
+                _rate_last[prefix] = now
+    return await call_next(request)
+
+
 engine = SuggesterEngine()
 
 

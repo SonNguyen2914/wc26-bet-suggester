@@ -1,8 +1,11 @@
 """Expected-goals model.
 
-v1 is an interpretable multiplicative model (the standard Dixon-Coles-style
+v2 is an interpretable multiplicative model (the standard Dixon-Coles-style
 starting point): a team's xG = league_base * own_attack * opponent_defence,
-scaled by regressed form and fatigue, plus a separate set-piece component.
+scaled by regressed form and fatigue, plus a CENTERED set-piece adjustment
+(v1 added the full set-piece component on top of an attack rating that was
+derived from total xG — double-counting the league's baseline set-piece
+production; found by the Jul 21 independent evaluation).
 
 Swap `predict_xg` for a trained XGBoost/NN later without touching the
 simulator — the interface (two floats out) stays the same.
@@ -11,8 +14,17 @@ from __future__ import annotations
 
 from src.models.features import build_team_features
 
-MODEL_VERSION = "v1-multiplicative"
+MODEL_VERSION = "v2-centered-setpiece"
 LEAGUE_BASE_XG = 1.30  # average goals per team per WC match
+
+# Competition-average set_piece_threat across the sourced TEAM_STATS table.
+# `attack` is derived from TOTAL xG-for per game, which already contains
+# set-piece production, so only a team's DEVIATION from the competition
+# mean may move its xG — re-adding the baseline would count it twice.
+# Until source xG is decomposed into open-play and set-piece components,
+# this constant is the centering point; a regression test pins it to the
+# live stats table so drift is caught.
+SET_PIECE_BASELINE = 0.236
 
 
 def predict_xg(home_raw: dict, away_raw: dict) -> tuple[float, float]:
@@ -20,13 +32,16 @@ def predict_xg(home_raw: dict, away_raw: dict) -> tuple[float, float]:
     away = build_team_features(away_raw)
 
     # Open play: attack vs opposing defence, scaled by form + fatigue.
+    # (Attack comes from total xGF, so this term already carries average
+    # set-piece production — hence the centered adjustment below.)
     home_open = LEAGUE_BASE_XG * home["attack"] * away["defence"] \
         * (0.85 + 0.30 * home["form"]) * home["fatigue_mult"]
     away_open = LEAGUE_BASE_XG * away["attack"] * home["defence"] \
         * (0.85 + 0.30 * away["form"]) * away["fatigue_mult"]
 
-    # Set pieces contribute on top of open play (15-30% of real goals).
-    home_xg = home_open + home["set_piece_threat"]
-    away_xg = away_open + away["set_piece_threat"]
+    # Set pieces: deviation from the competition mean only.
+    home_xg = home_open + (home["set_piece_threat"] - SET_PIECE_BASELINE)
+    away_xg = away_open + (away["set_piece_threat"] - SET_PIECE_BASELINE)
 
-    return round(min(home_xg, 4.0), 3), round(min(away_xg, 4.0), 3)
+    return (round(min(max(home_xg, 0.05), 4.0), 3),
+            round(min(max(away_xg, 0.05), 4.0), 3))

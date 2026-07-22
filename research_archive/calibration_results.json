@@ -1,0 +1,123 @@
+{
+ "metadata": {
+  "generated_by": "scripts/score_calibration.py",
+  "seed": 26,
+  "n_boot": 10000,
+  "model_weight": 0.6,
+  "n_rows": 293,
+  "n_matches": 6,
+  "market_stream_semantics": "executable ask at T-10 (execution comparison, not a neutral forecast benchmark)",
+  "binomial_sidedness": "both reported"
+ },
+ "descriptive": {
+  "raw": {
+   "brier": 0.0897899942662116,
+   "logloss": 0.2887007338595741,
+   "auc": 0.8931845701435738,
+   "ece10_width": 0.02686348122866894
+  },
+  "anch": {
+   "brier": 0.08955471624300342,
+   "logloss": 0.2874179747080999,
+   "auc": 0.8941359626362221,
+   "ece10_width": 0.030840273037542665
+  },
+  "imp": {
+   "brier": 0.09107357337883959,
+   "logloss": 0.2898116679422172,
+   "auc": 0.8902006573257222,
+   "ece10_width": 0.03844027303754266
+  }
+ },
+ "ece_sensitivity": {
+  "width5": {
+   "raw": 0.014275085324232075,
+   "anch": 0.016792081911262812,
+   "imp": 0.019095563139931732
+  },
+  "width10": {
+   "raw": 0.02686348122866894,
+   "anch": 0.030840273037542665,
+   "imp": 0.03844027303754266
+  },
+  "width15": {
+   "raw": 0.06061296928327645,
+   "anch": 0.050007235494880536,
+   "imp": 0.05936860068259386
+  },
+  "count5": {
+   "raw": 0.030177474402730373,
+   "anch": 0.016369965870307174,
+   "imp": 0.02462457337883959
+  },
+  "count10": {
+   "raw": 0.04186484641638225,
+   "anch": 0.02893160409556313,
+   "imp": 0.03868600682593856
+  }
+ },
+ "cluster_bootstrap": {
+  "raw_skill_vs_market": {
+   "ci95": [
+    -0.10028564374157689,
+    0.11850780140936068
+   ],
+   "p_gt0": 0.59
+  },
+  "anch_skill_vs_market": {
+   "ci95": [
+    -0.04817495181672826,
+    0.07876190581983056
+   ],
+   "p_gt0": 0.6763
+  },
+  "market_minus_raw_ece10": {
+   "ci95": [
+    -0.017065397923875424,
+    0.03284520547945206
+   ],
+   "p_gt0": 0.733
+  }
+ },
+ "advance_calls": {
+  "n": 14,
+  "hits": 11,
+  "binomial_one_sided": 0.0286865234375,
+  "binomial_two_sided": 0.057373046875,
+  "brier": 0.20973010142857143,
+  "skill_vs_coin_ci95": [
+   -0.00038454071428573044,
+   0.07778313571428572
+  ],
+  "labels": {
+   "BRA_NOR": "reconstructed",
+   "MEX_ENG": "reconstructed",
+   "POR_ESP": "reconstructed",
+   "USA_BEL": "reconstructed",
+   "ARG_EGY": "reconstructed",
+   "SUI_COL": "reconstructed",
+   "MAR_FRA": "reconstructed",
+   "ESP_BEL": "reconstructed",
+   "NOR_ENG": "prospective-frozen",
+   "ARG_SUI": "prospective-frozen",
+   "SF1": "prospective-frozen",
+   "SF2": "prospective-frozen",
+   "THIRD": "prospective-frozen",
+   "FINAL": "prospective-frozen"
+  }
+ },
+ "replays": {
+  "raw_edge_5pt_descriptive": {
+   "n": 28,
+   "wins": 13,
+   "pnl": 0.8471,
+   "roi": 0.0303
+  },
+  "live_kelly_rule_anchored_5pt": {
+   "n": 17,
+   "wins": 6,
+   "pnl": -1.8969,
+   "roi": -0.1116
+  }
+ }
+}

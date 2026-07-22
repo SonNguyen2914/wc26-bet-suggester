@@ -229,6 +229,8 @@ class TestLikelihoodBoard:
         # make every schedule match trackable regardless of container clock
         config.HOURLY_PREDICTION_WINDOW_HOURS = 100000
         config.TRACK_HOURS_AFTER_KICKOFF = 100000
+        self._rate = config.RATE_LIMIT_SECONDS
+        config.RATE_LIMIT_SECONDS = 0     # this class refreshes repeatedly
         self.client.post("/api/refresh-all")  # populate predictions
 
     def teardown_method(self):
@@ -236,6 +238,7 @@ class TestLikelihoodBoard:
          self.config.SUGGEST_FALLBACK_FLOOR) = self._floors
         (self.config.HOURLY_PREDICTION_WINDOW_HOURS,
          self.config.TRACK_HOURS_AFTER_KICKOFF) = self._window
+        self.config.RATE_LIMIT_SECONDS = self._rate
 
     def test_refresh_all_shape(self):
         data = self.client.post("/api/refresh-all").json()

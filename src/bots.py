@@ -166,17 +166,22 @@ def close_position(pos_id: int, price: float, reason: str) -> None:
 # ---------------------------------------------------------------------------
 
 def kelly_entries(rows, cash):
+    # Both the edge gate and the Kelly fraction use the ALL-IN unit cost
+    # q = price + entry fee, not the raw quote: gating on p - c while
+    # paying q > c admits trades whose true edge is under the threshold,
+    # and f* at price c overstates the optimal fraction.
     out = []
     for r in rows:
         p, c = r.get("model_probability"), r.get("implied_probability")
         if p is None or c is None or not (0.10 <= c <= 0.90):
             continue
-        edge = p - c
-        if edge < 0.05:
+        q = c + fee(c)                       # all-in cost per contract
+        edge = p - q
+        if edge < 0.05 or q >= 1.0:
             continue
-        f_star = (p - c) / (1.0 - c)         # binary Kelly at price c
+        f_star = (p - q) / (1.0 - q)         # binary Kelly at all-in cost
         stake = min(150.0, max(0.0, cash * f_star / 2.0))
-        if stake >= c + fee(c):
+        if stake >= q:
             out.append((r["market_id"], r["market_title"], c, stake,
                         f"edge {edge:+.2f}, half-kelly {f_star/2:.2f}"))
     return out

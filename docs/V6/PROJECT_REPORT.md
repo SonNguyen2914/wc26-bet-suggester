@@ -14,7 +14,7 @@ research archive, and the live deployment.*
 > called the world champion at the model freeze.**
 
 **Live:** namson.dev/bet-suggester · **Backend:** Railway (FastAPI) · **Stack:** Python
-3.11, FastAPI, SQLAlchemy, APScheduler / Next.js, TypeScript, Tailwind v4
+3.12, FastAPI, SQLAlchemy, APScheduler / Next.js, TypeScript, Tailwind v4
 
 ---
 
@@ -57,23 +57,35 @@ A personal research tool built and operated **during** the World Cup itself (Jun
 - **The model called the champion.** At the final's T-10 freeze: **Spain 53.9%** — Spain
   won 1–0 AET. The frozen "sweet-spot" scoreline cluster (1-1/1-0/0-1/0-0, ≈38% of
   simulations) contained both the 90-minute score (0-0) and the final score (1-0).
-- **The experiment returned the predicted ordering.** Over the tournament's final
-  stretch, out-of-sample, on real books: the model-driven Kelly bot finished **first
-  (+45.5% on bankroll)**, the model-blind price-follower finished **last (−11.9%)**, and
-  the random-placebo control mean-reverted in between — exactly the shape the edge
-  thesis predicts. (Honest caveats attached; see below.)
-- **The model's precision is proven, quantified, and honestly bounded.** Winner
-  calls: **11 of 14 knockout matches** (binomial p = 0.029 vs chance — significant).
-  Probability quality: Brier 0.0898 vs the market's 0.0911 across 293 frozen
-  pre-match predictions — statistical parity with a real-money exchange (cluster-
-  bootstrap CI straddles zero, stated as such). Calibration: expected calibration
-  error **0.0269 vs the market's own 0.0388 — better-calibrated than the exchange
-  it priced against**, with identical discrimination (AUC 0.893 vs 0.890). On the
-  single match where model and market picked different winners (SF2), the model
-  was right. Full write-up: `docs/V6/CALIBRATION.md`.
+- **In a two-match paper pilot, the strategy ordering matched the thesis** — the
+  model-driven Kelly bot finished first (+45.5% on bankroll), the model-blind
+  price-follower last (−11.9%), the random placebo in between. Stated plainly:
+  the settled ledger spans two matches and the ordering is dominated by
+  correlated positions on one match direction, so this is an operational pilot
+  with good instrumentation, not evidence of a general strategy ranking. The
+  instrumentation — controls, frozen states, archived settlement — is the claim.
+- **The model's accuracy is quantified, competitive, and honestly bounded.**
+  Winner calls: **11 of 14 knockout matches** (one-sided binomial p = 0.029;
+  two-sided 0.057 — suggestive, not proven). Probability quality: Brier 0.0898
+  vs 0.0911 across 293 frozen pre-match predictions — **statistical parity with
+  a real-money exchange's executable prices** (cluster-bootstrap CIs straddle
+  zero). Calibration: lower expected calibration error under the primary 10-bin
+  specification (0.0269 vs 0.0384), with the ordering binning-sensitive and the
+  cluster-level difference not significant — competitive, not superior.
+  Discrimination identical (AUC 0.893 vs 0.890). On the single match where model
+  and market picked different winners (SF2), the model was right. Full write-up
+  with evidence-hierarchy labels: `docs/V6/CALIBRATION.md`.
 - **Operated in production through the event it modeled.** One 15-minute outage all
   tournament (found, diagnosed, fixed, and regression-tested same-day). Every deploy
-  survives a full database wipe losslessly — by designed procedure, proven eight times.
+  survives a full database wipe losslessly — by designed procedure, proven across
+  every deploy since the final (12+ wipes).
+- **Independently evaluated — and improved by it.** A third-party technical and
+  quantitative evaluation (Jul 21) confirmed the test suite, reproduced the
+  metrics, and found three real model defects plus several inflated claims; all
+  defects were fixed same-day with regression tests, and the claims were revised
+  throughout, this document included. The evaluation's summary — "the
+  engineering system is currently stronger than the evidence for market edge" —
+  is adopted here as the project's own position.
 
 ---
 
@@ -92,12 +104,14 @@ model have edge, or does it just have confidence?**
 | 📚 SCHOLAR — copies peer-weighted consensus, bans loss-making families | Can you learn from the fleet? | +66.71 |
 | + six more personas (flat-stake chalk, longshots, in-play scalper, crash-fader, exact-score dutcher, a friend-group recipe) | Strategy coverage | between |
 
-The honest reading, stated as such everywhere the leaderboard appears: **one weekend is
-a small sample; paper fills are ask-side optimistic by the spread; the ordering — model
-first, anti-model last, placebo in the middle — is evidence, not proof.** The
-methodological point is that the system was built to *make that sentence possible*:
-controls, frozen pre-match model states, captured closing lines, and settlement from
-archived market data rather than self-reported P&L.
+The honest reading, stated as such everywhere the leaderboard appears: **the settled
+ledger is a two-match pilot; paper fills are ask-side optimistic by the spread; the
+winner's P&L is four correlated positions on one match direction plus one loss; and
+the live Kelly rule, flat-staked across all six archived lock matches, was
+negative (−11.2%) — the bankroll result came from stake sizing and window.** The
+methodological point is that the system was built to *make those sentences
+knowable*: controls, frozen pre-match model states, captured closing lines, and
+settlement from archived market data rather than self-reported P&L.
 
 The out-of-sample discipline cut the other way too, and that's kept in the record: a
 friend-group betting recipe backtested at +47% in-sample went **1-15** in live
@@ -124,22 +138,25 @@ kickoffs — the model was built mid-round. Six calls come from tamper-proof fro
 locks; eight are reconstructed by re-simulating with the exact git commit deployed
 at each kickoff, and labeled as such.)
 
-**The statistics:**
+**The statistics** (revised after independent evaluation; benchmark = the
+executable ask, an execution comparison rather than a neutral forecast):
 
 | test | result | reading |
 |---|---|---|
-| Winner calls vs chance | 11/14, p = 0.029 | significantly better than guessing |
-| Advance Brier vs coin flip | 0.2097 vs 0.2500, CI excludes zero | real skill, honest margin |
-| Brier vs the exchange (293 markets) | 0.0898 vs 0.0911, CI straddles zero | statistical parity with a real-money market |
-| Expected calibration error | **0.0269 vs market's 0.0388** | better-calibrated than the exchange itself |
+| Winner calls vs chance | 11/14; one-sided p = 0.029, two-sided p = 0.057 | suggestive — clears 5% only one-sided |
+| Advance Brier vs coin flip | 0.2097 vs 0.2500; bootstrap CI brushes zero | borderline, honestly labeled |
+| Brier vs the exchange (293 markets) | 0.0898 vs 0.0911, cluster CI straddles zero | statistical parity with a real-money market |
+| Expected calibration error | 0.0269 vs 0.0384 under the primary 10-bin spec; ordering flips under other binnings | competitive — not established superiority |
 | Discrimination (AUC) | 0.893 vs 0.890 | identical |
 | Per-family Brier | model ahead in 7 of 9 | broad, not cherry-picked |
-| Flat-stake replay of the edge rule | 28 bets, +3.0% ROI after real fees | consistent with the live KELLY bot's +45% |
+| Replay, retrospective raw-edge rule | 28 bets, +3.0% ROI after real fees | descriptive replay only |
+| Replay, the live Kelly gate (anchored edge) | 17 bets, **−11.2% ROI** flat-staked | the bot's +45% came from sizing + window — published anyway |
 
-**The one-line verdict, as published:** *probability-precise, not clairvoyant* —
-provably better than chance, statistically tied with the market, better-calibrated
-than the market's own prices, with the measurable edge concentrated in humility:
-every missed call came at ≤62% confidence, while the market lost two ~70% calls.
+**The one-line verdict, as published:** *probability-precise, not clairvoyant —
+and honestly bounded*: suggestively better than chance, statistically tied with
+the exchange's executable prices, competitive on calibration under every
+specification, with the measurable edge concentrated in humility: every missed
+call came at ≤62% confidence, while the market lost two ~70% calls.
 Weaknesses documented with equal prominence: an overconfident 40–50% band and a
 totals family that lost to the market.
 
@@ -220,8 +237,8 @@ totals family that lost to the market.
 | Data pipeline | 47 official FIFA match reports → extracted xG/player rates |
 | Bots | 12 personas, 84 settled positions, public leaderboard |
 | Production record | One 15-min outage; 12 lossless deploy-wipes; alerts Mac-independent |
-| Winner calls | 11/14 knockout matches (p = 0.029 vs chance) |
-| vs the market | Brier 0.0898 vs 0.0911 (parity); ECE 0.0269 vs 0.0388 (better) |
+| Winner calls | 11/14 knockout matches (one-sided p = 0.029, two-sided 0.057) |
+| vs the market | Brier 0.0898 vs 0.0911 — parity (cluster CIs straddle zero) |
 | The call | Spain 53.9% at freeze → Spain champions |
 
 ---
@@ -232,25 +249,27 @@ totals family that lost to the market.
 > Built and operated a full-stack sports prediction-market platform (Python/FastAPI,
 > Next.js/TS) live through the 2026 World Cup — Monte Carlo pricing of 9 Kalshi market
 > families, real-time in-play repricing, and a 12-bot controlled trading experiment;
-> the model called 11 of 14 knockout winners (p=0.029) including the champion, and
-> was better-calibrated than the exchange it priced against.
+> the model called 11 of 14 knockout winners (one-sided p=0.029) including the
+> champion, and held statistical parity with the exchange it priced against.
 
 **Standard (3 bullets):**
 > - Designed a Monte Carlo match-simulation engine (Poisson + gamma overdispersion,
 >   opponent-adjusted xG from 47 official match reports, fee-aware Kelly staking) that
 >   priced every Kalshi World Cup 2026 market and froze auditable pre-match
->   predictions; it called 11 of 14 knockout winners (binomial p=0.029) including
->   the champion, achieved statistical parity with the exchange on Brier score
->   (0.0898 vs 0.0911 over 293 frozen markets), and beat the exchange's own
->   calibration (ECE 0.027 vs 0.039).
-> - Ran a controlled paper-trading experiment — 12 bots including random-placebo and
+>   predictions; it called 11 of 14 knockout winners (one-sided binomial p=0.029)
+>   including the champion, and held statistical parity with the exchange on both
+>   Brier score (0.0898 vs 0.0911 over 293 frozen markets) and calibration —
+>   every claim bounded by match-cluster confidence intervals and verified by an
+>   independent evaluation.
+> - Designed a controlled paper-trading pilot — 12 bots including random-placebo and
 >   anti-model controls — on live exchange books with real fee/settlement modeling;
->   the model-driven strategy finished 1st (+45%) and the model-blind control last,
->   with all caveats (sample size, fill optimism) published alongside.
+>   in the two-match settled window the model-driven strategy finished 1st and the
+>   model-blind control last, published as a pilot with its correlation and
+>   fill-optimism caveats in the headline, not the footnotes.
 > - Operated the system in production through the tournament on deliberately hostile
 >   infrastructure (ephemeral DB wiped on every deploy): built fixpoint boot-time
 >   self-healing from public feeds, idempotent restore endpoints, and an export-first
->   deploy procedure — 8 lossless wipes, one 15-minute outage all tournament, 296
+>   deploy procedure — 12+ lossless wipes, one 15-minute outage all tournament, 296
 >   tests green.
 
 **Portfolio-site blurb (a paragraph):**
@@ -321,7 +340,7 @@ API design · webhook/push integrations (Discord, ntfy)
 archival/reproducibility discipline
 **Frontend:** TypeScript · Next.js · Tailwind · CSS animation performance
 (compositor-only) · design systems (multi-theme) · BigInt-exact financial math
-**Operations:** CI-gated deploys · production debugging from logs · self-healing
+**Operations:** locally test-gated deploys · production debugging from logs · self-healing
 systems on ephemeral infrastructure · incident writeups · secrets hygiene
 **Product:** built for a real user with real money on the line (the position tracker's
 EXIT/HOLD verdicts ran live during the final), scoped and shipped under a hard,
@@ -340,6 +359,11 @@ immovable deadline: kickoff.
 
 *The full evaluation lives in `docs/V6/CALIBRATION.md`: the 293-market three-stream
 scoring, the 14-match knockout scorecard (frozen locks + labeled git-archaeology
-reconstructions), the significance battery (cluster bootstrap, binomial, ECE, AUC),
-the trading replay, and every caveat. One script reproduces all of it from
-committed data: `scripts/score_calibration.py`.*
+reconstructions), the significance battery (cluster bootstraps, both-sided binomial,
+multi-specification ECE, AUC), both trading replays, and the evidence-hierarchy
+labels. One deterministic, seeded script now genuinely reproduces all of it from
+committed data (`scripts/score_calibration.py` →
+`research_archive/calibration_results.json`), and
+`tests/test_calibration_pipeline.py` fails the suite if the narrative numbers ever
+drift from the computation. The project was independently evaluated on Jul 21;
+its findings are incorporated throughout.*

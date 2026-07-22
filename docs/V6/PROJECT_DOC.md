@@ -61,11 +61,15 @@ UNFROZEN; deploys are routine again because the DB wipe is now **lossless by pro
   (M99–M104 PMSRs): Spain atk 1.45 def **0.65**, Argentina 1.45/**0.83**, England
   1.45/**0.95**, France 1.45/**0.86**; all four scouting blurbs rewritten from what
   actually happened.
-- **Model evaluation COMPLETE (Part I):** 11/14 knockout winner calls (binomial
-  p=0.029 vs chance); Brier 0.0898 vs the market's 0.0911 over 293 frozen markets
-  (statistical parity); expected calibration error **better than the market's own**
-  (0.0269 vs 0.0388); AUC identical (0.893 vs 0.890). Verdict: provably better
-  than chance, tied with the exchange, better-calibrated than it.
+- **Model evaluation COMPLETE (Part I), claims revised per the Jul 21
+  independent evaluation:** 11/14 knockout winner calls (one-sided p=0.029,
+  two-sided p=0.057 — suggestive, not proven); Brier 0.0898 vs 0.0911 over 293
+  frozen markets = **parity with the executable ask** (cluster CIs straddle
+  zero); ECE lower under the primary binning but **specification-sensitive**;
+  AUC identical. The evaluation also found three real model defects — all
+  FIXED same-day (xg_model v2 centered set-piece, per-draw first-goal mixture,
+  all-in-cost Kelly) — plus the public-lockdown work (PUBLIC_READ_ONLY +
+  ADMIN_TOKEN + rate limits, awaiting env activation).
 
 ### The weekend in one list (what V6 added over V5)
 1. **Five new arena bots** (`95884f1`) — the V5-proposed controls, ALL built: 🪙 COIN
@@ -127,7 +131,7 @@ UNFROZEN; deploys are routine again because the DB wipe is now **lossless by pro
 
 ## PART A — ARCHITECTURE (V6 full map)
 
-### Backend `~/dev/wc26-bet-suggester` (Python 3.11, FastAPI, SQLAlchemy/SQLite, APScheduler)
+### Backend `~/dev/wc26-bet-suggester` (Python 3.12, FastAPI, SQLAlchemy/SQLite, APScheduler)
 ```
 config.py                 every knob, env-overridable — READ THE COMMENTS, they carry the
                           honest contracts. V6 additions: POSITION_FLIP_MARGIN (0.05),
@@ -361,15 +365,19 @@ settlement from MarketClosing result (yes/no), else last-price heuristic
 11. 🤝 CREW        −58.29  (16 trades, 1-15)  ← out-of-sample verdict on the crew recipe
 12. 🐑 SHEEP      −119.25   (3 trades, 0-3)   ← DEAD LAST
 ```
-**THE VERDICT: the edge thesis held.** Model-driven value staking finished FIRST;
-the model-blind price-follower finished LAST; the random placebo mean-reverted toward
-zero in between. One weekend is not a proof — the leaderboard is a small sample and the
-fill model is ask-side optimistic (Part G) — but the ORDERING is exactly what the thesis
-predicts, and it was achieved out-of-sample, in public, on real books. CREW's 1-15 is
-the honest out-of-sample answer to the in-sample +47.4% backtest: the recipe's fixes
-were fitted to four matches and did not generalize. SNIPER's 2-0 over KELLY's timing
-question is intriguing but is TWO TRADES — the ripeness data, not the ledger, should
-settle bet-early-vs-bet-late.
+**THE VERDICT (revised Jul 21 — pilot-strategy-result, not proof):** in a
+**two-match paper pilot** (the settled ledger spans only THIRD + FINAL; earlier
+bot history died in pre-procedure wipes), model-driven staking finished first and
+the model-blind follower last — but the ordering is dominated by ONE match
+direction expressed through correlated contracts: KELLY's +454.73 is four
+overlapping England positions in THIRD plus a FINAL loss; SNIPER's and SHEEP's
+results are the same England-vs-France call from opposite sides. Add ask-side
+fill optimism (Part G) and the leaderboard is an anecdote with good
+instrumentation, not evidence of a general strategy ranking. CREW's 1-15 remains
+the honest out-of-sample answer to its in-sample +47.4% backtest. The live KELLY
+rule's own flat-staked replay across all six lock matches is NEGATIVE (−11.2%,
+Part I.4) — its bankroll result came from stake sizing and window, and saying so
+plainly is worth more than the headline was.
 
 ## PART E — RESEARCH SYSTEM (archive COMPLETE)
 - **T-10 lock**: `is_final` Prediction batch at kickoff−10min (the unfudgeable model
@@ -421,10 +429,21 @@ dispersion ✅ · easy-win dedupe ✅ · mark-to-market equity ✅ · champion-f
 (seeded cache) · Discord ✅ two channels + ntfy · settle-path bugs ✅ · naive-datetime
 crash ✅ · KXMENWORLDCUP classification + capture ✅ · time-bomb tests ✅ defused.
 
+**Jul 21 evening — the independent-evaluation fixes (same-day):** three real model
+defects corrected with regression tests (set-piece double counting → xg_model v2
+centered adjustment; first-goal probabilities computed per latent-rate draw; Kelly
+gate + fraction at all-in cost), the committed ntfy default REMOVED (fail-closed),
+the public lockdown built (PUBLIC_READ_ONLY / ADMIN_TOKEN header / expensive-route
+rate limits, 13 new tests), and the statistics battery moved into
+`scripts/score_calibration.py` with pinned outputs. Suite: 319 green.
+
 **Still owed:**
-1. **Rotate `NTFY_TOPIC`** — the default topic string is committed in a PUBLIC repo;
-   it was a deliberate tournament-weekend tradeoff, and its weekend is over. Set a new
-   topic env-side; Son re-subscribes in the ntfy app. Five minutes.
+1. **Activate the lockdown + new alert channel (Son, ONE Railway window):** set
+   `PUBLIC_READ_ONLY=true`, `ADMIN_TOKEN=<generated secret>` (store a copy in
+   `~/.wc26_admin_token` locally for operator curl), a fresh `NTFY_TOPIC` (then
+   re-subscribe in the ntfy app), and optionally the two Discord split webhooks.
+   Each save redeploys/wipes — batch all vars in one window, then run the restore
+   WITH the `X-Admin-Token` header.
 2. **Regenerate the API-Football key** — pasted in chat ~Jul 5 (never committed; repo
    scanned clean). Son's dashboard task.
 3. **Railway volume at /app/data** — still THE structural fix; the lossless procedure
@@ -459,7 +478,14 @@ crash ✅ · KXMENWORLDCUP classification + capture ✅ · time-bomb tests ✅ d
   EPL/La Liga mid-August. The engine generalizes: fixtures source + ticker families +
   xG pipeline (no PMSRs in club play — pick a provider) + league-play model deltas
   (no knockout damping, home advantage, squad rotation) + fresh ledgers.
-### H2. Model candidates (unchanged from V5, now with better data)
+- **Evaluation P1/P2 roadmap (Jul 21 independent evaluation, adopted as the
+  next-league gate):** fee-inclusive EV in the suggester's gate; full bid/ask/
+  depth lock schema (forecast benchmark ≠ execution comparison); prediction
+  `run_id` provenance + DB-level idempotency (final locks, bot pins); deterministic
+  sim seeds per (match, model version, data version); dependency lockfile + CI
+  pipeline; frontend tests (scenario math first); structured logging; retention
+  policy; `_classify_outcome`/match-page decomposition; frozen bot definitions +
+  cluster-level reporting for the next arena season.
 - Score-effects/dominance dynamics (leads snowball) — still the strongest unimplemented
   idea; still needs more than one tournament of data.
 - Minute-aware easy-win thresholds (the late state-hold killer — WIRE's and Son's
@@ -521,31 +547,42 @@ FINAL    Spain 55%       Spain 1-0 AET  HIT    frozen
 (the one miss = Norway over Brazil, the tournament's biggest upset); frozen era 4/6.
 Every miss came at ≤62% confidence; the market lost two ~70% France calls.
 
-### I.3 Significance (the teeth)
+### I.3 Significance (revised per the Jul 21 independent evaluation)
 ```
-11/14 vs coin flip            binomial p = 0.029                    significant at 5%
-advance Brier vs coin flip    skill CI [+0.3%, +31.4%], P=98%       significant, barely
-raw vs market (293 rows,      +1.4% point, CI [-10.0%, +12.0%],     indistinguishable
-  6-match cluster bootstrap)    P(better) = 60%
-anchored vs market            +1.7% point, CI [-4.8%, +7.8%], 68%   indistinguishable, leaning model
-expected calibration error    raw 0.0269 vs market 0.0388           model BETTER-calibrated than the exchange
-discrimination (AUC)          0.893 / 0.894 / 0.890                 identical
+11/14 vs coin flip            ONE-sided p = 0.0287, TWO-sided 0.0574   suggestive; 5% only one-sided
+advance Brier vs coin flip    0.2097 vs 0.25; skill CI brushes zero    borderline, RNG-sensitive
+raw vs market (293 rows,      +1.4% point, CI [-10.0%, +11.9%],        indistinguishable — parity
+  6-match cluster bootstrap)    P(better) = 59%
+anchored vs market            +1.7% point, CI [-4.8%, +7.9%], 68%      indistinguishable, leaning model
+expected calibration error    raw 0.0269 vs mkt 0.0384 (10-bin width)  BINNING-SENSITIVE: anchored wins
+                              ordering flips under equal-count bins;     equal-count specs; diff CI
+                              cluster CI for diff [-0.017, +0.033]       straddles zero — NOT established
+discrimination (AUC)          0.893 / 0.894 / 0.890                    identical
 ```
-(Cluster bootstrap resamples matches, seed 26, 10k draws — the honest test given
-that markets within a match share outcomes.)
+IMPORTANT SEMANTICS: the market stream is the executable ASK (deliberate for
+execution math) — every model-vs-market row is an execution comparison, not a
+neutral forecast benchmark; asks carry spread, which flatters the model. Full
+evidence-hierarchy labels in CALIBRATION.md. Cluster bootstrap resamples matches,
+seed 26, 10k draws, emitted by `scripts/score_calibration.py` and pinned by
+`tests/test_calibration_pipeline.py`.
 
-### I.4 The trading test + the verdict
-Flat $1 on every ≥5pt raw-edge lock at implied + real fees: 28 bets, 13 wins,
-**+3.0% ROI** — consistent with KELLY's +45% staking the same idea half-Kelly.
-Calibration buckets are clean except 40–50% (predicted .458, realized .304, n=23 —
-the model's one overconfident band).
+### I.4 The trading replays + the verdict
+TWO replays, flat $1 at implied + real fees (they are DIFFERENT rules — the
+original conflation was an evaluation finding):
+- raw edge ≥5pt (descriptive replay, retrospective rule): 28 bets, 13 wins, +3.0%
+- anchored edge ≥5pt (THE LIVE KELLY GATE): 17 bets, 6 wins, **−11.2%** — the live
+  rule flat-staked across all six lock matches LOST; KELLY's +45% bankroll came
+  from stake sizing plus its two-match window, and is a pilot-strategy-result.
+Calibration buckets are clean except 40–50% (predicted .458, realized .304, n=23).
 
-**THE VERDICT, one line: probability-precise, not clairvoyant.** Provably better
-than chance (both match-level tests clear 5%); statistically tied with a real-money
-exchange on probability quality; better-CALIBRATED than that exchange's own prices;
-identical discrimination. The measurable edge is humility — being right about how
-close close games are. Do not claim "beat the market" anywhere; DO claim parity
-plus superior calibration, because both are reproducible from this repo.
+**THE VERDICT, one line: probability-precise, not clairvoyant — and honestly
+bounded.** Suggestively better than chance (one-sided); statistical parity with a
+real-money exchange's executable prices; calibration competitive under every
+specification and ahead under the primary one; identical discrimination. The
+measurable edge is humility — being right about how close close games are. Do not
+claim "beat the market", "proven precision", or "better-calibrated than the
+exchange" anywhere: claim PARITY PLUS DISCIPLINE, because that is what survives
+every specification and is reproducible from this repo.
 
 ---
 
@@ -573,6 +610,21 @@ after the tournament. Every one fixed same-day except the ESPN clamp (backlogged
 **The two wipes of Jul 21** (final-stats deploys): both restored losslessly by the
 background pipeline — export → detect → restore → verify, hands-off. The ephemerality
 that terrorized V4/V5 is now a procedure, not a threat.
+
+**Jul 21 evening — the independent evaluation.** Son commissioned an external
+technical/quantitative/product evaluation of the full project archive. It was
+GOOD: it found three real model defects our audits missed (set-piece double
+counting, first-goal mixture math, fee-incomplete Kelly), correctly identified
+the bot leaderboard as a two-match pilot dominated by correlated England
+positions, showed the ECE headline was binning-sensitive, flagged the one-sided
+p-value, and called out claim inflation ("proven", "CI-gated", "one script
+reproduces all"). Every code defect was fixed same-day with regression tests;
+every inflated claim was rewritten in place (this document included); the
+lockdown was built. Its central line — "the engineering system is currently
+stronger than the evidence for market edge" — is adopted here as the project's
+own official position. Evaluation + evidence bundle archived in Son's Downloads;
+verification of its claims (all confirmed, none material found false) is in the
+session record.
 
 **Doc lineage:** V1–V4 ghosted with the Desktop (Jul 17 sync incident, V5.1); V5
 regenerated into the repo (`docs/PROJECT_DOC_V5.md`, branch `docs-v5-handoff`) — still
