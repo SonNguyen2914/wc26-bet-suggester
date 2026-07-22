@@ -537,19 +537,109 @@ def _scholar_context(match_id: str, session) -> tuple[dict, dict, set]:
 
 
 def wire_exits(open_positions, live_rows, sell_signal_ids):
-    """(pos, price, reason) for WIRE's exit rules: SELL flip or +20c."""
-    price_by_id = {r["market_id"]: r.get("market_probability")
-                   for r in live_rows}
+    """(pos, price, reason) for WIRE's exit rules: SELL flip or +20c.
+
+    Exits fill at the BID — a seller cannot realize the ask. A market
+    with no quoted bid is NOT EXECUTABLE: the position holds rather than
+    booking a fictitious ask-side fill (Jul 21 evaluation)."""
+    bid_by_id = {r["market_id"]: r.get("market_yes_bid")
+                 for r in live_rows}
     out = []
     for pos in open_positions:
-        cur = price_by_id.get(pos.market_id)
-        if cur is None:
-            continue
+        bid = bid_by_id.get(pos.market_id)
+        if bid is None:
+            continue          # no bid -> no exit, hold
         if pos.market_id in sell_signal_ids:
-            out.append((pos, cur, "sell signal"))
-        elif cur - pos.entry_price >= 0.20:
-            out.append((pos, cur, "take profit +20c"))
+            out.append((pos, bid, "sell signal"))
+        elif bid - pos.entry_price >= 0.20:
+            out.append((pos, bid, "take profit +20c"))
     return out
+
+
+# ---------------------------------------------------------------------------
+# Ledger restore — wipes are survivable because the settled ledger is a
+# committed artifact
+# ---------------------------------------------------------------------------
+
+# The canonical settled-ledger export, committed to the repo so a fresh
+# container can rebuild bot state the same way it rebuilds results. The
+# tournament is over: this file IS the final ledger (84 positions).
+BOT_LEDGER_ARCHIVE = __import__("os").path.join(
+    __import__("os").path.dirname(__file__), "..", "research_archive",
+    "bots_ledger_restore_source6_2026-07-21T0912Z.json")
+
+
+def restore_positions(payload: dict) -> dict:
+    """Re-insert archived bot positions. Accepts the /api/bots response
+    shape (bots[].open/closed) or a bare {"positions": [...]}. (bot,
+    market_id) duplicates are skipped, so replay is idempotent. Shared by
+    the admin endpoint and the boot self-heal."""
+    from datetime import datetime
+
+    def _dt(v):
+        if not v:
+            return None
+        try:
+            return datetime.fromisoformat(v)
+        except (TypeError, ValueError):
+            return None
+
+    items = list(payload.get("positions") or [])
+    for b in payload.get("bots") or []:
+        for p in (b.get("open") or []):
+            items.append({**p, "bot": b.get("bot")})
+        for p in (b.get("closed") or []):
+            items.append({**p, "bot": b.get("bot")})
+
+    inserted = skipped = 0
+    with SessionLocal() as session:
+        have = {(r.bot, r.market_id)
+                for r in session.execute(select(BotPosition)).scalars()}
+        for p in items:
+            bot, mk = p.get("bot"), p.get("market_id")
+            if bot not in PERSONAS or not mk or (bot, mk) in have:
+                skipped += 1
+                continue
+            pnl = p.get("pnl")
+            if pnl is None and p.get("net") is not None:
+                # /api/bots renders net = pnl - cost; recover the gross
+                pnl = round(p["net"] + (p.get("cost") or 0.0), 2)
+            kw = dict(bot=bot, match_id=p.get("match_id") or "?",
+                      market_id=mk,
+                      market_title=p.get("market_title") or "",
+                      entry_price=float(p.get("entry_price") or 0.0),
+                      contracts=int(p.get("contracts") or 0),
+                      cost=float(p.get("cost") or 0.0),
+                      note=p.get("note") or "",
+                      closed_at=_dt(p.get("closed_at")),
+                      close_price=p.get("close_price"),
+                      close_reason=p.get("close_reason"), pnl=pnl)
+            opened = _dt(p.get("opened_at"))
+            if opened is not None:      # omit -> column default (utcnow)
+                kw["opened_at"] = opened
+            session.add(BotPosition(**kw))
+            have.add((bot, mk))
+            inserted += 1
+        session.commit()
+    return {"inserted": inserted, "skipped": skipped}
+
+
+def restore_from_archive() -> dict:
+    """Boot self-heal for the ledger: a deploy wipe destroys BotPosition
+    rows, but the settled export is committed in-repo, so the container
+    heals its own bot state without any (now-locked-down) API call.
+    Never raises into the boot chain."""
+    import json as _json
+    try:
+        with open(BOT_LEDGER_ARCHIVE) as f:
+            payload = _json.load(f)
+        out = restore_positions(payload)
+        if out["inserted"]:
+            print(f"[bots] boot restore: {out}")
+        return out
+    except Exception as exc:            # a bad archive must not sink boot
+        print(f"[bots] boot restore failed: {exc}")
+        return {"inserted": 0, "skipped": 0, "error": str(exc)}
 
 
 # ---------------------------------------------------------------------------

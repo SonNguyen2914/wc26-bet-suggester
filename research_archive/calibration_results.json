@@ -1,6 +1,7 @@
 {
  "metadata": {
   "generated_by": "scripts/score_calibration.py",
+  "input_version": "wc26-final-2026-07-21",
   "seed": 26,
   "n_boot": 10000,
   "model_weight": 0.6,

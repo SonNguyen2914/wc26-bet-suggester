@@ -45,6 +45,7 @@ def record_reading(match_id: str, market: dict, model_probability: float | None)
             match_id=match_id,
             market_id=market["market_id"],
             yes_price=market["yes_price"],
+            yes_bid=market.get("yes_bid"),
             decimal_odds=market["decimal_odds"],
             model_probability=model_probability,
             edge=edge,

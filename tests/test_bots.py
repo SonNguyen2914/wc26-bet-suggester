@@ -10,9 +10,14 @@ def _row(model_p, implied, market_id="M1", title="Spain to win"):
             "model_probability": model_p, "implied_probability": implied}
 
 
-def _live(live_p, market_p, market_id="M1", title="Spain to win"):
+def _live(live_p, market_p, market_id="M1", title="Spain to win",
+          bid=None):
+    # bid rides 1c under the ask unless a test pins it (exits fill at BID)
+    if bid is None and market_p is not None:
+        bid = round(market_p - 0.01, 3)
     return {"market_id": market_id, "market_title": title,
-            "live_model_probability": live_p, "market_probability": market_p}
+            "live_model_probability": live_p, "market_probability": market_p,
+            "market_yes_bid": bid}
 
 
 class TestEntryRules:
@@ -132,7 +137,7 @@ class TestPositionLifecycle:
         bots.open_position("WIRE", "FINAL", "KX-B", "t", 0.50, 40.0)
         with SessionLocal() as s:
             open_pos = s.query(BotPosition).all()
-        live = [_live(0.9, 0.72, market_id="KX-A"),   # +22c -> take profit
+        live = [_live(0.9, 0.72, market_id="KX-A"),   # bid .71 -> +21c TP
                 _live(0.3, 0.45, market_id="KX-B")]   # SELL signal fired
         exits = bots.wire_exits(open_pos, live, sell_signal_ids={"KX-B"})
         got = {(p.market_id, reason) for p, _, reason in exits}

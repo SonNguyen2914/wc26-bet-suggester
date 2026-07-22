@@ -20,7 +20,7 @@ from __future__ import annotations
 import time
 from datetime import timedelta
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -56,6 +56,21 @@ _rate_last: dict[str, float] = {}
 _EXPENSIVE_PREFIXES = ("/api/refresh-all",)
 
 
+def _admin_ok(request) -> bool:
+    """Operator credential check: X-Admin-Token or Authorization: Bearer,
+    compared constant-time. Empty configured token or empty/malformed
+    request credentials always fail — an unset ADMIN_TOKEN disables
+    operator mutations entirely rather than matching an empty header."""
+    import secrets as _secrets
+    token = request.headers.get("x-admin-token", "")
+    if not token:
+        auth = request.headers.get("authorization", "")
+        if auth.lower().startswith("bearer "):
+            token = auth[7:].strip()
+    return (bool(config.ADMIN_TOKEN) and bool(token)
+            and _secrets.compare_digest(token, config.ADMIN_TOKEN))
+
+
 @app.middleware("http")
 async def _public_guard(request, call_next):
     """Post-tournament lockdown (Jul 21 evaluation, P0):
@@ -75,8 +90,9 @@ async def _public_guard(request, call_next):
     path = request.url.path
     if request.method in ("POST", "PUT", "PATCH", "DELETE") \
             and config.PUBLIC_READ_ONLY:
-        token = request.headers.get("x-admin-token", "")
-        if not (config.ADMIN_TOKEN and token == config.ADMIN_TOKEN):
+        # Auth is evaluated BEFORE the rate bucket so an unauthenticated
+        # caller can never exhaust the limiter and lock the operator out.
+        if not _admin_ok(request):
             return JSONResponse(
                 {"detail": "read-only mode: the tournament is over; "
                            "mutations require operator credentials"},
@@ -208,7 +224,14 @@ def suggestions(limit: int = Query(50, ge=1, le=200)):
 
 
 @app.get("/api/prediction/{match_id}")
-def get_prediction(match_id: str, force_refresh: bool = False):
+def get_prediction(match_id: str, force_refresh: bool = False,
+                   request: Request = None):
+    # force_refresh persists a fresh prediction batch — a mutating GET in
+    # effect. In read-only mode the expensive override is operator-only;
+    # the public still gets the cached (or stale-refreshed) view.
+    if force_refresh and config.PUBLIC_READ_ONLY \
+            and (request is None or not _admin_ok(request)):
+        force_refresh = False
     match = get_match(match_id)
     if not match:
         raise HTTPException(404, f"Unknown match_id '{match_id}'")
@@ -773,8 +796,11 @@ def bots_ledger():
             for rd in session.execute(
                     select(OddsReading)
                     .where(OddsReading.id.in_(latest_ids))).scalars():
-                if rd.yes_price is not None:
-                    marks[rd.market_id] = float(rd.yes_price)
+                # conservative mark: the BID (what an exit realizes);
+                # ask fallback for legacy rows, documented as optimistic
+                mark = rd.yes_bid if rd.yes_bid is not None else rd.yes_price
+                if mark is not None:
+                    marks[rd.market_id] = float(mark)
         for bot, persona in PERSONAS.items():
             rows = session.execute(
                 select(BotPosition).where(BotPosition.bot == bot)
@@ -920,61 +946,12 @@ def positions_close(pos_id: int, note: str = Query("closed by user")):
 
 @app.post("/api/bots/restore")
 def bots_restore(payload: dict):
-    """Re-insert archived bot positions after a DB wipe — the ledgers are
-    the one table the boot self-heal cannot rebuild. Accepts the /api/bots
-    response shape (bots[].open/closed) or a bare {"positions": [...]}.
-    (bot, market_id) duplicates are skipped, so replay is idempotent and
-    it composes with the tick's own deterministic re-entry."""
-    from datetime import datetime
-    from src.bots import PERSONAS
-    from src.db import BotPosition
-
-    def _dt(v):
-        if not v:
-            return None
-        try:
-            return datetime.fromisoformat(v)
-        except (TypeError, ValueError):
-            return None
-
-    items = list(payload.get("positions") or [])
-    for b in payload.get("bots") or []:
-        for p in (b.get("open") or []):
-            items.append({**p, "bot": b.get("bot")})
-        for p in (b.get("closed") or []):
-            items.append({**p, "bot": b.get("bot")})
-
-    inserted = skipped = 0
-    with SessionLocal() as session:
-        have = {(r.bot, r.market_id)
-                for r in session.execute(select(BotPosition)).scalars()}
-        for p in items:
-            bot, mk = p.get("bot"), p.get("market_id")
-            if bot not in PERSONAS or not mk or (bot, mk) in have:
-                skipped += 1
-                continue
-            pnl = p.get("pnl")
-            if pnl is None and p.get("net") is not None:
-                # /api/bots renders net = pnl - cost; recover the gross
-                pnl = round(p["net"] + (p.get("cost") or 0.0), 2)
-            kw = dict(bot=bot, match_id=p.get("match_id") or "?",
-                      market_id=mk,
-                      market_title=p.get("market_title") or "",
-                      entry_price=float(p.get("entry_price") or 0.0),
-                      contracts=int(p.get("contracts") or 0),
-                      cost=float(p.get("cost") or 0.0),
-                      note=p.get("note") or "",
-                      closed_at=_dt(p.get("closed_at")),
-                      close_price=p.get("close_price"),
-                      close_reason=p.get("close_reason"), pnl=pnl)
-            opened = _dt(p.get("opened_at"))
-            if opened is not None:      # omit -> column default (utcnow)
-                kw["opened_at"] = opened
-            session.add(BotPosition(**kw))
-            have.add((bot, mk))
-            inserted += 1
-        session.commit()
-    return {"inserted": inserted, "skipped": skipped}
+    """Re-insert archived bot positions after a DB wipe. Shared logic in
+    src.bots.restore_positions (the boot self-heal uses the same code with
+    the committed canonical archive, so this endpoint is now a manual
+    override rather than the primary recovery path)."""
+    from src.bots import restore_positions
+    return restore_positions(payload)
 
 
 @app.get("/api/live-signals")

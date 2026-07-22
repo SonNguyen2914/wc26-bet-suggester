@@ -81,11 +81,14 @@ A personal research tool built and operated **during** the World Cup itself (Jun
   every deploy since the final (12+ wipes).
 - **Independently evaluated — and improved by it.** A third-party technical and
   quantitative evaluation (Jul 21) confirmed the test suite, reproduced the
-  metrics, and found three real model defects plus several inflated claims; all
-  defects were fixed same-day with regression tests, and the claims were revised
-  throughout, this document included. The evaluation's summary — "the
-  engineering system is currently stronger than the evidence for market edge" —
-  is adopted here as the project's own position.
+  metrics, and found four real defects (set-piece double counting, first-goal
+  mixture math, fee-incomplete Kelly sizing, ask-side exit valuation) plus
+  several inflated claims; all defects were fixed same-day with regression
+  tests, the public API moved to fail-closed read-only with authenticated
+  operator controls, and the claims were revised throughout, this document
+  included. The evaluation's summary — "the engineering system is currently
+  stronger than the evidence for market edge" — is adopted here as the
+  project's own position.
 
 ---
 

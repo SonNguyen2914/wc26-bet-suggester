@@ -90,7 +90,8 @@ class OddsReading(Base):
     match_id = Column(String(64), nullable=False)
     market_id = Column(String(128), nullable=False)
 
-    yes_price = Column(Float, nullable=False)          # 0-1
+    yes_price = Column(Float, nullable=False)          # 0-1 (buy ask)
+    yes_bid = Column(Float)                            # 0-1 (sell bid)
     decimal_odds = Column(Float, nullable=False)
     model_probability = Column(Float)                  # latest cached model view
     edge = Column(Float)                               # model_p - yes_price
@@ -286,6 +287,13 @@ def _migrate() -> None:
             conn.execute(text("ALTER TABLE predictions ADD COLUMN summary_json TEXT"))
             conn.commit()
             print("[db] migrated: added predictions.summary_json")
+        ocols = [r[1] for r in conn.execute(
+            text("PRAGMA table_info(odds_readings)"))]
+        if ocols and "yes_bid" not in ocols:
+            conn.execute(text(
+                "ALTER TABLE odds_readings ADD COLUMN yes_bid FLOAT"))
+            conn.commit()
+            print("[db] migrated: added odds_readings.yes_bid")
 
 
 def get_setting(session, key: str, default: float) -> float:

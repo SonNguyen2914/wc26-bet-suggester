@@ -39,13 +39,18 @@ class TestEvaluate:
                                   contracts=100, cost=42.0))
             s.commit()
         live = {"M-1": {"live_model_probability": 0.20,
-                        "market_probability": 0.50}}
+                        "market_probability": 0.50,
+                        "market_yes_bid": 0.50}}
         (item,) = positions.evaluate_positions(live, "FX")
         assert item["verdict"] == "EXIT"          # cash 48.25 vs hold 20
         batch = {"M-1": {"model_probability": 0.80,
-                         "implied_probability": 0.50}}
+                         "market_yes_bid": 0.50}}
         (item,) = positions.evaluate_positions(batch, "FX")
         assert item["verdict"] == "HOLD"          # hold 80 vs cash 48.25
+        no_bid = {"M-1": {"model_probability": 0.80,
+                          "market_probability": 0.50}}
+        (item,) = positions.evaluate_positions(no_bid, "FX")
+        assert item["verdict"] == "NO_BID"        # ask never substitutes
 
     def test_alerts_fire_on_flip_into_exit_only(self, monkeypatch):
         _wipe()
@@ -58,9 +63,9 @@ class TestEvaluate:
                                   contracts=400, cost=42.0))
             s.commit()
         hold_rows = {"M-2": {"live_model_probability": 0.30,
-                             "market_probability": 0.12}}
+                             "market_yes_bid": 0.12}}
         exit_rows = {"M-2": {"live_model_probability": 0.02,
-                             "market_probability": 0.10}}
+                             "market_yes_bid": 0.10}}
         positions.evaluate_positions(hold_rows, "FX", 10, alert=True)
         assert sent == []                          # first sighting, HOLD
         pid = next(iter(positions._state))

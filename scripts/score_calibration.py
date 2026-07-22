@@ -228,6 +228,7 @@ def compute() -> dict:
     return {
         "metadata": {
             "generated_by": "scripts/score_calibration.py",
+            "input_version": "wc26-final-2026-07-21",   # frozen artifact id
             "seed": SEED, "n_boot": N_BOOT, "model_weight": W,
             "n_rows": len(rows), "n_matches": len(FILES),
             "market_stream_semantics": "executable ask at T-10 "

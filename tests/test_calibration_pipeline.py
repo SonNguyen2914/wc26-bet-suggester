@@ -1,8 +1,16 @@
 """Pins the calibration/significance pipeline to the committed archive so
 the narrative numbers in docs/V6 cannot drift from what the script
-actually computes (Jul 21 evaluation, patch 4). Bootstraps run at
-n_boot=500 here for suite speed; determinism is what's under test — the
-full 10k artifact is research_archive/calibration_results.json.
+actually computes (Jul 21 evaluation, patch 4).
+
+HISTORICAL-ARTIFACT SEMANTICS: every assertion here binds to the frozen
+2026 WC input version (six lock-bearing matches, settlement backfill of
+Jul 21). These are statements about THAT artifact — "this six-match
+sample does not support a superiority claim" — not general invariants.
+When new independent matches extend the dataset, a legitimately nonzero
+interval is a REPORT UPDATE (new input version, new pinned values), not
+a model failure. Bootstraps run at n_boot=500 here for suite speed;
+determinism is what's under test — the full 10k artifact is
+research_archive/calibration_results.json.
 """
 from __future__ import annotations
 
@@ -67,8 +75,10 @@ class TestSignificancePinned:
         lo, hi = sc.ci95(a1)
         assert lo == pytest.approx(-0.1069635, abs=1e-6)
         assert hi == pytest.approx(0.1156166, abs=1e-6)
-        # Every market-comparison interval straddles zero — the honest
-        # headline is parity, and this test makes that un-forgettable.
+        # For THIS committed six-match artifact, every market-comparison
+        # interval straddles zero: the honest headline is parity. A future
+        # dataset version that clears zero updates the report AND this pin
+        # together — see the module docstring.
         assert lo < 0 < hi
         elo, ehi = sc.ci95(c1)
         assert elo < 0 < ehi

@@ -21,9 +21,14 @@ LEAGUE_BASE_XG = 1.30  # average goals per team per WC match
 # `attack` is derived from TOTAL xG-for per game, which already contains
 # set-piece production, so only a team's DEVIATION from the competition
 # mean may move its xG — re-adding the baseline would count it twice.
-# Until source xG is decomposed into open-play and set-piece components,
-# this constant is the centering point; a regression test pins it to the
-# live stats table so drift is caught.
+# HONEST SCOPE (Jul 21 evaluation follow-up): centering eliminates the
+# GLOBAL inflation but above/below-average set-piece variation is still
+# represented twice (once inside total-xG attack, once here) — this
+# MITIGATES the overlap, it does not fully remove it. Full removal needs
+# decomposed inputs; note the extracted PMSR corpus carries set-play
+# COUNTS (set_plays.csv), not set-piece xG, so decomposition requires
+# re-extraction or a new source — next-competition work. A regression
+# test pins this constant to the live stats table so drift is caught.
 SET_PIECE_BASELINE = 0.236
 
 

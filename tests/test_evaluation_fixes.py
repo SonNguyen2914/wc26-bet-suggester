@@ -151,6 +151,79 @@ class TestPublicLockdown:
                         headers={"X-Admin-Token": ""})
         assert r.status_code == 403
 
+    def test_bearer_authorization_works(self, client, monkeypatch):
+        monkeypatch.setattr(config, "PUBLIC_READ_ONLY", True)
+        monkeypatch.setattr(config, "ADMIN_TOKEN", "s3cret")
+        ok = client.post("/api/settings", json={"min_edge": 0.05},
+                         headers={"Authorization": "Bearer s3cret"})
+        assert ok.status_code == 200
+
+    def test_malformed_authorization_fails(self, client, monkeypatch):
+        monkeypatch.setattr(config, "PUBLIC_READ_ONLY", True)
+        monkeypatch.setattr(config, "ADMIN_TOKEN", "s3cret")
+        for header in ("s3cret",              # no scheme
+                       "Basic s3cret",        # wrong scheme
+                       "Bearer",              # no token
+                       "Bearer  "):           # blank token
+            r = client.post("/api/settings", json={"min_edge": 0.05},
+                            headers={"Authorization": header})
+            assert r.status_code == 403, header
+
+    def test_auth_precedes_rate_bucket(self, client, monkeypatch):
+        # An unauthenticated caller must not consume the expensive-route
+        # limiter and lock the operator out.
+        monkeypatch.setattr(config, "PUBLIC_READ_ONLY", True)
+        monkeypatch.setattr(config, "ADMIN_TOKEN", "s3cret")
+        monkeypatch.setattr(config, "RATE_LIMIT_SECONDS", 999.0)
+        for _ in range(3):
+            assert client.post("/api/refresh-all").status_code == 403
+        ok = client.post("/api/refresh-all",
+                         headers={"X-Admin-Token": "s3cret"})
+        assert ok.status_code == 200      # limiter untouched by the 403s
+
+
+class TestBidSideExecution:
+    """Jul 21 evaluation: sells realize the BID; an absent bid means the
+    exit is NOT EXECUTABLE — the ask is never silently substituted."""
+
+    def test_yes_bid_extraction_priorities(self):
+        from src.kalshi_client import _market_yes_bid
+        assert _market_yes_bid({"yes_bid_dollars": "0.5500"}) == 0.55
+        # derived from the no-side ask when yes bid missing
+        assert _market_yes_bid({"no_ask_dollars": "0.4700"}) == \
+            pytest.approx(0.53)
+        assert _market_yes_bid({"yes_bid": 42}) == 0.42
+        assert _market_yes_bid({"yes_ask_dollars": "0.60"}) is None
+        assert _market_yes_bid({}) is None
+
+    def test_wire_exits_fill_at_bid(self):
+        pos = type("P", (), {"market_id": "M1", "entry_price": 0.40})()
+        rows = [{"market_id": "M1", "market_probability": 0.70,
+                 "market_yes_bid": 0.63}]
+        (got_pos, price, reason), = bots.wire_exits([pos], rows, set())
+        assert price == 0.63              # the bid, never the 0.70 ask
+        assert reason == "take profit +20c"
+
+    def test_wire_holds_without_a_bid(self):
+        pos = type("P", (), {"market_id": "M1", "entry_price": 0.40})()
+        rows = [{"market_id": "M1", "market_probability": 0.70,
+                 "market_yes_bid": None}]
+        assert bots.wire_exits([pos], rows, {"M1"}) == []   # not executable
+
+    def test_tracker_verdict_uses_bid_or_no_bid(self):
+        from src.positions import _verdict, fee
+        verdict, hold_ev, cashout = _verdict(0.50, 0.80, 100, 50.0)
+        assert verdict == "EXIT"
+        assert cashout == pytest.approx(100 * (0.80 - fee(0.80)))
+        verdict, hold_ev, cashout = _verdict(0.50, None, 100, 50.0)
+        assert verdict == "NO_BID" and cashout is None
+
+    def test_demo_rows_carry_a_bid(self):
+        from src.kalshi_client import _demo_markets_for_match
+        from src.schedule_data import load_schedule
+        mkts = _demo_markets_for_match(load_schedule()[0])
+        assert all(0 < m["yes_bid"] <= m["yes_price"] for m in mkts)
+
 
 class TestExpensiveRouteRateLimit:
     def test_second_call_is_limited(self, client, monkeypatch):

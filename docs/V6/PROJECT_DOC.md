@@ -22,8 +22,9 @@ hold-vs-cashout EV verdicts, and archived locked-model-vs-closing-line data for 
 knockout match. Backend Python/FastAPI on Railway; frontend Next.js/TS on Vercel at
 namson.dev/bet-suggester — now a **four-league platform shell** (WC26/MLS/EPL/La Liga)
 with the World Cup dressed in champions' gold. The tournament is complete; the code is
-UNFROZEN; deploys are routine again because the DB wipe is now **lossless by procedure**
-(export → push → restore, proven ×12 and counting).
+UNFROZEN; deploys are routine because the DB wipe is now **fully self-healing** —
+results, closings, bracket AND the settled bot ledger all rebuild at boot from feeds
+and committed artifacts (the manual restore procedure, proven ×12, is the fallback).
 
 ### How the tournament ended
 - **THIRD, Jul 18 (Hard Rock, Miami): England 6–4 France, FT.** A ten-goal carnival:
@@ -55,8 +56,9 @@ UNFROZEN; deploys are routine again because the DB wipe is now **lossless by pro
   (incl. the KXMENWORLDCUP champion books), every signal batch, the tracker's final
   state, six ledger restore sources. Part E.
 - **Alerts:** Discord two-channel (action TL;DR + detail w/ narrator briefs) + ntfy.sh
-  phone push, all server-side, Mac-independent, provable via `POST /api/alerts/test`.
-  The committed ntfy topic must be ROTATED now the tournament is over (Part G).
+  phone push, all server-side, Mac-independent, provable via `POST /api/alerts/test`
+  (operator-token required in read-only mode). The committed ntfy default was REMOVED
+  Jul 21 — pushes no-op until Son sets a fresh `NTFY_TOPIC` env var (Part G).
 - **Stats:** all four semifinalists folded through their full 8-match tournaments
   (M99–M104 PMSRs): Spain atk 1.45 def **0.65**, Argentina 1.45/**0.83**, England
   1.45/**0.95**, France 1.45/**0.86**; all four scouting blurbs rewritten from what
@@ -66,10 +68,11 @@ UNFROZEN; deploys are routine again because the DB wipe is now **lossless by pro
   two-sided p=0.057 — suggestive, not proven); Brier 0.0898 vs 0.0911 over 293
   frozen markets = **parity with the executable ask** (cluster CIs straddle
   zero); ECE lower under the primary binning but **specification-sensitive**;
-  AUC identical. The evaluation also found three real model defects — all
-  FIXED same-day (xg_model v2 centered set-piece, per-draw first-goal mixture,
-  all-in-cost Kelly) — plus the public-lockdown work (PUBLIC_READ_ONLY +
-  ADMIN_TOKEN + rate limits, awaiting env activation).
+  AUC identical. The evaluation found four real defects — all FIXED
+  same-day (xg_model v2 centered set-piece, per-draw first-goal mixture,
+  all-in-cost Kelly, bid-side exit valuation) — and the public API now FAILS
+  CLOSED to read-only, with authenticated operator controls awaiting only
+  Son's ADMIN_TOKEN + fresh NTFY_TOPIC env batch (Part G).
 
 ### The weekend in one list (what V6 added over V5)
 1. **Five new arena bots** (`95884f1`) — the V5-proposed controls, ALL built: 🪙 COIN
@@ -403,7 +406,14 @@ plainly is worth more than the headline was.
 ## PART F — OPS RUNBOOK (post-tournament edition)
 The match-day loop is retired (kept in V5 for history). What remains is DEPLOY OPS:
 
-**The lossless deploy procedure (proven ×12):**
+**The lossless deploy procedure — now AUTOMATIC:** since the Jul 21 evening
+patch the boot chain restores the settled ledger from the committed archive
+(`restore_ledger` step, `src/bots.py::restore_from_archive`) alongside results
+and closings — a deploy wipe heals ALL state with no operator action. The
+manual procedure below remains as the fallback (now requires the
+`X-Admin-Token` header in read-only mode):
+
+**(manual fallback, proven ×12 while it was the primary):**
 1. `curl /api/bots > research_archive/bots_ledger_restore_sourceN_<UTC>.json` — export
    FIRST, commit it. Also archive any new research bundles (`/api/research/{id}`).
 2. Push to main. Railway builds (10 min to 3+ hours — WATCH IN THE BACKGROUND, never
@@ -429,21 +439,33 @@ dispersion ✅ · easy-win dedupe ✅ · mark-to-market equity ✅ · champion-f
 (seeded cache) · Discord ✅ two channels + ntfy · settle-path bugs ✅ · naive-datetime
 crash ✅ · KXMENWORLDCUP classification + capture ✅ · time-bomb tests ✅ defused.
 
-**Jul 21 evening — the independent-evaluation fixes (same-day):** three real model
-defects corrected with regression tests (set-piece double counting → xg_model v2
-centered adjustment; first-goal probabilities computed per latent-rate draw; Kelly
-gate + fraction at all-in cost), the committed ntfy default REMOVED (fail-closed),
-the public lockdown built (PUBLIC_READ_ONLY / ADMIN_TOKEN header / expensive-route
-rate limits, 13 new tests), and the statistics battery moved into
-`scripts/score_calibration.py` with pinned outputs. Suite: 319 green.
+**Jul 21 evening — the independent-evaluation fixes (same-day, two rounds):**
+Round 1: three real model defects corrected with regression tests (set-piece
+double counting → xg_model v2 centered adjustment; first-goal probabilities
+computed per latent-rate draw; Kelly gate + fraction at all-in cost), the
+committed ntfy default REMOVED (fail-closed), the public lockdown built, and
+the statistics battery moved into `scripts/score_calibration.py` with pinned
+outputs. Round 2 (the evaluator's four refinements): sell-side execution FIXED
+(bid-side exits/cash-outs/marks, NO_BID = not executable); read-only now FAILS
+CLOSED by default with `secrets.compare_digest`, Bearer support, auth-before-
+rate-bucket, and the one mutating GET (`force_refresh`) operator-gated; the
+LEDGER JOINED THE BOOT SELF-HEAL (committed canonical archive — wipes now heal
+bot state with zero API calls); set-piece centering honestly re-scoped
+("mitigates, does not fully eliminate" — the extracted corpus has set-play
+counts, not set-piece xG); pinned statistics reframed as historical-artifact
+assertions (input_version wc26-final-2026-07-21). `scripts/verify_lockdown.sh`
+sweeps every OpenAPI mutation mechanically. Suite: 327 green.
 
 **Still owed:**
-1. **Activate the lockdown + new alert channel (Son, ONE Railway window):** set
-   `PUBLIC_READ_ONLY=true`, `ADMIN_TOKEN=<generated secret>` (store a copy in
-   `~/.wc26_admin_token` locally for operator curl), a fresh `NTFY_TOPIC` (then
-   re-subscribe in the ntfy app), and optionally the two Discord split webhooks.
-   Each save redeploys/wipes — batch all vars in one window, then run the restore
-   WITH the `X-Admin-Token` header.
+1. **Set the operator credentials + new alert channel (Son, ONE Railway
+   window):** read-only now FAILS CLOSED (default true — nothing to set), so
+   the batch is: `ADMIN_TOKEN=<generated secret>` (generate with
+   `python3 -c "import secrets;print(secrets.token_urlsafe(48))"`, store a
+   copy at `~/.wc26_admin_token` chmod 600 — operator scripts read it),
+   a fresh `NTFY_TOPIC` (then re-subscribe in the ntfy app), and optionally
+   the two Discord split webhooks. Each save redeploys/wipes — batch in one
+   window. The ledger now SELF-HEALS at boot (committed archive), so no
+   manual restore is required; run `scripts/verify_lockdown.sh` after.
 2. **Regenerate the API-Football key** — pasted in chat ~Jul 5 (never committed; repo
    scanned clean). Son's dashboard task.
 3. **Railway volume at /app/data** — still THE structural fix; the lossless procedure
@@ -456,9 +478,12 @@ rate limits, 13 new tests), and the statistics battery moved into
    break; needs a phase-aware clamp (kickoff-age or score-state disambiguation).
 6. **COIN/TILT/SCHOLAR per-match pins drift** — their "one action per match" markers
    are in-memory; a restart mid-match could double-enter. Bounded, but pin to DB.
-7. **Sell-at-bid realism** — all paper fills happen at the ASK including sells; paper
-   P&L is optimistic by the spread (2–5¢ on thin books). Fair bot-vs-bot, optimistic
-   vs reality. Fix before quoting the leaderboard anywhere serious.
+7. **Sell-at-bid realism — ✅ FIXED (Jul 21 evening):** exits, take-profits,
+   tracker cash-outs, and equity marks all use the YES BID (`_market_yes_bid`,
+   persisted per OddsReading); an absent bid means NOT EXECUTABLE (NO_BID
+   verdict / held position) — the ask is never silently substituted. The
+   SETTLED 2026 leaderboard predates the fix: its early exits (WIRE's scalps)
+   remain ask-side optimistic and are labeled a pilot result anyway.
 8. **Browser-pane can't hydrate namson.dev** (automation quirk) — DOM reads fine,
    client-rendered panels (bracket, arena) verify by code + build, not screenshot.
 9. **macOS update STILL uninstalled** (Son's machine) — it bracketed the final and

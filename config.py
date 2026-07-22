@@ -163,11 +163,13 @@ POSITION_FLIP_MARGIN = float(os.getenv("POSITION_FLIP_MARGIN", "0.05"))
 NTFY_TOPIC = os.getenv("NTFY_TOPIC", "")
 
 # --- Post-tournament public lockdown (Jul 21 evaluation, P0) --------------
-# PUBLIC_READ_ONLY=true turns every mutating route off for the public;
-# ADMIN_TOKEN (server-held, never shipped to a browser bundle) re-enables
-# them for operator tooling via the X-Admin-Token header. RATE_LIMIT_SECONDS
-# spaces calls to expensive recompute routes regardless of mode.
-PUBLIC_READ_ONLY = os.getenv("PUBLIC_READ_ONLY", "").lower() in (
+# FAIL CLOSED: read-only is the DEFAULT — an absent, misspelled, or lost
+# variable leaves the public API read-only, never open. Development and
+# tests opt out explicitly with PUBLIC_READ_ONLY=false. ADMIN_TOKEN
+# (server-held, never shipped to a browser bundle) re-enables mutations
+# for operator tooling via X-Admin-Token or Authorization: Bearer.
+# RATE_LIMIT_SECONDS spaces calls to expensive recompute routes.
+PUBLIC_READ_ONLY = os.getenv("PUBLIC_READ_ONLY", "true").lower() in (
     "1", "true", "yes")
 ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "")
 RATE_LIMIT_SECONDS = float(os.getenv("RATE_LIMIT_SECONDS", "30"))

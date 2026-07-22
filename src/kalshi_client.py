@@ -142,6 +142,7 @@ def _demo_markets_for_match(match: Match) -> list[dict]:
             "title": title,
             "outcome_key": key,
             "yes_price": round(yes, 3),
+            "yes_bid": round(max(yes - 0.02, 0.01), 3),  # demo 2c spread
             "decimal_odds": price_to_decimal_odds(yes),
             "volume_24h": 8000 + vol_seed % 250_000,
             "status": "open",
@@ -486,6 +487,26 @@ def _market_yes_price(m: dict) -> float | None:
     return None
 
 
+def _market_yes_bid(m: dict) -> float | None:
+    """SELL-side yes-price as probability 0-1 — the price an exit actually
+    realizes. Priority: yes-bid dollars -> derived from the no-side ask
+    (selling YES = buying NO at its ask, so yes_bid = 1 - no_ask) ->
+    legacy integer cents. NO ask/midpoint fallback: an absent bid means
+    the exit is NOT EXECUTABLE and callers must treat it that way rather
+    than silently substituting the ask (Jul 21 evaluation, sell-side
+    defect)."""
+    bid = _to_float(m.get("yes_bid_dollars"))
+    if bid is not None and 0.0005 < bid < 0.9995:
+        return round(bid, 3)
+    no_ask = _to_float(m.get("no_ask_dollars"))
+    if no_ask is not None and 0.0005 < no_ask < 0.9995:
+        return round(1.0 - no_ask, 3)
+    bid_c = m.get("yes_bid")
+    if bid_c and 0 < bid_c < 100:
+        return round(bid_c / 100.0, 3)
+    return None
+
+
 def _market_volume(m: dict) -> float:
     """Best available liquidity signal. Fractional markets report *_fp
     string fields; fall back through them, ending with open interest."""
@@ -587,6 +608,7 @@ class KalshiClient:
                                              m.get("title") or m["ticker"]),
                     "outcome_key": outcome,
                     "yes_price": yes,
+                    "yes_bid": _market_yes_bid(m),
                     "decimal_odds": price_to_decimal_odds(yes),
                     "volume_24h": _market_volume(m),
                     "status": m.get("status", "open"),

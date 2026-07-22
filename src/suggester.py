@@ -121,6 +121,7 @@ class SuggesterEngine:
                 "kalshi_odds": mkt["decimal_odds"],
                 # what the market currently thinks vs. our live read
                 "market_probability": round(implied_p, 4),
+                "market_yes_bid": mkt.get("yes_bid"),
                 "live_model_probability": round(model_p, 4),
                 # informational only — NOT a betting signal in-play
                 "difference": round(model_p - implied_p, 4),
@@ -199,6 +200,7 @@ class SuggesterEngine:
                 "outcome_key": key,
                 "kalshi_odds": None,
                 "market_probability": None,
+                "market_yes_bid": None,
                 "live_model_probability": round(p, 4),
                 "difference": None,
                 "volume_24h": 0.0,

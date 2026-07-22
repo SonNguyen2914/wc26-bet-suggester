@@ -6,10 +6,12 @@ and pushes an EXIT/HOLD read the moment the comparison flips. Alerts ride
 the same fan-out as the signals (Discord + ntfy), so nothing depends on a
 page being open.
 
-Honesty contract: cash-out value is computed at the last polled YES price
-minus the taker fee — real exits hit the BID, so cash-out is optimistic by
-the spread (2-5c on thin books). The HOLD side has no such bias: settlement
-pays $1 per contract, entry costs are sunk.
+Honesty contract (revised Jul 21): cash-out value is computed at the
+polled YES BID minus the taker fee — the price an exit actually realizes.
+When no bid is quoted the position is NOT EXECUTABLE: the verdict is
+NO_BID (hold-side EV still shown) and no EXIT can fire. The ask is never
+silently substituted. The HOLD side has no bias: settlement pays $1 per
+contract, entry costs are sunk.
 """
 from __future__ import annotations
 
@@ -30,11 +32,15 @@ def fee(p: float) -> float:
 _state: dict[int, dict] = {}
 
 
-def _verdict(p_model: float, price: float, contracts: int, cost: float):
+def _verdict(p_model: float, bid: float | None, contracts: int,
+             cost: float):
     """(verdict, hold_ev, cashout) — EXIT when selling now beats holding to
-    settlement by the margin; HOLD when holding beats selling; else CLOSE."""
+    settlement by the margin; HOLD when holding beats selling; else CLOSE.
+    `bid` is the SELL side; None means the exit is not executable."""
     hold_ev = contracts * p_model
-    cashout = contracts * (price - fee(price))
+    if bid is None:
+        return "NO_BID", hold_ev, None
+    cashout = contracts * (bid - fee(bid))
     margin = config.POSITION_FLIP_MARGIN * max(cost, 1.0)
     if cashout - hold_ev >= margin:
         return "EXIT", hold_ev, cashout
@@ -63,23 +69,24 @@ def evaluate_positions(rows_by_market: dict, match_id: str,
             p = r.get("live_model_probability")
             if p is None:
                 p = r.get("model_probability")
-            c = r.get("market_probability")
-            if c is None:
-                c = r.get("implied_probability")
-            if p is None or c is None:
+            if p is None:
                 continue
-            verdict, hold_ev, cashout = _verdict(p, c, pos.contracts, pos.cost)
+            bid = r.get("market_yes_bid")
+            verdict, hold_ev, cashout = _verdict(p, bid, pos.contracts,
+                                                 pos.cost)
             item = {"id": pos.id, "market_id": pos.market_id,
                     "market_title": pos.market_title,
                     "match_id": pos.match_id,
                     "entry_price": pos.entry_price,
                     "contracts": pos.contracts, "cost": pos.cost,
-                    "live_probability": round(p, 4), "price": c,
+                    "live_probability": round(p, 4), "bid": bid,
                     "hold_ev": round(hold_ev, 2),
-                    "cashout_now": round(cashout, 2),
+                    "cashout_now": (round(cashout, 2)
+                                    if cashout is not None else None),
                     "verdict": verdict,
                     "net_if_hold_wins": round(pos.contracts - pos.cost, 2),
-                    "net_if_cashout": round(cashout - pos.cost, 2)}
+                    "net_if_cashout": (round(cashout - pos.cost, 2)
+                                       if cashout is not None else None)}
             out.append(item)
             if alert:
                 _maybe_alert(pos, item, minute)
@@ -105,10 +112,10 @@ def _maybe_alert(pos, item: dict, minute) -> None:
             f"💼 CASH-OUT read{at}: {pos.market_title}\n"
             f"Selling now ≈ ${item['cashout_now']:.0f} beats holding "
             f"(EV ${item['hold_ev']:.0f}; live {item['live_probability']:.0%} "
-            f"vs {item['price']:.2f} price). Net if you cash: "
+            f"vs {item['bid']:.2f} bid). Net if you cash: "
             f"{item['net_if_cashout']:+.0f}")
     elif verdict == "HOLD" and prev and prev["verdict"] == "EXIT":
         send_alert(
             f"💼 back to HOLD{at}: {pos.market_title} — live "
-            f"{item['live_probability']:.0%} vs {item['price']:.2f}; "
+            f"{item['live_probability']:.0%} vs {item['bid']:.2f} bid; "
             f"holding beats cashing again.")
