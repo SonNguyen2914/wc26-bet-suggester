@@ -1,5 +1,9 @@
 # World Cup 2026 Kalshi Bet Suggester — Project Documentation & Roadmap
 
+> **SUPERSEDED BY V7** (`docs/V7/PROJECT_DOC.md`, Jul 22) — V6 remains as the
+> tournament-closing snapshot; the evaluation-arc changes (model v2, fail-closed
+> lockdown, self-healing deploys, rotated credentials) live in V7.
+
 **V6 — July 21, 2026. THE FINAL EDITION.** The tournament is over: **Spain are world
 champions, 1–0 AET over Argentina (Ferran Torres, 106')** — and the model called it at the
 T-10 freeze (Spain 53.9%). This document closes the tournament arc that V1–V5 opened: the
@@ -491,7 +495,7 @@ sweeps every OpenAPI mutation mechanically. Suite: 327 green.
 
 ## PART H — FUTURE: THE POST-TOURNAMENT AGENDA
 ### H1. The harvest (data's ready, commission at will)
-- **Brier/calibration write-up — ✅ DONE (Jul 21, `docs/V6/CALIBRATION.md`):** 293
+- **Brier/calibration write-up — ✅ DONE (Jul 21, `docs/V7/CALIBRATION.md`):** 293
   locked markets scored against backfilled settlement truth. Raw model Brier 0.0898
   vs market 0.0911 (model ahead 7/9 families); the 60/40 blend best at 0.0896 —
   which ANSWERS the MODEL_WEIGHT ratchet question: don't ratchet, the blend won.
@@ -526,7 +530,7 @@ sweeps every OpenAPI mutation mechanically. Suite: 327 green.
 
 ## PART I — THE MODEL'S REPORT CARD (calibration + scorecard, complete)
 The evaluation the whole research system existed to make possible. Full narrative in
-`docs/V6/CALIBRATION.md`; everything below is reproducible from committed data
+`docs/V7/CALIBRATION.md`; everything below is reproducible from committed data
 (`scripts/score_calibration.py`, `research_archive/settlements_backfill_2026-07-21.json`,
 `research_archive/knockout_recon_2026-07-21.json`).
 

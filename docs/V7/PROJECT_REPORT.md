@@ -1,9 +1,6 @@
 # WC26 Bet Suggester — Project Report (Resume / Portfolio Edition)
 
-> **SUPERSEDED BY V7** (`docs/V7/PROJECT_REPORT.md`, Jul 22) — use that edition;
-> this one predates the final hardening pass.
-
-*Prepared July 21, 2026 — two days after the final. For use in Son's resume, portfolio
+*V7 edition, July 22, 2026 — three days after the final, one day after the independent evaluation whose findings this report incorporates. For use in Son's resume, portfolio
 site, and interviews. Everything here is verifiable from the public repo, the committed
 research archive, and the live deployment.*
 
@@ -79,9 +76,12 @@ A personal research tool built and operated **during** the World Cup itself (Jun
   and market picked different winners (SF2), the model was right. Full write-up
   with evidence-hierarchy labels: `docs/V7/CALIBRATION.md`.
 - **Operated in production through the event it modeled.** One 15-minute outage all
-  tournament (found, diagnosed, fixed, and regression-tested same-day). Every deploy
-  survives a full database wipe losslessly — by designed procedure, proven across
-  every deploy since the final (12+ wipes).
+  tournament (found, diagnosed, fixed, and regression-tested same-day). Deploys are
+  now FULLY SELF-HEALING: results, bracket, and the settled bot ledger rebuild at
+  boot from public feeds and committed artifacts, with zero operator action (the
+  manual restore procedure was proven ×12 before being retired). The public API
+  runs fail-closed read-only with authenticated operator controls, verified by a
+  mechanical acceptance script sweeping every mutation in the OpenAPI document.
 - **Independently evaluated — and improved by it.** A third-party technical and
   quantitative evaluation (Jul 21) confirmed the test suite, reproduced the
   metrics, and found four real defects (set-piece double counting, first-goal
@@ -235,14 +235,14 @@ totals family that lost to the market.
 | | |
 |---|---|
 | Duration | ~6 weeks, solo, built during the live tournament |
-| Backend | 93 commits · ~8,700 LOC source · ~4,200 LOC tests · 296 tests green |
-| Frontend | 101 commits · ~6,300 LOC TypeScript/CSS |
+| Backend | 103 commits · ~9,200 LOC source · ~4,600 LOC tests · 327 tests green |
+| Frontend | 102 commits · ~6,300 LOC TypeScript/CSS |
 | API surface | ~37 endpoints; 8 scheduled jobs (15s → hourly cadences) |
 | Markets priced | 9 Kalshi market families, every WC26 fixture, pre-match + in-play |
 | Research corpus | 16 knockout matches × (frozen model + closing book + result) |
 | Data pipeline | 47 official FIFA match reports → extracted xG/player rates |
 | Bots | 12 personas, 84 settled positions, public leaderboard |
-| Production record | One 15-min outage; 12 lossless deploy-wipes; alerts Mac-independent |
+| Production record | One 15-min outage; deploys fully self-healing (manual restore retired after ×12); alerts Mac-independent |
 | Winner calls | 11/14 knockout matches (one-sided p = 0.029, two-sided 0.057) |
 | vs the market | Brier 0.0898 vs 0.0911 — parity (cluster CIs straddle zero) |
 | The call | Spain 53.9% at freeze → Spain champions |
@@ -275,8 +275,9 @@ totals family that lost to the market.
 > - Operated the system in production through the tournament on deliberately hostile
 >   infrastructure (ephemeral DB wiped on every deploy): built fixpoint boot-time
 >   self-healing from public feeds, idempotent restore endpoints, and an export-first
->   deploy procedure — 12+ lossless wipes, one 15-minute outage all tournament, 296
->   tests green.
+>   deploy procedure, later upgraded to fully self-healing boot recovery; hardened
+>   post-tournament to a fail-closed read-only API with authenticated operator
+>   controls — one 15-minute outage all tournament, 327 tests green.
 
 **Portfolio-site blurb (a paragraph):**
 > During the 2026 World Cup I built, deployed, and operated a prediction-market
@@ -335,6 +336,17 @@ totals family that lost to the market.
 
 ---
 
+6. **"Tell me about receiving critical feedback."** The project was independently
+   evaluated by a third party after the tournament. Instead of defending it, I
+   verified every claim against the code — confirming four real defects my own
+   audits had missed — then fixed all four with regression tests, rebuilt the
+   public deployment fail-closed, moved the statistics into a deterministic
+   pinned pipeline, and rewrote every overstated claim, all within roughly a
+   day. The evaluation's summary line is now quoted in the project's own
+   documentation as its official position.
+
+---
+
 ## Skills demonstrated
 
 **Quantitative:** Monte Carlo simulation · Poisson/gamma processes · probability
@@ -360,7 +372,7 @@ immovable deadline: kickoff.
   edition; Bot Arena: the settled leaderboard)
 - **Backend repo:** github.com/SonNguyen2914/wc26-bet-suggester — see
   `research_archive/` for the frozen-prediction corpus and
-  `docs/V6/PROJECT_DOC.md` for the full technical documentation
+  `docs/V7/PROJECT_DOC.md` for the full technical documentation
 - **Frontend repo:** github.com/SonNguyen2914/namson-dev
 
 *The full evaluation lives in `docs/V7/CALIBRATION.md`: the 293-market three-stream

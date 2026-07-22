@@ -1,5 +1,7 @@
 # Model vs Market — the Calibration Write-up
 
+*(V7 home — moved from docs/V6 on Jul 22; content unchanged, all claims as revised per the independent evaluation.)*
+
 *July 21, 2026. The post-tournament accounting the research system was built for:
 the model's frozen pre-match probabilities, scored against what actually settled,
 side-by-side with the market's own price at the same moment.*

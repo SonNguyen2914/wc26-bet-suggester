@@ -1,5 +1,5 @@
 """Pins the calibration/significance pipeline to the committed archive so
-the narrative numbers in docs/V6 cannot drift from what the script
+the narrative numbers in docs/V7 cannot drift from what the script
 actually computes (Jul 21 evaluation, patch 4).
 
 HISTORICAL-ARTIFACT SEMANTICS: every assertion here binds to the frozen

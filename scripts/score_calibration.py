@@ -18,7 +18,7 @@ Outputs `research_archive/calibration_results.json` (machine-readable,
 seeded, versioned); `tests/test_calibration_pipeline.py` pins the numbers
 so narrative drift fails CI.
 
-Evidence labels used throughout (see docs/V6/CALIBRATION.md):
+Evidence labels used throughout (see docs/V7/CALIBRATION.md):
   prospective-frozen | reconstructed | descriptive-replay |
   pilot-strategy-result | execution-comparison
 """
