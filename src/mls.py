@@ -220,3 +220,84 @@ def cup_futures() -> list[dict]:
             time.sleep(0.2)
         return parse_game_books(events, markets)
     return _cached("cup", 300, fetch) or []
+
+
+# --- per-match summary (the stat page) -------------------------------------
+
+# boxscore stats worth showing, in display order
+STAT_ORDER = (
+    ("possessionPct", "Possession %"),
+    ("totalShots", "Shots"),
+    ("shotsOnTarget", "On target"),
+    ("wonCorners", "Corners"),
+    ("foulsCommitted", "Fouls"),
+    ("offsides", "Offsides"),
+    ("yellowCards", "Yellow cards"),
+    ("redCards", "Red cards"),
+    ("saves", "Saves"),
+)
+
+
+def parse_summary(d: dict) -> dict:
+    """ESPN event summary -> {header, stats, events}. Tolerant of missing
+    sections (pre-match summaries carry empty boxscores)."""
+    header = d.get("header") or {}
+    comp = (header.get("competitions") or [{}])[0]
+    sides: dict[str, dict] = {}
+    id_to_side: dict[str, str] = {}
+    for c in comp.get("competitors") or []:
+        t = c.get("team") or {}
+        side = c.get("homeAway", "?")
+        id_to_side[str(t.get("id"))] = side
+        sides[side] = {
+            "name": t.get("displayName"), "abbrev": t.get("abbreviation"),
+            "logo": t.get("logos", [{}])[0].get("href")
+            if t.get("logos") else t.get("logo"),
+            "score": c.get("score"),
+        }
+    status = comp.get("status") or {}
+    stype = status.get("type") or {}
+
+    by_side: dict[str, dict] = {}
+    for team in (d.get("boxscore") or {}).get("teams") or []:
+        side = id_to_side.get(str((team.get("team") or {}).get("id")))
+        if side:
+            by_side[side] = {s.get("name"): s.get("displayValue")
+                             for s in team.get("statistics") or []}
+    stats = []
+    for key, label in STAT_ORDER:
+        h = by_side.get("home", {}).get(key)
+        a = by_side.get("away", {}).get(key)
+        if h is not None or a is not None:
+            stats.append({"key": key, "label": label, "home": h, "away": a})
+
+    events = []
+    for kev in d.get("keyEvents") or []:
+        events.append({
+            "minute": (kev.get("clock") or {}).get("displayValue"),
+            "type": (kev.get("type") or {}).get("text"),
+            "team": (kev.get("team") or {}).get("displayName"),
+            "text": kev.get("text"),
+            "scoring": bool(kev.get("scoringPlay")),
+        })
+
+    return {
+        "id": str((header.get("id") or d.get("meta", {}).get("id") or "")),
+        "date": comp.get("date"),
+        "state": stype.get("state"),
+        "detail": stype.get("shortDetail"),
+        "minute": status.get("displayClock"),
+        "venue": ((d.get("gameInfo") or {}).get("venue") or {}).get("fullName"),
+        "home": sides.get("home", {}),
+        "away": sides.get("away", {}),
+        "stats": stats,
+        "events": events,
+    }
+
+
+def match_summary(event_id: str) -> dict | None:
+    """One match's live stat page. 30s cache (it IS the live view)."""
+    def fetch():
+        d = _get_json(f"{ESPN_BASE}/summary", {"event": event_id})
+        return parse_summary(d) if d else None
+    return _cached(f"sum:{event_id}", 30, fetch)

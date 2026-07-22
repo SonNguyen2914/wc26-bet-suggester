@@ -75,3 +75,51 @@ class TestEndpoints:
         for r in app.routes:
             if str(getattr(r, "path", "")).startswith("/api/mls"):
                 assert set(r.methods) == {"GET"}   # archive-compatible
+
+
+_SUMMARY = {
+    "header": {"id": "761668", "competitions": [{
+        "date": "2026-07-22T23:30Z",
+        "status": {"type": {"state": "in", "shortDetail": "38'"},
+                   "displayClock": "38'"},
+        "competitors": [
+            {"homeAway": "home", "score": "1",
+             "team": {"id": "183", "displayName": "Columbus Crew",
+                      "abbreviation": "CLB"}},
+            {"homeAway": "away", "score": "0",
+             "team": {"id": "9668", "displayName": "New York City FC",
+                      "abbreviation": "NYC"}}]}]},
+    "gameInfo": {"venue": {"fullName": "Field"}},
+    "boxscore": {"teams": [
+        {"team": {"id": "9668"},
+         "statistics": [{"name": "possessionPct", "displayValue": "41.0"},
+                        {"name": "totalShots", "displayValue": "3"}]},
+        {"team": {"id": "183"},
+         "statistics": [{"name": "possessionPct", "displayValue": "59.0"},
+                        {"name": "totalShots", "displayValue": "8"}]}]},
+    "keyEvents": [
+        {"clock": {"displayValue": "23'"}, "scoringPlay": True,
+         "type": {"text": "Goal"}, "team": {"displayName": "Columbus Crew"},
+         "text": "Goal! Header from the corner."}],
+}
+
+
+class TestSummaryParser:
+    def test_sides_mapped_by_team_id_not_order(self):
+        out = mls.parse_summary(_SUMMARY)
+        # boxscore lists AWAY first here; mapping must use team ids
+        stat = out["stats"][0]
+        assert stat["label"] == "Possession %"
+        assert stat["home"] == "59.0" and stat["away"] == "41.0"
+
+    def test_header_and_events(self):
+        out = mls.parse_summary(_SUMMARY)
+        assert out["home"]["abbrev"] == "CLB" and out["home"]["score"] == "1"
+        assert out["state"] == "in" and out["minute"] == "38'"
+        ev = out["events"][0]
+        assert ev["scoring"] and ev["minute"] == "23'"
+        assert ev["team"] == "Columbus Crew"
+
+    def test_tolerates_prematch_empty_boxscore(self):
+        out = mls.parse_summary({"header": {}})
+        assert out["stats"] == [] and out["events"] == []

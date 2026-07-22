@@ -150,6 +150,17 @@ def mls_markets():
             "generated_at": utcnow().isoformat()}
 
 
+@app.get("/api/mls/match/{event_id}")
+def mls_match(event_id: str):
+    from src import mls
+    if not event_id.isdigit() or len(event_id) > 12:
+        raise HTTPException(404, "unknown event")
+    out = mls.match_summary(event_id)
+    if out is None:
+        raise HTTPException(502, "summary unavailable")
+    return {"match": out, "generated_at": utcnow().isoformat()}
+
+
 @app.get("/api/ready")
 def ready():
     """Readiness, distinct from liveness (V7 evaluation F7): reports
