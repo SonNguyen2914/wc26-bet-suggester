@@ -293,6 +293,13 @@ V7 adds the OUTPUT layer:
 **The competitions umbrella** (`~/dev/competitions/`): MLS in-season now,
 EPL/La Liga from mid-August; league deltas (home advantage, draws, no
 knockout damping, rosters, per-league calibration) scoped in each README.
+**MLS DATA LAYER LIVE (Jul 22 evening):** `src/mls.py` — self-contained,
+DB-less, cache-backed; keyless ESPN usa.1 (scoreboard/schedule/standings)
++ Kalshi KXMLSGAME 3-way books and KXMLSCUP futures (bid AND ask captured
+from day one); four read-only `/api/mls/*` endpoints (archive-compatible);
+the MLS page renders the live slate, real books, fixtures, and conference
+tables. NO model, NO suggestions — the acceptance gates above still gate
+that, and the page says so.
 
 ## PART I — THE REPORT CARD (final, one screen)
 Full tables + methods: `docs/V7/CALIBRATION.md`. Reproduce:

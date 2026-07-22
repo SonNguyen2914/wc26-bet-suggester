@@ -124,6 +124,32 @@ def health():
     return {"status": "ok", "demo_mode": config.DEMO_MODE, "time": utcnow().isoformat()}
 
 
+# --- MLS (next-league data layer; read-only, no DB) ------------------------
+@app.get("/api/mls/scoreboard")
+def mls_scoreboard(date: str | None = Query(None, pattern=r"^\d{8}$")):
+    from src import mls
+    return {"fixtures": mls.scoreboard(date), "generated_at": utcnow().isoformat()}
+
+
+@app.get("/api/mls/schedule")
+def mls_schedule(days: int = Query(7, ge=1, le=14)):
+    from src import mls
+    return {"fixtures": mls.schedule(days), "generated_at": utcnow().isoformat()}
+
+
+@app.get("/api/mls/standings")
+def mls_standings():
+    from src import mls
+    return {"conferences": mls.standings(), "generated_at": utcnow().isoformat()}
+
+
+@app.get("/api/mls/markets")
+def mls_markets():
+    from src import mls
+    return {"games": mls.game_books(), "cup": mls.cup_futures(),
+            "generated_at": utcnow().isoformat()}
+
+
 @app.get("/api/ready")
 def ready():
     """Readiness, distinct from liveness (V7 evaluation F7): reports
