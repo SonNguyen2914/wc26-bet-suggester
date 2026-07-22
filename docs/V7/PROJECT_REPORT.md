@@ -1,8 +1,9 @@
 # WC26 Bet Suggester — Project Report (Resume / Portfolio Edition)
 
 *V7 edition, July 22, 2026 — three days after the final, one day after the independent evaluation whose findings this report incorporates. For use in Son's resume, portfolio
-site, and interviews. Everything here is verifiable from the public repo, the committed
-research archive, and the live deployment.*
+site, and interviews. Source, committed research artifacts, and the deterministic
+V1 scoring are verifiable from the public repo; operational history (commit
+counts, outages, wipe/restore cycles, alert delivery) is project record.*
 
 ---
 
@@ -28,7 +29,8 @@ A personal research tool built and operated **during** the World Cup itself (Jun
    FIFA's official post-match reports (47 PDFs, pipeline-extracted), knockout damping,
    red-card sampling, extra-time/penalties continuation, and market anchoring
    (60% model / 40% market-implied). Output: win/draw/advance probabilities, exact-score
-   distributions, and fee-aware edge for every Kalshi market on every fixture.
+   distributions, and — since the Jul 22 economics unification — net-of-fee edge
+   and EV for every Kalshi market from one shared execution module.
 
 2. **The live pipeline.** A 15-second polling loop over free, keyless public feeds
    (ESPN) that reprices matches **in play**: score- and time-seeded re-simulation,
@@ -46,9 +48,11 @@ A personal research tool built and operated **during** the World Cup itself (Jun
 
 4. **The research system.** At kickoff−10 minutes, the model's view of every match is
    frozen ("T-10 lock"); at full time, the closing state of every priced market family
-   is captured. Lock + closing + result triples for **all 16 knockout matches** are
-   archived in-repo — a complete dataset for model-vs-market calibration that survives
-   the infrastructure (see "war stories").
+   is captured. The archive holds **six complete prospective market-level
+   lock/closing/result bundles** (both late QFs, both SFs, THIRD, FINAL), **eight
+   labeled reconstructed winner calls** (re-simulated from the commit deployed at
+   each kickoff), and two excluded matches that predate the repo — every record
+   carries its evidence label, and the archive survives the infrastructure.
 
 ---
 
@@ -239,7 +243,7 @@ totals family that lost to the market.
 | Frontend | 102 commits · ~6,300 LOC TypeScript/CSS |
 | API surface | ~37 endpoints; 8 scheduled jobs (15s → hourly cadences) |
 | Markets priced | 9 Kalshi market families, every WC26 fixture, pre-match + in-play |
-| Research corpus | 16 knockout matches × (frozen model + closing book + result) |
+| Research corpus | 6 complete frozen bundles + 8 labeled reconstructions + 2 excluded |
 | Data pipeline | 47 official FIFA match reports → extracted xG/player rates |
 | Bots | 12 personas, 84 settled positions, public leaderboard |
 | Production record | One 15-min outage; deploys fully self-healing (manual restore retired after ×12); alerts Mac-independent |
@@ -315,9 +319,10 @@ totals family that lost to the market.
    answer to the same question; and designed controls in the bot experiment (placebo +
    anti-model). The evaluation was then done properly — cluster bootstrap (matches as
    clusters, because markets within a match are correlated), binomial tests, ECE, AUC
-   — and the answer is nuanced: significantly better than chance (p=0.029),
-   statistically *tied* with the market on Brier, *better* than the market on
-   calibration (ECE 0.027 vs 0.039). Then the discipline of publishing the caveats
+   — and the answer is nuanced: suggestive against chance (one-sided p=0.029,
+   two-sided 0.057), statistically *tied* with the market on Brier, and
+   *competitive* on calibration (lower ECE under the primary binning, with the
+   ordering binning-sensitive and the cluster-level difference not significant). Then the discipline of publishing the caveats
    with the wins — and the losses: an in-sample +47% backtest that went 1-15
    out-of-sample is in the same public record.
 

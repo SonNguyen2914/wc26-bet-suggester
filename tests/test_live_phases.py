@@ -966,7 +966,12 @@ class TestSettledReviewPage:
         r = TestClient(app).get(f"/api/prediction/{mid}")
         assert r.status_code == 200
         d = r.json()
-        assert d["markets"] == [] and d["summary"]["full_time"]
+        # V7 evaluation F1: the old contract returned a post_match
+        # re-simulation here; the archive now says "incomplete" honestly
+        # (MAR_FRA's lock predates the archive discipline) and NEVER
+        # re-simulates on a review page.
+        assert d["markets"] == [] and d["source"] == "archive_incomplete"
+        assert d["summary"] is None and "archive_note" in d
 
 
 class TestLiveMatchStats:

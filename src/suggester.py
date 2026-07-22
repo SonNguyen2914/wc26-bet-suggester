@@ -10,6 +10,7 @@ import re
 from dataclasses import asdict, dataclass
 
 import config
+from src import execution
 from src.db import Prediction, Suggestion, SessionLocal, get_setting, utcnow
 from src.kalshi_client import KalshiClient
 from src.models.simulator import MatchSimulator
@@ -275,9 +276,12 @@ class SuggesterEngine:
                 # survive — kills the "everything is +8% value" bias.
                 model_p = (config.MODEL_WEIGHT * raw_model_p
                            + (1 - config.MODEL_WEIGHT) * implied_p)
-                edge = model_p - implied_p
-                # EV per $1: win (1/price - 1) with prob p, lose $1 otherwise
-                ev = model_p * (mkt["decimal_odds"] - 1) - (1 - model_p)
+                # ALL-IN economics from the shared module (V7 evaluation
+                # F5): gross edge admitted marginal trades whose true
+                # edge sat under the threshold, and the displayed EV
+                # ignored the entry fee the buyer actually pays.
+                edge = execution.net_edge(model_p, implied_p)
+                ev = execution.net_ev(model_p, implied_p)
 
                 take = (edge >= min_edge and sim["confidence"] >= min_conf
                         and mkt["volume_24h"] >= min_vol

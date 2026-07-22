@@ -35,6 +35,11 @@ four-league champions'-gold shell, unchanged since V6).
 - **Repos:** backend `~/dev/wc26-bet-suggester` @ `1385d9e` (**327 tests green**, 103
   commits, ~9.2k LOC src + ~4.6k LOC tests); frontend `~/dev/namson-dev` @ `aeb522c`
   (102 commits). Local == remote == deployed.
+- **Jul 22 evening — V7-evaluation BUILD round** (see V7.1 addendum): canonical
+  lock serving (F1), side-effect-free public GETs + strict fail-closed boolean
+  (F2), live first-goal interval fix (F3), integer red-card counts (F4), unified
+  fee economics (F5), corrected corpus/interview claims (F6), `/api/ready`,
+  isolated test database, 347 tests green.
 - **Prod, verified Jul 22 ~08:50–09:30 UTC** (`scripts/verify_lockdown.sh`, ALL CHECKS
   PASSED): every OpenAPI mutation 403 anonymous; operator paths 200 with the token;
   expensive-route limiter 429s; ledger 84/84 self-healed in ~1 min; champion Spain;
@@ -214,7 +219,17 @@ always. Next-season arena requirements (frozen definitions, decision traces,
 cluster-level reporting, seed distributions for COIN) are in Part H.
 
 ## PART E — RESEARCH SYSTEM (complete + measured)
-V6 Part E stands; V7 adds the OUTPUT layer:
+V6 Part E stands with ONE correction (V7 evaluation F6): the corpus is **six
+complete prospective market-level lock/closing/result bundles** (NOR_ENG,
+ARG_SUI, SF1, SF2, THIRD, FINAL) + **eight labeled reconstructed winner
+calls** + two excluded matches — NOT "all 16 triples"; ESP_BEL/MAR_FRA have
+closings and results but their locks died pre-discipline. Serving is now
+CANONICAL (V7 evaluation F1): `src/archive.py` reads the committed bundles
+directly — the research endpoint and finished-match review pages fall back
+to them when DB rows are absent, and the retrospective-simulation fallback
+is REMOVED (a lock-less match says `archive_incomplete`, honestly).
+`/api/ready` reports archival completeness distinctly from liveness.
+V7 adds the OUTPUT layer:
 - `settlements_backfill_2026-07-21.json` — settlement truth for 100% of the
   293 locked markets (Kalshi keeps settled markets queryable).
 - `knockout_recon_2026-07-21.json` — the 8 pre-lock matches re-simulated with
@@ -314,6 +329,31 @@ matrix passed end-to-end → the last bug of the arc (the ntfy newline) was
 caught by the new per-leg probe and killed class-wide → phone ping confirmed
 09:07 UTC. Twenty-six hours from "evaluate it" to "everything the evaluation
 asked for, deployed and verified."
+
+**Jul 22 evening — the V7 evaluation and the BUILD round.** A second
+independent evaluation reviewed the V7 archive itself (hashes verified —
+byte-identical to the shipped zip) and found the remediation real but
+incomplete in exactly the ways that matter for an archive: the T-10 locks
+were NOT in the boot self-heal — verified live, the deployed site was
+serving `final_lock: 0` and a current-model retro-simulation on the FINAL's
+review page (F1); anonymous GETs could persist prediction rows and the
+read-only boolean parsed "true " as OPEN (F2 — the same whitespace class as
+the ntfy newline, one day later); the live first-goal path passed
+full-match rates, freezing no-goal at 9.1% through minute 89 (F3); red-card
+columns were Boolean and a second red raised StatementError (F4); the
+primary suggester still gated on gross edge (F5); and the docs claimed "all
+16 triples" where six complete bundles exist (F6). ALL SIX fixed in one
+build round: `src/archive.py` serves the committed bundles canonically and
+the retro-sim fallback is gone (lock-less matches say `archive_incomplete`);
+public GETs are side-effect-free with 403 on unauthorized refresh intent;
+the boolean parser fail-closes on anything but an exact off-value;
+first-goal runs on remaining-interval lambdas (ET/FG parameters split so it
+cannot recur) and disappears once a goal scores; red cards are integer
+counts end-to-end; `src/execution.py` is the single economics module
+(suggester edge/EV now net of fees — the evaluator's 0.55@0.50 marginal
+example is a pinned test); `/api/ready` reports archival completeness; the
+test suite runs on an isolated database; and every corpus/interview claim
+was rewritten to the 6+8+2 truth. Suite: 347 green.
 
 **Doc lineage:** V1–V4 ghosted (Desktop, Jul 17); V5 = pre-final handoff
 (branch `docs-v5-handoff`); V6 = the tournament-closing snapshot (evolved

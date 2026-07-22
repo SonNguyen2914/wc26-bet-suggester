@@ -92,9 +92,7 @@ PERSONAS = {
 }
 
 
-def fee(p: float) -> float:
-    """Kalshi taker fee per contract at price p."""
-    return 0.07 * p * (1.0 - p)
+from src.execution import fee  # noqa: E402  (single economics source)
 
 
 def bankroll(bot: str, session) -> float:

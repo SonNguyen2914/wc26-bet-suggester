@@ -124,6 +124,36 @@ def health():
     return {"status": "ok", "demo_mode": config.DEMO_MODE, "time": utcnow().isoformat()}
 
 
+@app.get("/api/ready")
+def ready():
+    """Readiness, distinct from liveness (V7 evaluation F7): reports
+    whether the archival state a fresh container rebuilds at boot is
+    actually present, with expected-vs-actual counts. /api/health stays a
+    bare liveness probe; THIS is the endpoint that must gate "the archive
+    is being served correctly". Expectations are pinned to the completed
+    2026 configuration (84 settled positions, 6 canonical lock bundles)."""
+    from sqlalchemy import func as _func
+
+    from src import archive
+    from src.db import BotPosition, MatchResult
+
+    now = utcnow()
+    with SessionLocal() as s:
+        results = s.execute(select(_func.count())
+                            .select_from(MatchResult)).scalar_one()
+        ledger = s.execute(select(_func.count())
+                           .select_from(BotPosition)).scalar_one()
+    expected_results = sum(1 for m in load_schedule()
+                           if m.fully_resolved and m.kickoff < now)
+    bundles = len(archive.available_lock_bundles())
+    ok = (results >= expected_results and ledger == 84 and bundles == 6)
+    return {"ready": ok,
+            "results": results, "expected_results": expected_results,
+            "ledger_positions": ledger, "expected_ledger": 84,
+            "lock_bundles": bundles, "expected_lock_bundles": 6,
+            "time": now.isoformat()}
+
+
 @app.get("/api/matches/upcoming")
 def upcoming_matches(hours_ahead: int = Query(48, ge=1, le=720)):
     now = utcnow()
@@ -226,12 +256,6 @@ def suggestions(limit: int = Query(50, ge=1, le=200)):
 @app.get("/api/prediction/{match_id}")
 def get_prediction(match_id: str, force_refresh: bool = False,
                    request: Request = None):
-    # force_refresh persists a fresh prediction batch — a mutating GET in
-    # effect. In read-only mode the expensive override is operator-only;
-    # the public still gets the cached (or stale-refreshed) view.
-    if force_refresh and config.PUBLIC_READ_ONLY \
-            and (request is None or not _admin_ok(request)):
-        force_refresh = False
     match = get_match(match_id)
     if not match:
         raise HTTPException(404, f"Unknown match_id '{match_id}'")
@@ -246,28 +270,56 @@ def get_prediction(match_id: str, force_refresh: bool = False,
         locked = latest_for_match(match_id, final_only=True)
         if locked and locked["markets"]:
             return {"freshness": "locked", **locked, "is_stale": False}
+        # The committed lock bundle is the canonical copy — the DB rows
+        # die on deploy wipes (V7 evaluation F1). Serve it verbatim.
+        from src import archive
+        archived = archive.review_payload(match_id)
+        if archived:
+            return {"freshness": "locked", **archived}
         cached = latest_for_match(match_id)
         if cached and cached["markets"]:
             return {"freshness": "cached", **cached, "is_stale": False}
-        # nothing survived (pre-persistence wipe): summary from a cheap
-        # market-less sim, honestly empty markets, zero Kalshi calls
-        sim = engine.simulator.simulate(
-            get_team_stats(match.home), get_team_stats(match.away),
-            stage=match.stage)
-        return {"freshness": "cached", "match_id": match_id,
+        # No frozen record survives and none was archived. The old
+        # fallback re-simulated with the CURRENT model and stats and
+        # rendered it on the review page — a provenance failure (V7
+        # evaluation F1). An archive says "missing"; it never invents.
+        return {"freshness": "archive-incomplete", "match_id": match_id,
                 "generated_at": utcnow().isoformat(), "age_seconds": 0,
-                "is_stale": False, "source": "post_match", "is_final": False,
-                "xg": sim["xg"], "scorelines": sim["scorelines"],
-                "summary": {"full_time": sim["outcomes"],
-                            "advance": sim.get("advance"),
-                            "halves": sim.get("halves")},
-                "confidence": sim["confidence"], "markets": [],
-                "suggestions": []}
+                "is_stale": False, "source": "archive_incomplete",
+                "is_final": False, "xg": None, "scorelines": [],
+                "summary": None, "confidence": None, "markets": [],
+                "suggestions": [],
+                "archive_note": ("no frozen pre-match record survives for "
+                                 "this match — its T-10 lock predates the "
+                                 "archive discipline; retrospective "
+                                 "re-simulation is deliberately not shown "
+                                 "on review pages")}
 
+    public = config.PUBLIC_READ_ONLY and (request is None
+                                          or not _admin_ok(request))
+    if force_refresh and public:
+        # explicit refusal, not a silent downgrade: the frontend must
+        # never report "fresh simulation done" for a request the server
+        # refused (V7 evaluation §7.3)
+        raise HTTPException(403, "read-only mode: fresh computation "
+                                 "requires operator credentials")
     if not force_refresh:
         cached = latest_for_match(match_id)
         if cached and not cached["is_stale"]:
             return {"freshness": "cached", **cached}
+        if public:
+            # computing would PERSIST prediction rows — a mutating GET in
+            # effect (V7 evaluation F2). The anonymous public gets the
+            # stale copy, honestly labeled, or an honest empty. Never a
+            # write.
+            if cached:
+                return {"freshness": "stale-archive", **cached}
+            return {"freshness": "unavailable", "match_id": match_id,
+                    "generated_at": utcnow().isoformat(), "age_seconds": 0,
+                    "is_stale": True, "source": "unavailable",
+                    "is_final": False, "xg": None, "scorelines": [],
+                    "summary": None, "confidence": None, "markets": [],
+                    "suggestions": []}
 
     t0 = time.time()
     result = engine.run_for_match(match, source="on_demand")
@@ -522,6 +574,14 @@ def research_bundle(match_id: str):
                 "edge": r.edge, "confidence": r.confidence,
                 "locked_at": r.created_at.isoformat() if r.created_at else None,
             })
+        # DB rows die on deploy wipes; the committed bundle is the
+        # canonical copy (V7 evaluation F1). Serve it verbatim.
+        final_lock_source = "database"
+        if not final_lock:
+            from src import archive
+            final_lock = archive.lock_rows(match_id)
+            final_lock_source = ("canonical_archive" if final_lock
+                                 else "absent")
         # last traded reading per market (the true pre-settlement close)
         reads = s.execute(
             _select(OddsReading)
@@ -540,7 +600,7 @@ def research_bundle(match_id: str):
                 "read_at": r.created_at.isoformat() if r.created_at else None,
             })
     return {"match_id": match_id, "home_team": m.home, "away_team": m.away,
-            "result": result, "final_lock": final_lock,
+            "result": result, "final_lock": final_lock, "final_lock_source": final_lock_source,
             "closing": closing_rows(match_id),
             "last_readings": last_readings,
             "generated_at": utcnow().isoformat()}

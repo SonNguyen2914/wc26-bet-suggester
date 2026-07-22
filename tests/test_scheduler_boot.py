@@ -12,12 +12,14 @@ import jobs.scheduler as sched
 class TestBootSequence:
     def setup_method(self):
         self._restore = sched.live_state.restore_missing_results
+        self._ledger = sched.bots.restore_from_archive
         self._bracket = sched.resolve_bracket_job
         self._hourly = sched.hourly_predictions
         self._poll = sched.poll_odds
 
     def teardown_method(self):
         sched.live_state.restore_missing_results = self._restore
+        sched.bots.restore_from_archive = self._ledger
         sched.resolve_bracket_job = self._bracket
         sched.hourly_predictions = self._hourly
         sched.poll_odds = self._poll
@@ -30,6 +32,7 @@ class TestBootSequence:
                     raise RuntimeError(f"{name} exploded")
             return _f
         sched.live_state.restore_missing_results = stub("restore")
+        sched.bots.restore_from_archive = stub("ledger")
         sched.resolve_bracket_job = stub("bracket")
         sched.hourly_predictions = stub("predictions")
         sched.poll_odds = stub("poll")
@@ -41,7 +44,7 @@ class TestBootSequence:
         calls: list[str] = []
         self._stub_all(calls)
         sched.boot_sequence()
-        assert calls == ["restore", "bracket", "predictions", "poll"]
+        assert calls == ["restore", "ledger", "bracket", "predictions", "poll"]
 
     def test_failing_step_never_skips_the_rest(self):
         # ESPN down during restore must still leave the bracket resolved
@@ -49,14 +52,14 @@ class TestBootSequence:
         calls: list[str] = []
         self._stub_all(calls, fail=("restore",))
         sched.boot_sequence()
-        assert calls == ["restore", "bracket", "predictions", "poll"]
+        assert calls == ["restore", "ledger", "bracket", "predictions", "poll"]
 
     def test_every_step_is_isolated(self):
         calls: list[str] = []
         self._stub_all(calls, fail=("restore", "bracket", "predictions",
                                     "poll"))
         sched.boot_sequence()  # must not raise
-        assert calls == ["restore", "bracket", "predictions", "poll"]
+        assert calls == ["restore", "ledger", "bracket", "predictions", "poll"]
 
 
 class _RecordingScheduler:

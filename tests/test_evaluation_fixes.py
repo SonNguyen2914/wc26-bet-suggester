@@ -233,3 +233,126 @@ class TestExpensiveRouteRateLimit:
         assert first.status_code == 200
         second = client.post("/api/refresh-all")
         assert second.status_code == 429
+
+
+class TestStrictReadOnlyParsing:
+    """V7 evaluation F2: unknown boolean values must fail CLOSED."""
+
+    def test_only_exact_off_values_open(self):
+        from config import _parse_read_only
+        for raw in ("false", "False", "0", "no", "off", " false "):
+            assert _parse_read_only(raw) is False, raw
+
+    def test_everything_else_is_read_only(self):
+        from config import _parse_read_only
+        for raw in (None, "", "true", "TRUE", "yes", "1", "on",
+                    "true ", " treu", "treu", "flase", "enabled", "public"):
+            assert _parse_read_only(raw) is True, raw
+
+
+class TestLiveFirstGoalInterval:
+    """V7 evaluation F3: live no-goal must track the REMAINING interval."""
+
+    def _live(self, minute, h=0, a=0):
+        sim = MatchSimulator()
+        return sim.simulate_remaining(
+            _team(), _team(), current_home=h, current_away=a,
+            minutes_elapsed=minute, stage="group")
+
+    def test_no_goal_rises_with_the_clock(self):
+        vals = [self._live(m)["props"]["no_goal"] for m in (0, 45, 80, 89)]
+        assert vals == sorted(vals)            # monotonic in minute
+        assert vals[-1] > 0.85                 # ~one quiet minute left
+        assert vals[0] < 0.25                  # full match still to play
+
+    def test_minute_zero_matches_prematch(self):
+        pre = MatchSimulator().simulate(_team(), _team())["props"]["no_goal"]
+        live0 = self._live(0)["props"]["no_goal"]
+        assert live0 == pytest.approx(pre, abs=0.03)   # same interval, MC noise
+
+    def test_first_goal_props_absent_after_a_goal(self):
+        props = self._live(60, h=1, a=0)["props"]
+        assert "no_goal" not in props
+        assert "home_first_goal" not in props
+
+    def test_outcomes_still_sum_to_one_live(self):
+        p = self._live(30)["props"]
+        total = p["home_first_goal"] + p["away_first_goal"] + p["no_goal"]
+        assert total == pytest.approx(1.0, abs=2e-3)
+
+
+class TestMultiRedCardPersistence:
+    """V7 evaluation F4: two reds for one team must survive every layer."""
+
+    def test_two_reds_persist_and_reload(self):
+        from src.db import (MatchLiveSnapshot, MatchResult, SessionLocal,
+                            init_db)
+        init_db()
+        with SessionLocal() as s:
+            s.merge(MatchResult(match_id="REDTEST", home="A", away="B",
+                                home_goals=1, away_goals=0,
+                                red_home=2, red_away=1))
+            s.merge(MatchLiveSnapshot(match_id="REDTEST", home_goals=0,
+                                      away_goals=0,
+                                      red_home=2, red_away=0))
+            s.commit()
+        with SessionLocal() as s:
+            r = s.get(MatchResult, "REDTEST")
+            snap = s.get(MatchLiveSnapshot, "REDTEST")
+            assert r.red_home == 2 and r.red_away == 1
+            assert snap.red_home == 2
+            # legacy truthiness callers still behave
+            assert bool(r.red_home) and not bool(0)
+
+    def test_counts_flow_into_the_simulator(self):
+        sim = MatchSimulator()
+        one = sim.simulate_remaining(_team(), _team(), current_home=0,
+                                     current_away=0, minutes_elapsed=60,
+                                     stage="group", red_home=1)
+        two = sim.simulate_remaining(_team(), _team(), current_home=0,
+                                     current_away=0, minutes_elapsed=60,
+                                     stage="group", red_home=2)
+        # a second red must further depress the carded side's win chance
+        assert two["outcomes"]["home_win"] < one["outcomes"]["home_win"]
+
+
+class TestUnifiedFeeEconomics:
+    """V7 evaluation F5: the suggester's gate/EV use all-in cost from the
+    ONE shared execution module — the evaluator's marginal example."""
+
+    def test_marginal_trade_refused_all_in(self):
+        from src import execution
+        # gross edge exactly 5.0pt; all-in edge only ~3.3pt
+        assert 0.55 - 0.50 == pytest.approx(0.05)
+        assert execution.net_edge(0.55, 0.50) == pytest.approx(0.0325)
+        assert execution.net_edge(0.55, 0.50) < 0.05
+
+    def test_net_ev_matches_all_in_cost(self):
+        from src import execution
+        q = 0.50 + execution.fee(0.50)
+        expect = 0.55 * (1 - q) / q - 0.45
+        assert execution.net_ev(0.55, 0.50) == pytest.approx(expect)
+
+    def test_suggester_persists_net_edge(self, monkeypatch):
+        monkeypatch.setattr(config, "DEMO_MODE", True)
+        from sqlalchemy import select
+        from src.db import Prediction, SessionLocal, init_db
+        from src.schedule_data import get_match
+        from src.suggester import SuggesterEngine
+        from src import execution
+        init_db()
+        eng = SuggesterEngine()
+        eng.run_for_match(get_match("POR_ESP"), source="test_fee")
+        with SessionLocal() as s:
+            rows = s.execute(select(Prediction).where(
+                Prediction.source == "test_fee")).scalars().all()
+        assert rows
+        for r in rows[:10]:
+            expect = execution.net_edge(r.model_probability,
+                                        r.implied_probability)
+            assert r.edge == pytest.approx(expect, abs=1e-9)
+
+    def test_single_fee_source(self):
+        from src import bots, execution, positions
+        assert bots.fee is execution.fee
+        assert positions.fee is execution.fee

@@ -67,7 +67,12 @@ class TestSuggester:
         assert len(result["suggestions"]) >= 5
         for s in result["suggestions"]:
             assert s["recommendation"] in ("TAKE", "SKIP")
-            assert abs(s["edge"] - (s["model_probability"] - s["implied_probability"])) < 1e-6
+            # edge is NET of the entry fee since the V7 evaluation's F5
+            # fix — gross (p - price) minus fee(price), from src.execution
+            from src.execution import net_edge
+            # 4dp API rounding on p/implied/edge -> compare at 1e-3
+            assert abs(s["edge"] - net_edge(s["model_probability"],
+                                            s["implied_probability"])) < 1e-3
 
     def test_suggestions_sorted_by_ev(self):
         match = load_schedule()[0]

@@ -156,8 +156,12 @@ class MatchResult(Base):
     home_goals = Column(Integer, default=0)
     away_goals = Column(Integer, default=0)
     status_short = Column(String(8))                  # FT | AET | PEN
-    red_home = Column(Boolean, default=False)
-    red_away = Column(Boolean, default=False)
+    # red-card COUNTS (0-3). Were Boolean; SQLAlchemy's validator
+    # rejected a second red with StatementError precisely when the
+    # state was most unusual (V7 evaluation F4). SQLite affinity is
+    # INTEGER either way, so legacy True/False rows read back as 1/0.
+    red_home = Column(Integer, default=0)
+    red_away = Column(Integer, default=0)
     goals_json = Column(Text)                          # scorers snapshot as JSON
     finished_at = Column(DateTime(timezone=True), default=utcnow)
 
@@ -255,8 +259,12 @@ class MatchLiveSnapshot(Base):
     away_goals = Column(Integer, default=0)
     minutes_elapsed = Column(Float, nullable=True)
     status_short = Column(String(8))
-    red_home = Column(Boolean, default=False)
-    red_away = Column(Boolean, default=False)
+    # red-card COUNTS (0-3). Were Boolean; SQLAlchemy's validator
+    # rejected a second red with StatementError precisely when the
+    # state was most unusual (V7 evaluation F4). SQLite affinity is
+    # INTEGER either way, so legacy True/False rows read back as 1/0.
+    red_home = Column(Integer, default=0)
+    red_away = Column(Integer, default=0)
     goals_json = Column(Text)
     last_seen_at = Column(DateTime(timezone=True), default=utcnow)
 

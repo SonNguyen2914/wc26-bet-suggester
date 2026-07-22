@@ -24,8 +24,7 @@ from src.alerts import send_alert
 from src.db import SessionLocal, TrackedPosition, utcnow
 
 
-def fee(p: float) -> float:
-    return 0.07 * p * (1.0 - p)
+from src.execution import fee  # noqa: E402  (single economics source)
 
 
 # verdict cooldown/flip state, in-memory (restart cost: one repeat alert)

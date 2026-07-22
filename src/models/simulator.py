@@ -92,8 +92,10 @@ class MatchSimulator:
 
         result = self._aggregate_outcomes(goals_home, goals_away, stage,
                                           xg_home, xg_away,
-                                          lam90_home=lam_home,
-                                          lam90_away=lam_away)
+                                          et_lam_home=lam_home,
+                                          et_lam_away=lam_away,
+                                          fg_lam_home=lam_home,
+                                          fg_lam_away=lam_away)
         result["halves"] = self._half_summaries(lam_home, lam_away)
         return result
 
@@ -124,7 +126,8 @@ class MatchSimulator:
     # ------------------------------------------------------------------
     def _aggregate_outcomes(self, goals_home: np.ndarray, goals_away: np.ndarray,
                             stage: str, xg_home: float, xg_away: float,
-                            lam90_home=None, lam90_away=None) -> dict:
+                            et_lam_home=None, et_lam_away=None,
+                            fg_lam_home=None, fg_lam_away=None) -> dict:
         """Shared tail of every simulation: per-sim FINAL scores in, the
         outcome/props/scorelines/confidence dict out.
 
@@ -132,7 +135,14 @@ class MatchSimulator:
         simulate_remaining() so their return shapes structurally cannot
         drift apart — prob_for_outcome_key() works on either result.
 
-        lam90_home/lam90_away are each team's effective per-90 goal rate
+        TWO separate latent-rate inputs (they coincide pre-match but
+        DIVERGE in play — conflating them was V7 evaluation F3, which froze
+        live no-goal at its pre-match value all match long):
+          et_lam_*: per-90 rates for the extra-time continuation scale.
+          fg_lam_*: rates for the interval the first-goal race actually
+                    covers — full match pre-kickoff, the REMAINING
+                    interval in play, omitted once a goal has scored.
+        Legacy note: the old single lam90_* parameter was each team's per-90 rate
         (scalar, or a per-sim array so red-card handicaps carry into the
         continuation). When provided for a knockout, level regulations
         continue into a simulated ET + penalties (Piece 2); otherwise
@@ -160,9 +170,9 @@ class MatchSimulator:
         # the gamma mixture's extra zero mass (E[exp(-λ)] > exp(-E[λ]),
         # Jensen), understating no_goal on every FTTS book. The three
         # outcomes sum to one by construction, per draw and in the mean.
-        if lam90_home is not None and lam90_away is not None:
-            lh = np.asarray(lam90_home, dtype=float)
-            la = np.asarray(lam90_away, dtype=float)
+        if fg_lam_home is not None and fg_lam_away is not None:
+            lh = np.asarray(fg_lam_home, dtype=float)
+            la = np.asarray(fg_lam_away, dtype=float)
             lt = lh + la
             if float(np.mean(lt)) > 0:
                 safe_lt = np.where(lt > 0, lt, 1.0)
@@ -203,11 +213,11 @@ class MatchSimulator:
         # Regulation W/D/L, props, and scorelines above stay REGULATION-final
         # (that's what the Kalshi market families settle on); only "who
         # advances" continues past 90 minutes.
-        if stage == "knockout" and lam90_home is not None and lam90_away is not None:
+        if stage == "knockout" and et_lam_home is not None and et_lam_away is not None:
             level = goals_home == goals_away
             et_scale = ET_MINUTES / 90.0
-            et_home = self.rng.poisson(np.asarray(lam90_home) * et_scale, self.n)
-            et_away = self.rng.poisson(np.asarray(lam90_away) * et_scale, self.n)
+            et_home = self.rng.poisson(np.asarray(et_lam_home) * et_scale, self.n)
+            et_away = self.rng.poisson(np.asarray(et_lam_away) * et_scale, self.n)
             still_level = level & (et_home == et_away)
             pens_home = self.rng.random(self.n) < PENALTY_HOME_WIN_P
             home_adv = (goals_home > goals_away) \
@@ -329,10 +339,16 @@ class MatchSimulator:
         goals_home = current_home + rem_home
         goals_away = current_away + rem_away
 
-        result = self._aggregate_outcomes(goals_home, goals_away, stage,
-                                          xg_home, xg_away,
-                                          lam90_home=rate_home,
-                                          lam90_away=rate_away)
+        goalless = (current_home + current_away) == 0
+        result = self._aggregate_outcomes(
+            goals_home, goals_away, stage, xg_home, xg_away,
+            et_lam_home=rate_home, et_lam_away=rate_away,
+            # first-goal race: the remaining interval's dispersed rates —
+            # passing the full-match rates froze no_goal at its pre-match
+            # value through minute 89 (V7 evaluation F3). Once a goal has
+            # scored the race is settled: no first-goal props at all.
+            fg_lam_home=lam_home if goalless else None,
+            fg_lam_away=lam_away if goalless else None)
         result["live_state"] = {
             "score": f"{current_home}-{current_away}",
             "minutes_elapsed": round(float(minutes_elapsed), 1),

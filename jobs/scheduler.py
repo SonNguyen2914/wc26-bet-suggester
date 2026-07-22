@@ -26,6 +26,7 @@ from src.live_signals import evaluate_live_signals
 from src.model_cache import get_model_prob, refresh_model_cache
 from src.schedule_data import is_trackable, load_schedule
 from src import spike_detector
+from src import bots
 from src import live_state
 from src.suggester import SuggesterEngine
 from src.timing import compute_timing, record_reading, save_alert, should_alert
@@ -197,10 +198,9 @@ def boot_sequence() -> None:
       4. prime odds poll.
     Steps are isolated: a failing restore (ESPN down) must not leave the
     bracket unresolved or the dashboard unprimed."""
-    from src.bots import restore_from_archive
     for name, step in (
         ("restore_results", live_state.restore_missing_results),
-        ("restore_ledger", restore_from_archive),
+        ("restore_ledger", bots.restore_from_archive),
         ("resolve_bracket", resolve_bracket_job),
         ("prime_predictions", hourly_predictions),
         ("prime_poll", poll_odds),

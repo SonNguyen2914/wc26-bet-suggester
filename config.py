@@ -171,8 +171,23 @@ NTFY_TOPIC = os.getenv("NTFY_TOPIC", "").strip()
 # (server-held, never shipped to a browser bundle) re-enables mutations
 # for operator tooling via X-Admin-Token or Authorization: Bearer.
 # RATE_LIMIT_SECONDS spaces calls to expensive recompute routes.
-PUBLIC_READ_ONLY = os.getenv("PUBLIC_READ_ONLY", "true").lower() in (
-    "1", "true", "yes")
+def _parse_read_only(raw: str | None) -> bool:
+    """STRICT fail-closed boolean: only an exact, known 'off' value opens
+    mutations. Unknown, misspelled, empty, or whitespace-damaged values
+    all mean READ-ONLY — the V7 evaluation showed "true " and "treu"
+    silently parsed as False under the old containment check, which is
+    the opposite of fail-closed (same env-var-whitespace class as the
+    Jul 22 ntfy newline)."""
+    v = (raw or "").strip().lower()
+    if v in ("false", "0", "no", "off"):
+        return False
+    if v not in ("", "true", "1", "yes", "on"):
+        print(f"[config] PUBLIC_READ_ONLY={raw!r} not recognized — "
+              "failing CLOSED (read-only)")
+    return True
+
+
+PUBLIC_READ_ONLY = _parse_read_only(os.getenv("PUBLIC_READ_ONLY", "true"))
 ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "").strip()
 RATE_LIMIT_SECONDS = float(os.getenv("RATE_LIMIT_SECONDS", "30"))
 
