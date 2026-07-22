@@ -43,7 +43,7 @@ RIPENESS_MIN_READINGS = int(os.getenv("RIPENESS_MIN_READINGS", "10"))
 ALERT_COOLDOWN_MINUTES = int(os.getenv("ALERT_COOLDOWN_MINUTES", "30"))
 
 # --- Alerts -------------------------------------------------------------
-DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", "")
+DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", "").strip()
 
 # --- API ----------------------------------------------------------------
 API_HOST = os.getenv("API_HOST", "0.0.0.0")
@@ -100,7 +100,7 @@ TRACK_HOURS_AFTER_KICKOFF = float(os.getenv("TRACK_HOURS_AFTER_KICKOFF", "4"))
 # is 100 requests/day, so calls are budgeted: a hard daily cap (stop before
 # the limit) plus a short cache so repeated reads of the same match don't
 # each cost a request. World Cup is league id 1 in API-Football.
-API_FOOTBALL_KEY = os.getenv("API_FOOTBALL_KEY", "")
+API_FOOTBALL_KEY = os.getenv("API_FOOTBALL_KEY", "").strip()
 API_FOOTBALL_BASE = os.getenv("API_FOOTBALL_BASE", "https://v3.football.api-sports.io")
 API_FOOTBALL_LEAGUE_ID = int(os.getenv("API_FOOTBALL_LEAGUE_ID", "1"))
 API_FOOTBALL_SEASON = int(os.getenv("API_FOOTBALL_SEASON", "2026"))
@@ -160,7 +160,9 @@ POSITION_FLIP_MARGIN = float(os.getenv("POSITION_FLIP_MARGIN", "0.05"))
 # channel (the tournament-weekend default was exactly that, by documented
 # tradeoff — retired Jul 21). Set NTFY_TOPIC in the deployment environment
 # and subscribe to the same topic in the ntfy app; unset, pushes no-op.
-NTFY_TOPIC = os.getenv("NTFY_TOPIC", "")
+# .strip(): dashboard copy-paste loves smuggling trailing newlines into
+# secrets — a whitespace-damaged topic failed silently on Jul 22.
+NTFY_TOPIC = os.getenv("NTFY_TOPIC", "").strip()
 
 # --- Post-tournament public lockdown (Jul 21 evaluation, P0) --------------
 # FAIL CLOSED: read-only is the DEFAULT — an absent, misspelled, or lost
@@ -171,7 +173,7 @@ NTFY_TOPIC = os.getenv("NTFY_TOPIC", "")
 # RATE_LIMIT_SECONDS spaces calls to expensive recompute routes.
 PUBLIC_READ_ONLY = os.getenv("PUBLIC_READ_ONLY", "true").lower() in (
     "1", "true", "yes")
-ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "")
+ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "").strip()
 RATE_LIMIT_SECONDS = float(os.getenv("RATE_LIMIT_SECONDS", "30"))
 
 # --- Two-channel Discord routing + the narrator ---------------------------
@@ -179,9 +181,9 @@ RATE_LIMIT_SECONDS = float(os.getenv("RATE_LIMIT_SECONDS", "30"))
 # DETAIL channel: the narrator's full live briefs + rich event analyses.
 # Either falls back to the original DISCORD_WEBHOOK_URL so a single-channel
 # setup keeps working untouched.
-DISCORD_ACTION_WEBHOOK_URL = os.getenv("DISCORD_ACTION_WEBHOOK_URL",
-                                       os.getenv("DISCORD_WEBHOOK_URL", ""))
-DISCORD_DETAIL_WEBHOOK_URL = os.getenv("DISCORD_DETAIL_WEBHOOK_URL",
-                                       os.getenv("DISCORD_WEBHOOK_URL", ""))
+DISCORD_ACTION_WEBHOOK_URL = os.getenv(
+    "DISCORD_ACTION_WEBHOOK_URL", os.getenv("DISCORD_WEBHOOK_URL", "")).strip()
+DISCORD_DETAIL_WEBHOOK_URL = os.getenv(
+    "DISCORD_DETAIL_WEBHOOK_URL", os.getenv("DISCORD_WEBHOOK_URL", "")).strip()
 # Minutes between periodic in-play live briefs on the detail channel.
 NARRATOR_INTERVAL_MINUTES = int(os.getenv("NARRATOR_INTERVAL_MINUTES", "5"))
