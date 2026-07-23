@@ -1,5 +1,8 @@
 # WC26 Bet Suggester — Project Report (Resume / Portfolio Edition)
 
+> **SUPERSEDED BY V8** (`docs/V8/PROJECT_REPORT.md`, Jul 23) — this report stays
+> the reference for the World Cup + evaluation arc; the MLS expansion arc is V8's.
+
 *V7 edition, July 22, 2026 — three days after the final, one day after the independent evaluation whose findings this report incorporates. For use in Son's resume, portfolio
 site, and interviews. Source, committed research artifacts, and the deterministic
 V1 scoring are verifiable from the public repo; operational history (commit

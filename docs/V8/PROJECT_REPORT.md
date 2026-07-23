@@ -1,0 +1,133 @@
+# Project Report — V8: The MLS Expansion (July 22–23, 2026)
+
+*Successor to `docs/V7/PROJECT_REPORT.md` (the World Cup arc + evaluation). This
+report covers the ~36 hours in which the completed-tournament archive became a
+two-plane, multi-league platform with a live shadow pipeline. V7's report remains
+the reference for everything WC26.*
+
+## The one-liner
+
+Took a hardened single-tournament research archive and, without disturbing it,
+stood up a second league end-to-end in a day and a half: durable PostgreSQL evidence
+store, league-fitted model that had to *earn* its shadow badge in a walk-forward
+backtest, atomic full-book T-10 locks across all twelve Kalshi market families, and
+a public match hub that shows model-vs-market edges on ~60 markets per fixture —
+every number labeled shadow, money locked behind a gate no code path can open.
+
+## The arc
+
+1. **The decision (Jul 22).** An external evaluator's launch review was adopted in
+   full: go live in shadow mode now; real money stays disabled until prospective
+   validation; PostgreSQL is P0; approved aliases make final market attachments;
+   MLS gets its own model ("do not reuse WC26 parameters"); locks are transactional
+   and never reconstructed. The implementation order in that document became the
+   build order.
+2. **The platform day (Jul 22 evening).** MLS data layer + dashboard + match hub
+   shipped in three same-night stages, verified against an in-play match (the book
+   repriced seconds after a goal; the scenario engine hand-checked to the cent).
+3. **The plane-birth (Jul 23, 03:00–07:00).** PostgreSQL provisioned; three crashes
+   diagnosed and fixed (chronicle below); by 07:00 the live plane reported healthy
+   through its own readiness endpoint.
+4. **The pipeline day (Jul 23).** Identity → season ingest → model → runs → locks →
+   full market coverage → four design iterations on the match hub, each deployed and
+   verified live the same hour Son asked for it.
+
+## The outage chronicle (the lesson V8 is named for)
+
+Connecting PostgreSQL produced a three-bug chain, and the middle one mattered most:
+
+- **Bug 1 — driver scheme.** Railway hands out `postgresql://`; SQLAlchemy then
+  wants psycopg2; we ship psycopg 3. Fixed with URL normalization to
+  `postgresql+psycopg://`.
+- **Bug 2 — the design flaw.** The boot migration RAISED on failure. The container
+  crash-looped, and Railway stopped serving *everything* — including the WC26
+  archive. **25 minutes of full outage, entirely self-inflicted.** The fix became a
+  law: a subordinate plane must never be able to kill the primary. Boot failures now
+  disable the live plane, record `LIVE_BOOT_ERROR`, surface it in `/api/ready`, and
+  a regression test (`test_live_boot_failure_never_raises`) pins it.
+- **Bug 3 — the actual crash.** Alembic autogenerate rendered the partial-index
+  WHERE clause as `canonical IS 1` — legal SQLite, fatal PostgreSQL. Fixed with
+  explicit per-dialect SQL and a test that compiles the DDL for BOTH dialects.
+
+Two more prod-only bugs followed the same theme (SQLite forgives, PG doesn't; local
+passes, prod fails): 32-bit signed `INTEGER` overflowed by our unmasked sha-prefix
+seeds (the whole run sweep died; seeds now masked to 31 bits, failures isolated
+per fixture), and ESPN's schedule endpoint silently returning only *played* games
+until `?fixture=true` is added (238 fixtures became 510).
+
+## The model, honestly
+
+`mls-2026-v0` is a deliberately small model: recency-weighted, shrunk goals rates
+through the shared Monte Carlo engine, with the league scoring rate and venue split
+fitted from MLS data and honest zeros everywhere no validated input exists.
+
+The validation story is the part worth telling: **the first fit lost.** At the
+initial shrinkage (k=6), the model was *worse* than a flat "every team is identical"
+baseline by 0.007 logloss over 162 walk-forward fixtures. A hyperparameter sweep
+showed MLS scoring is noisy enough that ratings must be pulled hard toward the mean
+— k=24 beats the baseline by +0.007, stable at 4000 simulations. That number is
+real but small, and it is written into the code as a standing argument for keeping
+the money gate closed. `approved_for_shadow=True` was *earned*; the real-money flag
+has no setter. Full tables in `docs/V8/CALIBRATION.md`.
+
+## Full market coverage (the "Kalshi has all the markets" build)
+
+Son's push — "Kalshi has all the market, why don't we have it?" — turned out to be
+the best feature request of the arc. Discovery found 17 MLS series, 12 per-match.
+Three design facts made covering all of them cheap and safe:
+
+- Every family shares the game event's ticker suffix (`26JUL25CLBCIN`), so only the
+  3-way needs name resolution; everything else joins by exact suffix.
+- Every market's meaning is machine-readable in its ticker tail (`CLB4CIN2` = 4–2;
+  `CIN3` = away by >2.5; `-4` = over 3.5) — no label parsing, ever.
+- The simulator already emitted almost every needed probability (totals ladder,
+  BTTS, margins, first-goal, full scoreline distribution); team totals fell out of
+  the scorelines.
+
+Result: prediction runs went from 3 contracts to ~35; T-10 locks freeze the whole
+book; the site shows ~60 markets per match with signed edges — and they cohere (the
+day it shipped, the model liked Cincinnati on the winner, the spread, AND the high
+totals — one thesis expressed three ways).
+
+## The design loop (four iterations in one day)
+
+The first match hub was engineering-led and Son rejected it in one sentence: "too
+different from WC, defeats my designs... I don't even see the every market section."
+The rebuilds that followed — WC26 skeleton, then Son's own layout (info card, paired
+club-color bars, folded scouting, table under the model prediction) — plus his bug
+report from a phone screenshot (RBNY's book missing: a wrong ESPN name baked into
+BOTH the code and its test) are the arc's product lesson: **the operator's eye found
+a real data bug and a better information design faster than any review pass.**
+
+## By the numbers
+
+- **~36 hours** from launch decision to full-coverage shadow platform.
+- **399 backend tests** (327 at V7), 119 commits backend / 114 frontend.
+- **510 fixtures**, 30 clubs, **652 Kalshi events / 12 families** discovered,
+  **~35 contracts per prediction run**, 15-fixture Saturday slate fully priced.
+- **5 backend deploys in 24h**, archive intact through all of them; **1 outage
+  (25 min)**, converted into the plane-isolation law + regression test.
+- **+0.0073** walk-forward logloss edge vs flat baseline (n=162) — the whole reason
+  "shadow" is the only mode.
+
+## Resume bullets (ready to paste)
+
+- Extended a single-tournament prediction platform into a multi-league system by
+  designing a two-plane architecture (immutable tournament archive + durable
+  PostgreSQL live plane) where a live-plane failure provably cannot degrade the
+  archive — validated by regression tests and five production deploys in 24 hours.
+- Built a league-specific Monte Carlo model gated by rolling-origin validation;
+  rejected the initial parameterization when it underperformed a naive baseline and
+  shipped only the configuration that beat it, with the (small) edge documented as
+  grounds for keeping real-money features disabled.
+- Implemented a full-book market evidence chain: approved-alias identity resolution,
+  exact ticker-suffix mapping across 12 market families, integer-cent quote + depth
+  capture, and atomic pre-kickoff locks enforced by partial unique indexes.
+- Diagnosed and fixed cross-dialect production failures (SQLite-vs-PostgreSQL DDL,
+  32-bit integer overflow) and codified each as a dual-dialect regression test.
+
+## Links
+
+- Live: https://namson.dev/bet-suggester?league=mls (board) → any match card (hub)
+- Readiness: https://wc26-bet-suggester-production.up.railway.app/api/ready
+- Docs: `docs/V8/` (this arc), `docs/V7/` (evaluation arc), `docs/V6/` (tournament)

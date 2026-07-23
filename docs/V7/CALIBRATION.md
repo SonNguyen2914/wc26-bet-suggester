@@ -1,5 +1,8 @@
 # Model vs Market — the Calibration Write-up
 
+> **COMPANION: V8** (`docs/V8/CALIBRATION.md`, Jul 23) — this document remains
+> CURRENT for all WC26 numbers; V8 adds the separate mls-2026-v0 validation.
+
 *(V7 home — moved from docs/V6 on Jul 22; content unchanged, all claims as revised per the independent evaluation.)*
 
 *July 21, 2026. The post-tournament accounting the research system was built for:

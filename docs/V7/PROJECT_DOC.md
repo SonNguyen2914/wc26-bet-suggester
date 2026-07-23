@@ -1,5 +1,9 @@
 # World Cup 2026 Kalshi Bet Suggester — Project Documentation & Roadmap
 
+> **SUPERSEDED BY V8** (`docs/V8/PROJECT_DOC.md`, Jul 23) — V7 remains as the
+> evaluation-closing snapshot; the expansion-arc changes (two-plane architecture,
+> PostgreSQL live plane, mls-2026-v0, full Kalshi market coverage) live in V8.
+
 **V7 — July 22, 2026. THE HARDENED EDITION.** V6 closed the tournament arc; V7 closes
 the **evaluation arc**: in the 24 hours after V6 was written, the project was measured
 (the full calibration + significance battery), independently reviewed (an external
