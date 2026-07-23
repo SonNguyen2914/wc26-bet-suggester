@@ -577,6 +577,131 @@ class TestRiskEngine:
         assert sig.reject_reason in ("TOTAL_RISK_LIMIT", "BANKROLL_RESERVE")
 
 
+class TestSlateReport:
+    def test_classifies_every_state(self, live_session, monkeypatch):
+        """Each fixture lands in exactly one state; the slate qualifies
+        only when clean."""
+        from src.live import slate
+        from src.live.models import (Fixture, LineupSnapshot,
+                                     MarketSnapshot, ModelInputArtifact,
+                                     ModelVersion, PredictionContract,
+                                     PredictionRun)
+        from zoneinfo import ZoneInfo
+        import json as _json
+        # anchor to real now so past/future classification is robust; a
+        # RECENT-PAST matchday so the fixtures read as kicked off
+        past = datetime.now(UTC) - timedelta(days=5)
+        et = past.astimezone(ZoneInfo("America/New_York")).strftime("%Y%m%d")
+        live_session.add(ModelVersion(id=1, name=model_mls.MODEL_NAME,
+                                      approved_for_shadow=True))
+
+        def fx(fid, eid, ko, status="post"):
+            live_session.add(Fixture(id=fid, competition_slug="mls-2026",
+                                     espn_event_id=eid,
+                                     current_kickoff_utc=ko, status=status))
+
+        # MISSED: kicked off, shadow-touched (a scheduled run), no lock
+        fx(2, "miss", past)
+        live_session.add(PredictionRun(id="s2", fixture_id=2,
+                                       run_type="scheduled",
+                                       status="complete"))
+        # LEGACY_UNSCORABLE: kicked off, NO runs at all
+        fx(4, "legacy", past)
+        # PASS: audit-clean canonical lock, execution-ready snapshot
+        fx(3, "pass", past)
+        cap = past - timedelta(minutes=8)
+        live_session.add_all([
+            ModelInputArtifact(id=1, schema_version="model-input-v1",
+                               content_hash="h", document_json="{}"),
+            MarketSnapshot(id=1, fixture_id=3, captured_at=cap,
+                           status="complete", execution_ready=True,
+                           policy_version="mls-lock-v1",
+                           required_families_complete=True),
+            LineupSnapshot(id=1, fixture_id=3, captured_at=cap,
+                           status="confirmed")])
+        live_session.flush()
+        live_session.add(PredictionRun(
+            id="lk3", fixture_id=3, run_type="t10", status="complete",
+            canonical=True, captured_at=cap, seconds_before_kickoff=480,
+            market_snapshot_id=1, model_version_id=1,
+            model_approved_at_run=True, model_input_artifact_id=1,
+            input_snapshot_hash="h", lineup_snapshot_id=1,
+            simulation_seed=1,
+            input_quality_json=_json.dumps({"TEAM_DATA_FRESH": True})))
+        live_session.flush()
+        for k, p in (("home_win", 0.5), ("draw", 0.2), ("away_win", 0.3)):
+            live_session.add(PredictionContract(
+                prediction_run_id="lk3", outcome_key=k, raw_probability=p))
+        live_session.commit()
+
+        rep = slate.slate_report(et)
+        states = {r["espn_event_id"]: r["state"] for r in rep["rows"]}
+        assert states["miss"] == "MISSED"
+        assert states["legacy"] == "LEGACY_UNSCORABLE"
+        assert states["pass"] == "PASS", [r for r in rep["rows"]
+                                          if r["espn_event_id"] == "pass"]
+        assert rep["qualification"]["no_duplicate_canonical_locks"]
+        assert rep["qualification"]["no_post_kickoff_locks"]
+        assert rep["clean_slate"] is True
+
+    def test_pending_before_lock_window(self, live_session):
+        from src.live import slate
+        from src.live.models import Fixture
+        from zoneinfo import ZoneInfo
+        fut = datetime.now(UTC) + timedelta(days=3)
+        et = fut.astimezone(ZoneInfo("America/New_York")).strftime("%Y%m%d")
+        live_session.add(Fixture(id=1, competition_slug="mls-2026",
+                                 espn_event_id="pend",
+                                 current_kickoff_utc=fut, status="pre"))
+        live_session.commit()
+        rep = slate.slate_report(et)
+        row = next(r for r in rep["rows"] if r["espn_event_id"] == "pend")
+        assert row["state"] == "PENDING"
+
+    def test_execution_not_ready_is_flagged_not_failed(self, live_session):
+        """An audit-clean lock whose book simply wasn't tradeable is
+        EXECUTION_NOT_READY — valid evidence, flagged, not a failure."""
+        from src.live import slate
+        from src.live.models import (Fixture, LineupSnapshot,
+                                     MarketSnapshot, ModelInputArtifact,
+                                     ModelVersion, PredictionContract,
+                                     PredictionRun)
+        import json as _json
+        base = datetime(2026, 8, 16, 23, 30, tzinfo=UTC)
+        live_session.add_all([
+            ModelVersion(id=1, name=model_mls.MODEL_NAME,
+                         approved_for_shadow=True),
+            Fixture(id=7, competition_slug="mls-2026", espn_event_id="enr",
+                    current_kickoff_utc=base + timedelta(minutes=5),
+                    status="pre"),
+            ModelInputArtifact(id=1, schema_version="model-input-v1",
+                               content_hash="h", document_json="{}"),
+            MarketSnapshot(id=2, fixture_id=7,
+                           captured_at=base - timedelta(minutes=1),
+                           status="complete", execution_ready=False,
+                           policy_version="mls-lock-v1",
+                           required_families_complete=True),
+            LineupSnapshot(id=1, fixture_id=7, captured_at=base,
+                           status="confirmed")])
+        live_session.flush()
+        live_session.add(PredictionRun(
+            id="lk7", fixture_id=7, run_type="t10", status="complete",
+            canonical=True, captured_at=base - timedelta(minutes=1),
+            seconds_before_kickoff=360, market_snapshot_id=2,
+            model_version_id=1, model_approved_at_run=True,
+            model_input_artifact_id=1, input_snapshot_hash="h",
+            lineup_snapshot_id=1, simulation_seed=1,
+            input_quality_json=_json.dumps({"TEAM_DATA_FRESH": True})))
+        live_session.flush()
+        for k, p in (("home_win", 0.5), ("draw", 0.2), ("away_win", 0.3)):
+            live_session.add(PredictionContract(
+                prediction_run_id="lk7", outcome_key=k, raw_probability=p))
+        live_session.commit()
+        rep = slate.slate_report("20260816")
+        row = next(r for r in rep["rows"] if r["espn_event_id"] == "enr")
+        assert row["state"] == "EXECUTION_NOT_READY"
+
+
 class TestObservability:
     def test_metrics_shape_and_lock_success(self, live_session,
                                             monkeypatch):

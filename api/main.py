@@ -199,6 +199,24 @@ def mls_admin_sweep(request: Request, force: bool = Query(False)):
             "generated_at": utcnow().isoformat()}
 
 
+@app.get("/api/mls/slate")
+def mls_slate(date: str | None = Query(None, pattern=r"^\d{8}$")):
+    """The slate scorecard (V8.1 eval step 2): every fixture on a
+    matchday classified into exactly one state (PASS / MISSED /
+    CAPTURE_FAILED / LOCK_FAILED / EXECUTION_NOT_READY /
+    SETTLEMENT_FAILED / LEGACY_UNSCORABLE / PENDING / INTEGRITY_FAILED),
+    plus the operational-qualification invariants. Defaults to the
+    soonest upcoming slate. Public read-only, 30s cache."""
+    from src.mls import _cached
+    try:
+        from src.live import slate
+        key = f"mls_slate:{date or 'next'}"
+        return _cached(key, 30, lambda: slate.slate_report(date)) or {}
+    except Exception as exc:
+        print(f"[mls] slate failed: {exc}")
+        raise HTTPException(503, "slate unavailable")
+
+
 @app.get("/api/mls/audit")
 def mls_audit():
     """The lock acceptance audit: every T-10 lock's integrity
