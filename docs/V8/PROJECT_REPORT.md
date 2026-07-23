@@ -131,3 +131,28 @@ a real data bug and a better information design faster than any review pass.**
 - Live: https://namson.dev/bet-suggester?league=mls (board) → any match card (hub)
 - Readiness: https://wc26-bet-suggester-production.up.railway.app/api/ready
 - Docs: `docs/V8/` (this arc), `docs/V7/` (evaluation arc), `docs/V6/` (tournament)
+
+---
+
+## V8.1 ADDENDUM — the P0 remediation (July 23, 2026, evening)
+
+A second independent evaluation of the V8 zip arrived the same day and was adopted in full. It found the architecture sound but the MLS evidence chain not yet atomic — the sharpest finding provable from our own test: a canonical T-10 lock could complete with zero captured quotes. All twelve P0 items were fixed and deployed (@48837bf backend, @2a06214 frontend); 408 tests green; the batch-mode migration `8329bc9afacb` ran clean on **prod PostgreSQL** — the real-Postgres migration the evaluator noted had never been done.
+
+| # | Finding | Fix |
+|---|---|---|
+| F1 | Lock not atomic (quotes separate, could be zero) | `MarketSnapshot` header + completeness gate; `capture_lock_snapshot` fetches all externally, one transaction, `status='complete'` only when every event returned and the 3-way is priced; **no complete snapshot → no canonical lock** |
+| F2 | Provenance columns null | runs freeze `model_version_id`, `input_snapshot_hash`, `market_snapshot_id`; every contract links its frozen `market_quote_id` (35/35 verified) |
+| F3 | Approval was metadata | `scheduled_runs`/`t10_locks` fail closed without an approved `ModelVersion`; boot approves before running |
+| F4 | Team totals from truncated scorelines | computed from the simulator's **full goal arrays** (verified live: home O1.5 0.526 vs 0.317 truncated) |
+| F5 | Current Kalshi schema dropped | parse `*_size_fp`/`volume_fp`/`open_interest_fp`/`updated_time`/rules + `orderbook_fp` depth (verified live: 62 quotes all sized + 833 depth rows, was zero) |
+| F6 | No pagination | `_kalshi_paged` cursors to exhaustion; correct-score events capture fully |
+| F9 | Later run supersedes lock | `model_for_event` exposes `primary` = the lock once it exists; sweep is pre-match-status only and skips locked fixtures; frontend renders `primary` |
+| F10 | Seed on mutable row id | `seed_for` hashes the ESPN event id (survives rebuild; regression test) |
+| F11 | Fixed UTC−4 breaks post-DST | `ZoneInfo("America/New_York")` in both market paths |
+| F12 | Readiness didn't measure operation | `shadow_counts` adds `shadow_ready` + named `blockers` |
+| — | Gross gap labeled "Edge" | table column is **Net edge** = model − (ask + fee) |
+| — | `UNIQUE(run, market_contract_id)` skipped NULLs | added `UNIQUE(run, outcome_key)`; hardcoded test path removed |
+
+**Live proof (prod, CLB-CIN):** one real lock snapshot captured 62 quotes — all with sizes, 833 depth rows — across 11/11 events, produced a canonical lock with full provenance and all 35 contracts joined to frozen quotes. `/api/ready` reports `shadow_ready: true, blockers: []`.
+
+**Still open (evaluator's P1/P2, not blocking shadow):** a reproducible MLS corpus export, common-random-number backtesting with uncertainty intervals, PostgreSQL integration tests in CI, raw-payload object storage, and the team/player/availability/lineup snapshot inputs before any real-money discussion. Saturday's locks are now **provenance-complete canonical evidence**, still shadow-labeled, money still locked.
