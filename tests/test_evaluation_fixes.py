@@ -356,3 +356,26 @@ class TestUnifiedFeeEconomics:
         from src import bots, execution, positions
         assert bots.fee is execution.fee
         assert positions.fee is execution.fee
+
+
+class TestOperatingModes:
+    """MLS launch decision: every mode flag fails toward safety."""
+
+    def test_flag_parser_is_allowlist(self):
+        from config import _parse_flag
+        assert _parse_flag("true", False, "x") is True
+        assert _parse_flag("off", True, "x") is False
+        assert _parse_flag("1 ", False, "x") is True   # whitespace strips
+        for raw in ("treu", "enabled", " yes please", ""):
+            assert _parse_flag(raw, False, "x") is False, raw
+            # unknown values keep the safer default in BOTH directions
+        assert _parse_flag("garbage", True, "x") is True
+
+    def test_money_and_auto_execution_default_off(self):
+        import config
+        assert config.REAL_MONEY_SIGNALS_ENABLED is False
+        assert config.AUTO_EXECUTION_ENABLED is False
+
+    def test_live_plane_dormant_without_url(self):
+        import config
+        assert config.LIVE_DATABASE_URL == ""   # test env: dormant

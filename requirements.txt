@@ -1,3 +1,7 @@
+# Runtime dependencies. Dev/test tools live in requirements-dev.txt
+# (the V7 evaluation flagged test deps shipping as runtime).
+# Exact-version locking (uv.lock / hashed pip-compile) remains on the
+# next-league gate list; these are floors, not pins.
 fastapi>=0.110
 uvicorn[standard]>=0.29
 sqlalchemy>=2.0
@@ -5,5 +9,6 @@ apscheduler>=3.10
 numpy>=1.26
 requests>=2.31
 pydantic>=2.6
-pytest>=8.0
-httpx>=0.27
+# --- live data plane (MLS shadow; dormant without LIVE_DATABASE_URL) ---
+psycopg[binary]>=3.1
+alembic>=1.13

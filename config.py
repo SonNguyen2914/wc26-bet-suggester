@@ -188,6 +188,51 @@ def _parse_read_only(raw: str | None) -> bool:
 
 
 PUBLIC_READ_ONLY = _parse_read_only(os.getenv("PUBLIC_READ_ONLY", "true"))
+
+
+# --- Competition operating modes (MLS launch decision, Jul 23) ------------
+# The archive plane (WC26) and the live plane (MLS shadow) are SEPARATE
+# concerns sharing one deployment. Every flag fails toward the safer
+# state: an unknown value never enables anything. Real-money display and
+# automated execution have NO enabling path in code yet — the manual
+# money gate (implementation order #13) arrives only after the
+# operational and model gates pass evidence review.
+def _parse_flag(raw: str | None, default: bool, name: str) -> bool:
+    """Strict allowlist boolean; unknown values -> the safer default,
+    loudly."""
+    v = (raw or "").strip().lower()
+    if v in ("true", "1", "yes", "on"):
+        return True
+    if v in ("false", "0", "no", "off"):
+        return False
+    if v:
+        print(f"[config] {name}={raw!r} not recognized — "
+              f"using safe default {default}")
+    return default
+
+
+COMPETITION = os.getenv("COMPETITION", "mls-2026").strip()
+# Shadow collection defaults ON: ingest, snapshot, lock, paper-trade.
+MLS_SHADOW_ENABLED = _parse_flag(
+    os.getenv("MLS_SHADOW_ENABLED"), True, "MLS_SHADOW_ENABLED")
+# Money stays OFF by default and unknown-value-proof. Flipping this env
+# var alone is NOT sufficient by design: the readiness endpoint must
+# also report the model approved_for_real_money, which no code path
+# sets in this phase.
+REAL_MONEY_SIGNALS_ENABLED = _parse_flag(
+    os.getenv("REAL_MONEY_SIGNALS_ENABLED"), False,
+    "REAL_MONEY_SIGNALS_ENABLED")
+# No auto-execution phase exists. The flag is declared so the invariant
+# "it is false" is testable, not because anything reads it to act.
+AUTO_EXECUTION_ENABLED = _parse_flag(
+    os.getenv("AUTO_EXECUTION_ENABLED"), False, "AUTO_EXECUTION_ENABLED")
+
+# --- Live data plane (PostgreSQL; the archive DB stays untouched) ---------
+# Absent = the live plane is DORMANT: no engine is created, no MLS
+# writes happen anywhere, shadow endpoints report not-ready. Set it to
+# the Railway PostgreSQL connection string once provisioned (backups ON
+# before first reliance — the launch decision's O2).
+LIVE_DATABASE_URL = os.getenv("LIVE_DATABASE_URL", "").strip()
 ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "").strip()
 RATE_LIMIT_SECONDS = float(os.getenv("RATE_LIMIT_SECONDS", "30"))
 

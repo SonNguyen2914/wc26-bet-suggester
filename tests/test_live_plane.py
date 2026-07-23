@@ -1,0 +1,128 @@
+"""Live-plane schema invariants + dormancy (MLS launch decision O1-O3)."""
+from __future__ import annotations
+
+import subprocess
+import sys
+import tempfile
+
+import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import sessionmaker
+
+from src.live.models import (Competition, Fixture, LiveBase,
+                             PredictionContract, PredictionRun, Team,
+                             TeamAlias)
+
+
+@pytest.fixture()
+def session():
+    eng = create_engine("sqlite://", future=True)
+    LiveBase.metadata.create_all(eng)
+    s = sessionmaker(bind=eng, future=True)()
+    s.add(Competition(slug="mls-2026", name="MLS", season=2026))
+    s.add(Team(id=1, competition_slug="mls-2026",
+               canonical_name="Columbus Crew"))
+    s.add(Fixture(id=10, competition_slug="mls-2026",
+                  espn_event_id="761668"))
+    s.commit()
+    return s
+
+
+class TestCanonicalT10Invariant:
+    def test_one_canonical_complete_t10_per_fixture(self, session):
+        session.add(PredictionRun(id="run-1", fixture_id=10,
+                                  run_type="t10", status="complete",
+                                  canonical=True))
+        session.commit()
+        session.add(PredictionRun(id="run-2", fixture_id=10,
+                                  run_type="t10", status="complete",
+                                  canonical=True))
+        with pytest.raises(IntegrityError):
+            session.commit()
+        session.rollback()
+
+    def test_non_canonical_and_other_types_are_free(self, session):
+        for i, kw in enumerate((
+                dict(run_type="t10", status="complete", canonical=False),
+                dict(run_type="t10", status="failed", canonical=True),
+                dict(run_type="t60", status="complete", canonical=True),
+                dict(run_type="live", status="complete", canonical=True))):
+            session.add(PredictionRun(id=f"free-{i}", fixture_id=10, **kw))
+        session.commit()    # no violation: the index is precisely scoped
+
+    def test_run_contract_uniqueness(self, session):
+        session.add(PredictionRun(id="run-3", fixture_id=10,
+                                  run_type="scheduled", status="complete"))
+        session.commit()
+        session.add(PredictionContract(prediction_run_id="run-3",
+                                       market_contract_id=None,
+                                       outcome_key="home_win",
+                                       raw_probability=0.5))
+        session.commit()
+        # NULL market_contract_id rows don't collide (SQL NULL semantics);
+        # real contract ids do:
+        from src.live.models import MarketContract, MarketEvent
+        session.add(MarketEvent(id=1, kalshi_event_ticker="KX-TEST",
+                                competition_slug="mls-2026"))
+        session.add(MarketContract(id=5, market_event_id=1, ticker="KX-T-A"))
+        session.commit()
+        session.add(PredictionContract(prediction_run_id="run-3",
+                                       market_contract_id=5,
+                                       outcome_key="draw",
+                                       raw_probability=0.3))
+        session.commit()
+        session.add(PredictionContract(prediction_run_id="run-3",
+                                       market_contract_id=5,
+                                       outcome_key="draw",
+                                       raw_probability=0.31))
+        with pytest.raises(IntegrityError):
+            session.commit()
+        session.rollback()
+
+
+class TestIdentityRules:
+    def test_alias_unique_per_source(self, session):
+        session.add(TeamAlias(team_id=1, alias="Columbus", source="kalshi",
+                              approved=True))
+        session.commit()
+        session.add(TeamAlias(team_id=1, alias="Columbus", source="kalshi"))
+        with pytest.raises(IntegrityError):
+            session.commit()
+        session.rollback()
+        # same alias under another source is fine
+        session.add(TeamAlias(team_id=1, alias="Columbus", source="espn"))
+        session.commit()
+
+    def test_alias_defaults_unapproved(self, session):
+        a = TeamAlias(team_id=1, alias="CLB Crew", source="kalshi")
+        session.add(a)
+        session.commit()
+        assert a.approved is False      # fuzzy may propose, never decide
+
+
+class TestDormancy:
+    def test_plane_dormant_without_url(self):
+        from src.live import db as livedb
+        assert livedb.live_enabled() is False
+        assert livedb.get_engine() is None
+        assert livedb.get_session() is None
+        assert livedb.migrations_current() is None
+        livedb.startup_check()          # dormant -> no raise
+
+
+class TestMigrations:
+    def test_baseline_upgrades_empty_database(self, tmp_path):
+        url = f"sqlite:///{tmp_path}/mig.db"
+        r = subprocess.run(
+            [sys.executable.replace("python3", "python").rsplit("/", 1)[0]
+             + "/alembic", "-x", f"url={url}", "upgrade", "head"],
+            capture_output=True, text=True,
+            cwd="/Users/ns/dev/wc26-bet-suggester")
+        assert r.returncode == 0, r.stderr
+        import sqlite3
+        tables = {row[0] for row in sqlite3.connect(
+            f"{tmp_path}/mig.db").execute(
+            "SELECT name FROM sqlite_master WHERE type='table'")}
+        assert {"prediction_run", "market_quote", "team_alias",
+                "alembic_version"} <= tables
