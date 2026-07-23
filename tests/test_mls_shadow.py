@@ -656,6 +656,47 @@ class TestPredictionRuns:
         # deterministic: same seed + same inputs => essentially identical
         assert rep["max_delta"] < 1e-6
 
+    def test_corpus_is_self_contained_and_replayable(self, live_session,
+                                                     monkeypatch, tmp_path):
+        """Phase 3 acceptance: export the corpus, then reproduce every
+        run and verify integrity from the FILES ALONE — no DB access in
+        the analyzer path."""
+        from src.live import corpus
+        monkeypatch.setattr(config, "N_SIMULATIONS", 500)
+        self._seed_playable(live_session)
+        runs.scheduled_runs()
+        out = str(tmp_path / "corpus-v1")
+        manifest = corpus.export_corpus(out, "mls-shadow-2026-test")
+        assert manifest["schema_version"] == "corpus-v1"
+        assert manifest["counts"]["prediction_runs"] >= 1
+        assert manifest["counts"]["input_artifacts"] >= 1
+
+        # --- from here, DB is off-limits: analyze the files only ---
+        import importlib.util
+        import os
+        spec = importlib.util.spec_from_file_location(
+            "analyze_corpus",
+            os.path.join(os.path.dirname(os.path.dirname(__file__)),
+                         "scripts", "analyze_corpus.py"))
+        an = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(an)
+        m = an._load(out, "manifest.json")
+        assert an.verify_hashes(out, m) == []          # integrity clean
+        rep = an.replay_report(out)
+        assert rep["all_reproduced"] and rep["max_delta"] <= 1e-6
+        # audit section carries the anti-survivorship-bias record
+        aud = an._load(out, "audit.json")
+        assert "missed_locks" in aud and "failed_snapshots" in aud
+
+    def test_corpus_versions_are_immutable(self, live_session, tmp_path):
+        from src.live import corpus
+        self._seed_playable(live_session)
+        runs.scheduled_runs()
+        out = str(tmp_path / "corpus")
+        corpus.export_corpus(out, "mls-shadow-2026-test")
+        with pytest.raises(FileExistsError):
+            corpus.export_corpus(out, "mls-shadow-2026-test")
+
     def test_shadow_counts_shape(self, live_session):
         self._seed_playable(live_session)
         c = runs.shadow_counts()

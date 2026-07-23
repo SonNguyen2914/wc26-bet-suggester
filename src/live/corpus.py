@@ -1,0 +1,182 @@
+"""Prospective research corpus exporter (V8.1 evaluation Phase 3).
+
+Produces a SELF-CONTAINED snapshot of the MLS shadow evidence — every
+entity a researcher needs to regenerate forecast, market-comparison,
+reproducibility, and audit results WITHOUT access to the production
+database. Includes failures (missed locks, failed snapshots) so the
+corpus is free of survivorship bias.
+
+The manifest carries per-file record counts and content hashes plus an
+overall hash over the DATA (not the wall-clock timestamps), so the same
+database state exports to the same manifest_hash. Published corpus
+versions are immutable — bump the version, never overwrite.
+
+Scope note: quotes/depth are the LOCK-SNAPSHOT evidence (the frozen
+T-10 books), not the routine observation stream — the research-relevant
+set, and bounded. This is stated in the manifest.
+"""
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+from datetime import datetime, timezone
+
+from src.live import audit as live_audit
+from src.live.db import get_session, plane_ready
+from src.live.models import (Competition, Fixture, MarketContract,
+                             MarketDepthLevel, MarketEvent, MarketQuote,
+                             MarketSnapshot, ModelInputArtifact,
+                             ModelVersion, PredictionContract,
+                             PredictionRun, Team, TeamAlias)
+
+CORPUS_SCHEMA = "corpus-v1"
+_GIT_REV = os.getenv("RAILWAY_GIT_COMMIT_SHA", "")[:40]
+
+
+def _now():
+    return datetime.now(timezone.utc)
+
+
+def _dump(obj) -> dict:
+    """Generic column -> JSON-safe dict for any live-plane row."""
+    from sqlalchemy import inspect as _inspect
+    out = {}
+    for c in _inspect(obj).mapper.column_attrs:
+        v = getattr(obj, c.key)
+        if isinstance(v, datetime):
+            v = (v if v.tzinfo else v.replace(tzinfo=timezone.utc)).isoformat()
+        out[c.key] = v
+    return out
+
+
+def build_corpus(version: str = "mls-shadow-2026-v1") -> dict:
+    """Read the live plane into an in-memory, self-contained bundle +
+    manifest. Deterministic for a given DB state (manifest_hash covers
+    data, not timestamps)."""
+    if not plane_ready():
+        return {"skipped": "dormant"}
+    s = get_session()
+    try:
+        comp = "mls-2026"
+        fixtures = s.query(Fixture).filter_by(
+            competition_slug=comp).all()
+        fixture_ids = {f.id for f in fixtures}
+        runs = s.query(PredictionRun).filter(
+            PredictionRun.fixture_id.in_(fixture_ids)).all()
+        run_ids = {r.id for r in runs}
+        artifact_ids = {r.model_input_artifact_id for r in runs
+                        if r.model_input_artifact_id}
+        contracts = [c for c in s.query(PredictionContract).all()
+                     if c.prediction_run_id in run_ids]
+        events = s.query(MarketEvent).filter_by(
+            competition_slug=comp).all()
+        event_ids = {e.id for e in events}
+        mcontracts = [c for c in s.query(MarketContract).all()
+                      if c.market_event_id in event_ids]
+        snapshots = [sn for sn in s.query(MarketSnapshot).all()
+                     if sn.fixture_id in fixture_ids]
+        snap_ids = {sn.id for sn in snapshots}
+        # RESEARCH scope: quotes frozen into a lock snapshot (+ depth)
+        quotes = [q for q in s.query(MarketQuote).all()
+                  if q.market_snapshot_id in snap_ids]
+        quote_ids = {q.id for q in quotes}
+        depth = [d for d in s.query(MarketDepthLevel).all()
+                 if d.market_quote_id in quote_ids]
+
+        sections = {
+            "competitions.json": [_dump(x) for x in
+                                  s.query(Competition).all()],
+            "teams.json": [_dump(x) for x in s.query(Team).filter_by(
+                competition_slug=comp).all()],
+            "team_aliases.json": [_dump(x) for x in
+                                  s.query(TeamAlias).all()],
+            "fixtures.json": [_dump(x) for x in fixtures],
+            "model_versions.json": [_dump(x) for x in
+                                    s.query(ModelVersion).all()],
+            "model_input_artifacts.json": [
+                _dump(x) for x in s.query(ModelInputArtifact).all()
+                if x.id in artifact_ids],
+            "prediction_runs.json": [_dump(x) for x in runs],
+            "prediction_contracts.json": [_dump(x) for x in contracts],
+            "market_events.json": [_dump(x) for x in events],
+            "market_contracts.json": [_dump(x) for x in mcontracts],
+            "market_snapshots.json": [_dump(x) for x in snapshots],
+            "market_quotes.json": [_dump(x) for x in quotes],
+            "market_depth_levels.json": [_dump(x) for x in depth],
+            # audit carries missed_locks + failed_snapshots = the
+            # anti-survivorship-bias record
+            "audit.json": live_audit.lock_audit(),
+        }
+        files = {}
+        for name, data in sections.items():
+            body = json.dumps(data, sort_keys=True, ensure_ascii=False)
+            files[name] = {
+                "records": len(data) if isinstance(data, list) else 1,
+                "sha256": hashlib.sha256(body.encode()).hexdigest(),
+            }
+        audit_summary = (sections["audit.json"].get("summary")
+                         if isinstance(sections["audit.json"], dict)
+                         else {})
+        counts = {
+            "fixtures": len(fixtures),
+            "completed_fixtures": sum(1 for f in fixtures
+                                      if f.status == "post"),
+            "prediction_runs": len(runs),
+            "canonical_locks": sum(1 for r in runs
+                                   if r.run_type == "t10"
+                                   and r.canonical
+                                   and r.status == "complete"),
+            "input_artifacts": len(artifact_ids),
+            "lock_snapshots": len(snapshots),
+            "frozen_quotes": len(quotes),
+            "depth_rows": len(depth),
+            "missed_locks": audit_summary.get("missed_locks", 0),
+            "failed_snapshots": audit_summary.get("failed_snapshots", 0),
+        }
+        manifest = {
+            "corpus_version": version,
+            "schema_version": CORPUS_SCHEMA,
+            "created_at": _now().isoformat(),
+            "db_cutoff": _now().isoformat(),
+            "backend_revision": _GIT_REV,
+            "model_versions": [m["name"] for m in
+                               sections["model_versions.json"]],
+            "quote_scope": "lock_snapshot_only",
+            "files": files,
+            "counts": counts,
+        }
+        # hash over DATA (file hashes + counts), NOT the timestamps
+        core = json.dumps({"files": files, "counts": counts,
+                           "corpus_version": version,
+                           "schema_version": CORPUS_SCHEMA},
+                          sort_keys=True)
+        manifest["manifest_hash"] = hashlib.sha256(
+            core.encode()).hexdigest()
+        return {"manifest": manifest, "sections": sections}
+    finally:
+        s.close()
+
+
+def export_corpus(out_dir: str,
+                  version: str = "mls-shadow-2026-v1") -> dict:
+    """Write the corpus to a directory (one JSON file per section +
+    manifest.json). Refuses to overwrite an existing directory —
+    published versions are immutable. Returns the manifest."""
+    bundle = build_corpus(version)
+    if "manifest" not in bundle:
+        return bundle
+    if os.path.exists(out_dir) and os.listdir(out_dir):
+        raise FileExistsError(
+            f"{out_dir} is not empty — corpus versions are immutable, "
+            f"bump the version instead of overwriting")
+    os.makedirs(out_dir, exist_ok=True)
+    for name, data in bundle["sections"].items():
+        with open(os.path.join(out_dir, name), "w",
+                  encoding="utf-8") as fh:
+            json.dump(data, fh, sort_keys=True, ensure_ascii=False,
+                      indent=1)
+    with open(os.path.join(out_dir, "manifest.json"), "w",
+              encoding="utf-8") as fh:
+        json.dump(bundle["manifest"], fh, sort_keys=True, indent=1)
+    return bundle["manifest"]

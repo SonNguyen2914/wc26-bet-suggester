@@ -216,6 +216,26 @@ def mls_audit():
     return out or {"skipped": "dormant"}
 
 
+@app.get("/api/mls/corpus")
+def mls_corpus(full: bool = Query(False)):
+    """The prospective research corpus. Default returns the MANIFEST
+    (version, counts, per-file hashes, manifest hash); ?full=1 returns
+    the entire self-contained bundle for offline analysis. Public
+    read-only — this is the downloadable evidence base. 60s cache on
+    the manifest."""
+    from src.mls import _cached
+    try:
+        from src.live import corpus as live_corpus
+        if full:
+            return live_corpus.build_corpus()
+        bundle = _cached("mls_corpus_manifest", 60,
+                         lambda: live_corpus.build_corpus())
+        return bundle.get("manifest", bundle)
+    except Exception as exc:
+        print(f"[mls] corpus failed: {exc}")
+        raise HTTPException(503, "corpus unavailable")
+
+
 @app.get("/api/mls/replay/{run_id}")
 def mls_replay(run_id: str):
     """Independent reproducibility check: replay a run from its stored
