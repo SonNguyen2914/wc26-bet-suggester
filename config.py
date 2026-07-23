@@ -226,6 +226,12 @@ REAL_MONEY_SIGNALS_ENABLED = _parse_flag(
 # "it is false" is testable, not because anything reads it to act.
 AUTO_EXECUTION_ENABLED = _parse_flag(
     os.getenv("AUTO_EXECUTION_ENABLED"), False, "AUTO_EXECUTION_ENABLED")
+# Paper trading runs in SHADOW to build the execution-evidence base. It
+# simulates fills against frozen books and NEVER places a real order —
+# it has no coupling to REAL_MONEY_SIGNALS_ENABLED whatsoever. On by
+# default in shadow; a kill switch, not a money gate.
+PAPER_TRADING_ENABLED = _parse_flag(
+    os.getenv("PAPER_TRADING_ENABLED"), True, "PAPER_TRADING_ENABLED")
 
 # --- Live data plane (PostgreSQL; the archive DB stays untouched) ---------
 # Absent = the live plane is DORMANT: no engine is created, no MLS

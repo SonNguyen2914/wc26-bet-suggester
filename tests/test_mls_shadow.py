@@ -367,6 +367,151 @@ class TestLineupPlane:
         assert live_session.query(Player).count() == 22
 
 
+class TestPaperFillModel:
+    def test_book_walk_partial_and_slippage(self):
+        from src.live import paper
+        # ladder: 20 @ 55c, 30 @ 56c, 40 @ 58c (best first)
+        ladder = [(55, 20), (56, 30), (58, 40)]
+        # request 100 but only 90 available -> partial
+        r = paper.simulate_fill(ladder, 100)
+        assert r["filled"] == 90
+        assert r["best_ask_c"] == 55
+        assert r["levels"] == 3
+        # weighted avg = (20*55 + 30*56 + 40*58)/90
+        assert r["avg_price_c"] == round((20*55 + 30*56 + 40*58) / 90)
+        assert r["slippage_c"] == r["avg_price_c"] - 55
+        # deep enough book -> full fill, no book exhaustion
+        r2 = paper.simulate_fill(ladder, 20)
+        assert r2["filled"] == 20 and r2["avg_price_c"] == 55
+        assert r2["slippage_c"] == 0
+
+    def test_yes_buy_ladder_from_no_depth(self):
+        from src.live import paper
+        from types import SimpleNamespace as NS
+        # NO bids at 44,45 -> YES asks at 56,55 (best = 55)
+        depth = [NS(side="no", price_c=44, size=30),
+                 NS(side="no", price_c=45, size=20),
+                 NS(side="yes", price_c=54, size=99)]  # ignored for buys
+        quote = NS(yes_ask_c=55, yes_ask_size=10)
+        ladder = paper.yes_buy_ladder(quote, depth)
+        assert ladder == [(55, 20), (56, 30)]     # best (lowest ask) first
+        # no depth -> fall back to the top quote
+        assert paper.yes_buy_ladder(quote, []) == [(55, 10)]
+
+
+class TestPaperTrading:
+    def _lock_with_book(self, live_session, ask=45, bid=44,
+                        exec_ready=True, model_p=0.60):
+        """A canonical lock whose game 3-way has a quote + depth, and a
+        model probability we control, so the net edge is deterministic."""
+        from src.live.models import (Competition, Fixture, MarketContract,
+                                     MarketEvent, MarketDepthLevel,
+                                     MarketQuote, MarketSnapshot,
+                                     ModelVersion, PredictionContract,
+                                     PredictionRun)
+        s = live_session   # the fixture already seeded Competition
+        s.add(ModelVersion(name=model_mls.MODEL_NAME,
+                           approved_for_shadow=True))
+        fx = Fixture(id=1, competition_slug="mls-2026",
+                     espn_event_id="p1", status="pre",
+                     current_kickoff_utc=datetime.now(UTC))
+        snap = MarketSnapshot(id=1, fixture_id=1,
+                              captured_at=datetime.now(UTC),
+                              status="complete", execution_ready=exec_ready,
+                              oldest_quote_age_seconds=30)
+        ev = MarketEvent(id=1, competition_slug="mls-2026",
+                         kalshi_event_ticker="KXMLSGAME-x", series="KXMLSGAME",
+                         fixture_id=1, mapping_approved=True)
+        mc = MarketContract(id=1, market_event_id=1,
+                            ticker="KXMLSGAME-x-H", outcome_key="home_win")
+        q = MarketQuote(id=1, market_contract_id=1,
+                        captured_at=datetime.now(UTC),
+                        yes_ask_c=ask, yes_bid_c=bid, yes_ask_size=50,
+                        market_snapshot_id=1)
+        run = PredictionRun(id="lock", fixture_id=1, run_type="t10",
+                            status="complete", canonical=True,
+                            market_snapshot_id=1)
+        s.add_all([fx, snap, ev, mc, q, run])
+        s.flush()
+        # depth: NO bids -> a buyable YES ladder
+        s.add_all([MarketDepthLevel(market_quote_id=1, side="no",
+                                    price_c=100 - ask, size=30),
+                   MarketDepthLevel(market_quote_id=1, side="no",
+                                    price_c=100 - ask - 1, size=200)])
+        s.add(PredictionContract(prediction_run_id="lock",
+                                 market_contract_id=1,
+                                 market_quote_id=1, outcome_key="home_win",
+                                 raw_probability=model_p))
+        for ok in ("draw", "away_win"):
+            s.add(PredictionContract(prediction_run_id="lock",
+                                     outcome_key=ok, raw_probability=0.2))
+        s.commit()
+        return fx
+
+    def test_positive_edge_fills_deterministically(self, live_session,
+                                                   monkeypatch):
+        from src.live import paper
+        from src.live.models import PaperFill, PaperSignal
+        monkeypatch.setattr(config, "PAPER_TRADING_ENABLED", True)
+        self._lock_with_book(live_session, ask=45, model_p=0.60)
+        r1 = paper.paper_trade_lock("lock")
+        assert r1["fills"] == 1
+        fill = live_session.query(PaperFill).one()
+        sig = live_session.query(PaperSignal).filter_by(
+            decision="fill").one()
+        # net edge = 0.60 - (0.45 + fee) > 0.03
+        assert sig.net_edge > 0.03
+        assert fill.filled_contracts == 100 and fill.best_ask_c == 45
+        assert fill.cost_c > 0 and fill.fee_c > 0
+        # idempotent + DETERMINISTIC replay: a second run adds nothing
+        r2 = paper.paper_trade_lock("lock")
+        assert r2["signals"] == 0
+        assert live_session.query(PaperFill).count() == 1
+
+    def test_gates_reject_with_reasons(self, live_session, monkeypatch):
+        from src.live import paper
+        from src.live.models import PaperFill, PaperSignal
+        monkeypatch.setattr(config, "PAPER_TRADING_ENABLED", True)
+        # model_p just above ask -> net edge below the 0.03 floor
+        self._lock_with_book(live_session, ask=45, model_p=0.47)
+        paper.paper_trade_lock("lock")
+        sig = live_session.query(PaperSignal).filter_by(
+            outcome_key="home_win").one()
+        assert sig.decision == "reject"
+        assert sig.reject_reason == "net_edge_too_low"
+        assert live_session.query(PaperFill).count() == 0
+
+    def test_not_execution_ready_rejects(self, live_session, monkeypatch):
+        from src.live import paper
+        from src.live.models import PaperSignal
+        monkeypatch.setattr(config, "PAPER_TRADING_ENABLED", True)
+        self._lock_with_book(live_session, model_p=0.60, exec_ready=False)
+        paper.paper_trade_lock("lock")
+        sig = live_session.query(PaperSignal).filter_by(
+            outcome_key="home_win").one()
+        assert sig.decision == "reject"
+        assert sig.reject_reason == "not_execution_ready"
+
+    def test_settlement_pays_hits_and_records_pnl(self, live_session,
+                                                  monkeypatch):
+        from src.live import paper
+        from src.live.models import Fixture, PaperFill
+        monkeypatch.setattr(config, "PAPER_TRADING_ENABLED", True)
+        fx = self._lock_with_book(live_session, ask=45, model_p=0.60)
+        paper.paper_trade_lock("lock")
+        # fixture finishes a home win -> the home_win bet hits
+        fx.status = "post"; fx.home_goals = 2; fx.away_goals = 0
+        live_session.commit()
+        r = paper.settle_paper()
+        assert r["settled"] == 1
+        fill = live_session.query(PaperFill).one()
+        assert fill.status == "settled" and fill.outcome_hit is True
+        assert fill.payout_c == fill.filled_contracts * 100
+        assert fill.pnl_c == fill.payout_c - fill.cost_c
+        # settle is idempotent
+        assert paper.settle_paper()["settled"] == 0
+
+
 class TestModelLadderEval:
     def test_analytic_3way_is_exact_and_normalized(self):
         from src.live import model_eval

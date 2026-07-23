@@ -254,12 +254,20 @@ def mls_boot() -> None:
 
 
 def mls_window_job() -> None:
-    """Rolling fixture refresh: reschedules, status flips, final scores."""
+    """Rolling fixture refresh: reschedules, status flips, final scores;
+    then settle any paper fills whose fixtures just completed."""
     try:
         from src.live import ingest
         ingest.refresh_window()
     except Exception as exc:
         print(f"[mls-window] error: {exc}")
+    try:
+        from src.live import paper
+        r = paper.settle_paper()
+        if r.get("settled"):
+            print(f"[mls-paper] settled {r['settled']} fills")
+    except Exception as exc:
+        print(f"[mls-paper] settle error: {exc}")
 
 
 def mls_markets_job() -> None:

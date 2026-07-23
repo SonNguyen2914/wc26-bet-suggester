@@ -279,7 +279,14 @@ def t10_locks() -> dict:
                 continue
             if run:
                 locked += 1
-                # 13. alert only AFTER commit, PAPER-labeled
+                # 13. paper trading against the frozen book — PAPER only,
+                # isolated (a paper failure must not undo the lock)
+                try:
+                    from src.live import paper
+                    paper.paper_trade_lock(run.id)
+                except Exception as exc:
+                    print(f"[runs] t10 paper {f.espn_event_id}: {exc}")
+                # 14. alert only AFTER commit, PAPER-labeled
                 try:
                     from src.alerts import send_alert
                     o = (s.query(PredictionContract)

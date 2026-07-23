@@ -28,8 +28,9 @@ from src.live.models import (Competition, Fixture, LineupEntry,
                              LineupSnapshot, MarketContract,
                              MarketDepthLevel, MarketEvent, MarketQuote,
                              MarketSnapshot, ModelInputArtifact,
-                             ModelVersion, Player, PredictionContract,
-                             PredictionRun, Team, TeamAlias)
+                             ModelVersion, PaperFill, PaperSignal, Player,
+                             PredictionContract, PredictionRun, Team,
+                             TeamAlias)
 
 CORPUS_SCHEMA = "corpus-v1"
 _GIT_REV = os.getenv("RAILWAY_GIT_COMMIT_SHA", "")[:40]
@@ -113,6 +114,12 @@ def build_corpus(version: str = "mls-shadow-2026-v1") -> dict:
             "players.json": [_dump(x) for x in s.query(Player).all()],
             "lineup_snapshots.json": [_dump(x) for x in lineups],
             "lineup_entries.json": [_dump(x) for x in lineup_entries],
+            # paper trading — signals (incl. rejections) + fills, so the
+            # execution-strategy metrics reproduce from the corpus too
+            "paper_signals.json": [_dump(x) for x in
+                                   s.query(PaperSignal).all()],
+            "paper_fills.json": [_dump(x) for x in
+                                 s.query(PaperFill).all()],
             # audit carries missed_locks + failed_snapshots = the
             # anti-survivorship-bias record
             "audit.json": live_audit.lock_audit(),
@@ -144,6 +151,8 @@ def build_corpus(version: str = "mls-shadow-2026-v1") -> dict:
             "failed_snapshots": audit_summary.get("failed_snapshots", 0),
             "lineup_snapshots": len(lineups),
             "players": len(sections["players.json"]),
+            "paper_signals": len(sections["paper_signals.json"]),
+            "paper_fills": len(sections["paper_fills.json"]),
         }
         manifest = {
             "corpus_version": version,

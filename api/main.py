@@ -216,6 +216,20 @@ def mls_audit():
     return out or {"skipped": "dormant"}
 
 
+@app.get("/api/mls/paper")
+def mls_paper():
+    """The paper-trading ledger P&L: signals, fills, rejections (with
+    reasons), and settled economics. PAPER only — execution evidence
+    against frozen T-10 books, never a real position. 30s cache."""
+    from src.mls import _cached
+    try:
+        from src.live import paper
+        return _cached("mls_paper", 30, paper.paper_summary) or {}
+    except Exception as exc:
+        print(f"[mls] paper summary failed: {exc}")
+        raise HTTPException(503, "paper summary unavailable")
+
+
 @app.get("/api/mls/model-eval")
 def mls_model_eval():
     """The model-development ladder evaluation: M0/M1/M2 scored with

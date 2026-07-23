@@ -372,3 +372,61 @@ class MarketDepthLevel(LiveBase):
     side = Column(String(8), nullable=False)        # yes | no
     price_c = Column(Integer, nullable=False)
     size = Column(Integer, nullable=False)
+
+
+class PaperSignal(LiveBase):
+    """A paper-trading DECISION on one contract of a canonical lock
+    (V8.1 evaluation Phase 7). PAPER ONLY — no real order is ever
+    placed. Records the model's read and whether the execution gates
+    passed; a rejection keeps its reason so the ledger has no
+    survivorship bias. One per (run, contract)."""
+    __tablename__ = "paper_signal"
+    id = Column(Integer, primary_key=True)
+    prediction_run_id = Column(String(36),
+                               ForeignKey("prediction_run.id"),
+                               nullable=False)
+    market_contract_id = Column(Integer,
+                                ForeignKey("market_contract.id"))
+    market_quote_id = Column(Integer, ForeignKey("market_quote.id"))
+    fixture_id = Column(Integer, ForeignKey("fixture.id"))
+    outcome_key = Column(String(32))
+    policy_version = Column(String(24))
+    model_probability = Column(Float)
+    ask_c = Column(Integer)
+    fee_c = Column(Integer)
+    net_edge = Column(Float)             # model_p - (ask + fee)
+    decision = Column(String(12))        # fill | reject
+    reject_reason = Column(String(48))
+    created_at = Column(DateTime(timezone=True))
+    __table_args__ = (
+        UniqueConstraint("prediction_run_id", "market_contract_id",
+                         name="uq_paper_signal_run_contract"),
+    )
+
+
+class PaperFill(LiveBase):
+    """The simulated execution of a filled PaperSignal against the
+    FROZEN lock book — realistic: ask entry walking real depth, fees,
+    slippage, partial fills. Settled once the fixture resolves.
+    Deterministic from the frozen snapshot (the replay acceptance)."""
+    __tablename__ = "paper_fill"
+    id = Column(Integer, primary_key=True)
+    paper_signal_id = Column(Integer, ForeignKey("paper_signal.id"),
+                             nullable=False)
+    requested_contracts = Column(Integer)
+    filled_contracts = Column(Integer)
+    avg_fill_price_c = Column(Integer)
+    best_ask_c = Column(Integer)
+    slippage_c = Column(Integer)         # avg fill - best ask
+    fee_c = Column(Integer)
+    cost_c = Column(Integer)             # contracts*price + fee
+    levels_consumed = Column(Integer)
+    latency_ms = Column(Integer)         # recorded assumption
+    reason = Column(String(48))          # filled | partial | no_depth
+    created_at = Column(DateTime(timezone=True))
+    # settlement, once the fixture is post
+    status = Column(String(12), default="open")   # open | settled
+    outcome_hit = Column(Boolean)
+    payout_c = Column(Integer)
+    pnl_c = Column(Integer)
+    settled_at = Column(DateTime(timezone=True))
