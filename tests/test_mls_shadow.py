@@ -184,6 +184,13 @@ class TestModelFit:
         assert model_mls.seed_for(10, "t10") != model_mls.seed_for(10, "scheduled")
         assert model_mls.seed_for(10, "t10") != model_mls.seed_for(11, "t10")
 
+    def test_seed_fits_signed_32bit(self):
+        # prediction_run.simulation_seed is INTEGER on PostgreSQL —
+        # an unmasked seed >= 2^31 killed the prod boot sweep (Jul 23)
+        for fid in range(1, 600):
+            for rt in ("scheduled", "t10", "backtest"):
+                assert 0 <= model_mls.seed_for(fid, rt) < 2**31
+
     def test_predict_requires_min_games_and_is_deterministic(self):
         fixtures = [_fx(i, 5 + i, 1, 2, 2, 1) for i in range(6)]
         m = model_mls.fit(fixtures, datetime.now(UTC))

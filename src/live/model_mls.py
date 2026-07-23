@@ -126,9 +126,13 @@ def _raw(team_id: int, model: dict, venue: str) -> dict | None:
 
 
 def seed_for(fixture_id: int, run_type: str) -> int:
+    """Deterministic per-(fixture, run_type) seed, masked to 31 bits:
+    prediction_run.simulation_seed is a SIGNED 32-bit integer on
+    PostgreSQL, and an unmasked sha prefix >= 2^31 killed every boot
+    run sweep on prod (Jul 23) while sqlite happily stored it."""
     h = hashlib.sha256(f"{MODEL_NAME}:{fixture_id}:{run_type}"
                       .encode()).hexdigest()
-    return int(h[:8], 16)
+    return int(h[:8], 16) & 0x7FFFFFFF
 
 
 def predict_fixture(fixture, model: dict, run_type: str = "scheduled",

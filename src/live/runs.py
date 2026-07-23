@@ -112,8 +112,14 @@ def scheduled_runs(horizon_hours: float = 168.0) -> dict:
                           ) < timedelta(hours=4):
                 skipped += 1
                 continue
-            if _write_run(s, f, "scheduled", model):
-                created += 1
+            # one bad fixture must not kill the whole sweep — the prod
+            # boot of Jul 23 lost all 15 runs to a single insert error
+            try:
+                if _write_run(s, f, "scheduled", model):
+                    created += 1
+            except Exception as exc:
+                s.rollback()
+                print(f"[runs] fixture {f.espn_event_id} failed: {exc}")
         return {"created": created, "fresh_skipped": skipped}
     except Exception as exc:
         s.rollback()
@@ -149,8 +155,15 @@ def t10_locks() -> dict:
                 continue
             # 1. freeze the book first (its own transaction/observation)
             markets.capture_quotes(fixture_id=f.id)
-            # 2-12. the transactional run
-            run = _write_run(s, f, "t10", model, canonical=True)
+            # 2-12. the transactional run (isolated per fixture: one
+            # failed lock must stay visibly missing, not take the rest
+            # of the slate down with it)
+            try:
+                run = _write_run(s, f, "t10", model, canonical=True)
+            except Exception as exc:
+                s.rollback()
+                print(f"[runs] t10 {f.espn_event_id} failed: {exc}")
+                continue
             if run:
                 locked += 1
                 # 13. alert only AFTER commit, PAPER-labeled
