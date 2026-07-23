@@ -180,25 +180,44 @@ def standings() -> list[dict]:
     return _cached("standings", 300, fetch) or []
 
 
-def game_books(limit: int = 30) -> list[dict]:
-    """Open KXMLSGAME books from Kalshi's public API. 60s cache."""
+TRADEABLE = ("active", "open", "initialized")
+
+
+def _game_events(limit: int = 60) -> list[dict]:
+    """The KXMLSGAME event list — one cheap call, 120s cache. NO status
+    filter: an in-play fixture's event stops reporting "open" while its
+    markets keep trading as "active" (found live on MLS night one — the
+    CLB-NYC book was active at 38/33/30 while the open-filtered list
+    omitted it). Tradability is judged per MARKET, at market-fetch time."""
     def fetch():
         d = _get_json(f"{KALSHI_BASE}/events",
-                      {"series_ticker": KALSHI_MLS_GAME, "limit": limit,
-                       "status": "open"})
-        if not d:
+                      {"series_ticker": KALSHI_MLS_GAME, "limit": limit})
+        return (d.get("events") or []) if d else None
+    return _cached("events", 120, fetch) or []
+
+
+def event_markets(event_ticker: str) -> list[dict]:
+    """One event's tradeable markets, 15s cache — cheap enough for the
+    match page's 30s poll to ride."""
+    def fetch():
+        md = _get_json(f"{KALSHI_BASE}/markets",
+                       {"event_ticker": event_ticker, "limit": 20})
+        if md is None:
             return None
-        events = d.get("events") or []
-        markets: dict[str, list[dict]] = {}
-        for ev in events:
-            md = _get_json(f"{KALSHI_BASE}/markets",
-                           {"event_ticker": ev["event_ticker"],
-                            "limit": 20})
-            markets[ev["event_ticker"]] = (md.get("markets") or []
-                                           if md else [])
-            time.sleep(0.2)            # polite gap, same as the WC path
-        return parse_game_books(events, markets)
-    return _cached("books", 60, fetch) or []
+        return [m for m in (md.get("markets") or [])
+                if m.get("status") in TRADEABLE]
+    return _cached(f"mkts:{event_ticker}", 15, fetch) or []
+
+
+def game_books(limit: int = 60) -> list[dict]:
+    """Every fixture's tradeable book (the dashboard grid). Assembled
+    from the shared event list + per-event market caches, so the match
+    page and the dashboard amortize the same fetches."""
+    events = _game_events(limit)
+    markets = {ev["event_ticker"]: event_markets(ev["event_ticker"])
+               for ev in events}
+    books = parse_game_books(events, markets)
+    return [b for b in books if b["markets"]]   # drop settled fixtures
 
 
 def cup_futures() -> list[dict]:
@@ -292,6 +311,8 @@ def parse_summary(d: dict) -> dict:
         "away": sides.get("away", {}),
         "stats": stats,
         "events": events,
+        "scouting": {"last_five": _parse_last_five(d),
+                     "head_to_head": _parse_h2h(d)},
     }
 
 
@@ -301,3 +322,119 @@ def match_summary(event_id: str) -> dict | None:
         d = _get_json(f"{ESPN_BASE}/summary", {"event": event_id})
         return parse_summary(d) if d else None
     return _cached(f"sum:{event_id}", 30, fetch)
+
+
+# --- match hub: scouting + the fixture's own Kalshi book -------------------
+
+def _parse_last_five(d: dict) -> list[dict]:
+    """lastFiveGames -> per team: form string + recent results."""
+    out = []
+    for t in d.get("lastFiveGames") or []:
+        evs = t.get("events") or []
+        out.append({
+            "team": (t.get("team") or {}).get("displayName"),
+            "abbrev": (t.get("team") or {}).get("abbreviation"),
+            "form": " ".join(e.get("gameResult", "?") for e in evs[:5]),
+            "games": [{
+                "result": e.get("gameResult"),
+                "score": e.get("score"),
+                "at_vs": e.get("atVs"),
+                "opponent": (e.get("opponent") or {}).get("abbreviation"),
+                "date": e.get("gameDate"),
+            } for e in evs[:5]],
+        })
+    return out
+
+
+def _parse_h2h(d: dict) -> list[dict]:
+    """headToHeadGames -> recent meetings, from the first team's view."""
+    groups = d.get("headToHeadGames") or []
+    if not groups:
+        return []
+    team = (groups[0].get("team") or {}).get("abbreviation")
+    out = []
+    for e in (groups[0].get("events") or [])[:6]:
+        out.append({
+            "perspective": team,
+            "result": e.get("gameResult"),
+            "home_score": e.get("homeTeamScore"),
+            "away_score": e.get("awayTeamScore"),
+            "at_vs": e.get("atVs"),
+            "opponent": (e.get("opponent") or {}).get("abbreviation"),
+            "date": e.get("gameDate"),
+        })
+    return out
+
+
+# Kalshi title-name -> ESPN displayName bridges that substring matching
+# cannot cross. Verified against the live KXMLSGAME slate 2026-07-22.
+_KALSHI_ALIASES = {
+    "los angeles g": "la galaxy",
+    "los angeles f": "los angeles fc",
+    "saint louis": "st louis city",
+    "new york rb": "new york red bulls",
+}
+
+
+def _norm_name(s: str) -> str:
+    import unicodedata
+    s = unicodedata.normalize("NFKD", s or "")
+    s = "".join(c for c in s if not unicodedata.combining(c))
+    return s.lower().replace(".", "").strip()
+
+
+def _side_matches(kalshi_side: str, espn_name: str) -> bool:
+    k, e = _norm_name(kalshi_side), _norm_name(espn_name)
+    if not k or not e:
+        return False
+    return k in e or _KALSHI_ALIASES.get(k, "\x00") in e
+
+
+def _ticker_et_date(event_ticker: str) -> str | None:
+    """KXMLSGAME-26JUL25SJLAG -> '26JUL25' (Kalshi dates are US-Eastern)."""
+    import re
+    m = re.match(r"KXMLSGAME-(\d{2}[A-Z]{3}\d{2})", event_ticker or "")
+    return m.group(1) if m else None
+
+
+def _fixture_et_date(iso_date: str) -> str | None:
+    """ESPN UTC kickoff -> the Kalshi-style US-Eastern date segment."""
+    from datetime import datetime, timedelta, timezone
+    try:
+        dt = datetime.fromisoformat(iso_date.replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+    et = dt.astimezone(timezone(timedelta(hours=-4)))     # EDT (season)
+    return et.strftime("%y%b%d").upper()
+
+
+def find_book(fixture_date: str, home_name: str, away_name: str,
+              books: list[dict] | None = None) -> dict | None:
+    """This fixture's KXMLSGAME book: ET-date segment must match the
+    ticker (teams meet twice inside one open window — SJ played Jul 22
+    AND Jul 25 on the day this shipped), then both title sides must
+    match the ESPN names."""
+    want = _fixture_et_date(fixture_date)
+    if books is not None:               # injected (tests)
+        pool = books
+    else:
+        # two cheap calls instead of a full sweep: match on the EVENT
+        # list first, then fetch only this fixture's markets
+        pool = [{"event_ticker": ev.get("event_ticker"),
+                 "title": ev.get("title"), "markets": None}
+                for ev in _game_events()]
+    for b in pool:
+        if _ticker_et_date(b.get("event_ticker", "")) != want:
+            continue
+        title = b.get("title") or ""
+        if " vs " not in title:
+            continue
+        k_home, k_away = title.split(" vs ", 1)
+        if _side_matches(k_home, home_name) and \
+                _side_matches(k_away, away_name):
+            if b["markets"] is None:
+                b = parse_game_books(
+                    [b], {b["event_ticker"]:
+                          event_markets(b["event_ticker"])})[0]
+            return b if b["markets"] else None
+    return None

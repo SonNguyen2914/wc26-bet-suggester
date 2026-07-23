@@ -123,3 +123,58 @@ class TestSummaryParser:
     def test_tolerates_prematch_empty_boxscore(self):
         out = mls.parse_summary({"header": {}})
         assert out["stats"] == [] and out["events"] == []
+
+
+class TestBookMatcher:
+    _ROW = [{"ticker": "X", "label": "X", "yes_ask": "0.50",
+             "yes_bid": "0.48", "status": "active"}]
+    _BOOKS = [
+        {"event_ticker": "KXMLSGAME-26JUL25SJLAG",
+         "title": "San Jose vs Los Angeles G", "markets": _ROW},
+        {"event_ticker": "KXMLSGAME-26JUL22SJORL",
+         "title": "San Jose vs Orlando", "markets": _ROW},
+        {"event_ticker": "KXMLSGAME-26JUL22LAGSTL",
+         "title": "Los Angeles G vs Saint Louis", "markets": _ROW},
+        {"event_ticker": "KXMLSGAME-26JUL22NYRBCLT",
+         "title": "New York RB vs Charlotte", "markets": _ROW},
+    ]
+
+    def test_date_disambiguates_double_fixtures(self):
+        # San Jose appears Jul 22 AND Jul 25 — the ET date must decide.
+        b = mls.find_book("2026-07-22T23:30Z", "San Jose Earthquakes",
+                          "Orlando City SC", self._BOOKS)
+        assert b["event_ticker"].endswith("26JUL22SJORL")
+        b = mls.find_book("2026-07-26T02:30Z", "San Jose Earthquakes",
+                          "LA Galaxy", self._BOOKS)     # 02:30Z = Jul 25 ET
+        assert b["event_ticker"].endswith("26JUL25SJLAG")
+
+    def test_aliases_bridge_kalshi_names(self):
+        b = mls.find_book("2026-07-22T23:30Z", "LA Galaxy",
+                          "St. Louis CITY SC", self._BOOKS)
+        assert b["event_ticker"].endswith("LAGSTL")
+        b = mls.find_book("2026-07-22T23:30Z", "New York Red Bulls",
+                          "Charlotte FC", self._BOOKS)
+        assert b["event_ticker"].endswith("NYRBCLT")
+
+    def test_no_match_returns_none(self):
+        assert mls.find_book("2026-07-22T23:30Z", "Inter Miami CF",
+                             "Chicago Fire FC", self._BOOKS) is None
+
+
+class TestScoutingParsers:
+    def test_last_five_and_h2h(self):
+        d = {"lastFiveGames": [{"team": {"displayName": "Columbus Crew",
+                                         "abbreviation": "CLB"},
+                                "events": [{"gameResult": "L", "score": "3-0",
+                                            "atVs": "@", "gameDate": "2026-05-10",
+                                            "opponent": {"abbreviation": "NYC"}}]}],
+             "headToHeadGames": [{"team": {"abbreviation": "CLB"},
+                                  "events": [{"gameResult": "W",
+                                              "homeTeamScore": "1",
+                                              "awayTeamScore": "0",
+                                              "atVs": "vs", "gameDate": "2026-05-20",
+                                              "opponent": {"abbreviation": "NYC"}}]}]}
+        lf = mls._parse_last_five(d)
+        assert lf[0]["form"] == "L" and lf[0]["games"][0]["opponent"] == "NYC"
+        h = mls._parse_h2h(d)
+        assert h[0]["result"] == "W" and h[0]["perspective"] == "CLB"

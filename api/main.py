@@ -158,7 +158,15 @@ def mls_match(event_id: str):
     out = mls.match_summary(event_id)
     if out is None:
         raise HTTPException(502, "summary unavailable")
-    return {"match": out, "generated_at": utcnow().isoformat()}
+    book = None
+    try:
+        book = mls.find_book(out.get("date"),
+                             (out.get("home") or {}).get("name") or "",
+                             (out.get("away") or {}).get("name") or "")
+    except Exception as exc:            # the hub must not die on the book
+        print(f"[mls] book match failed for {event_id}: {exc}")
+    return {"match": out, "book": book,
+            "generated_at": utcnow().isoformat()}
 
 
 @app.get("/api/ready")
