@@ -1,0 +1,65 @@
+name: CI
+
+# V8.1 evaluation step 5 — real PostgreSQL in CI. Four clean production
+# migrations are good operational evidence; this makes the guarantee
+# automatic and blocking on every push, against a real server (SQLite
+# cannot validate partial unique indexes, the exact migration DDL,
+# transaction isolation, or concurrent canonical-lock creation).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: livetest
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      PG_BASE: postgresql://postgres:postgres@localhost:5432
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: SQLite unit suite (fast — PostgreSQL tests skip here)
+        run: python -m pytest -q
+
+      - name: Migration — empty PostgreSQL database to head
+        env:
+          LIVE_DATABASE_URL: ${{ env.PG_BASE }}/livetest
+        run: python -m alembic upgrade head
+
+      - name: Migration — previous release to head on PostgreSQL
+        run: |
+          psql "${PG_BASE}/postgres" -c "CREATE DATABASE prevrel;"
+          LIVE_DATABASE_URL="${PG_BASE}/prevrel" python -m alembic upgrade 9673668959a8
+          LIVE_DATABASE_URL="${PG_BASE}/prevrel" python -m alembic upgrade head
+          LIVE_DATABASE_URL="${PG_BASE}/prevrel" python -m alembic current | grep -q '(head)'
+
+      - name: PostgreSQL integration tests (index, uniqueness, restart, concurrency)
+        env:
+          PG_TEST_URL: ${{ env.PG_BASE }}/postgres
+        run: python -m pytest tests/test_postgres_integration.py -v
