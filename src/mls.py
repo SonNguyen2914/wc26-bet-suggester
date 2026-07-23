@@ -432,13 +432,16 @@ def _ticker_et_date(event_ticker: str) -> str | None:
 
 
 def _fixture_et_date(iso_date: str) -> str | None:
-    """ESPN UTC kickoff -> the Kalshi-style US-Eastern date segment."""
-    from datetime import datetime, timedelta, timezone
+    """ESPN UTC kickoff -> the Kalshi-style US-Eastern date segment.
+    Real wall-clock Eastern time: a fixed UTC-4 offset misdates
+    late-evening fixtures once DST ends Nov 1 (playoffs)."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
     try:
         dt = datetime.fromisoformat(iso_date.replace("Z", "+00:00"))
     except (TypeError, ValueError):
         return None
-    et = dt.astimezone(timezone(timedelta(hours=-4)))     # EDT (season)
+    et = dt.astimezone(ZoneInfo("America/New_York"))
     return et.strftime("%y%b%d").upper()
 
 

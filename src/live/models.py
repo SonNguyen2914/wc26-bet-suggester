@@ -194,6 +194,10 @@ class PredictionContract(LiveBase):
     market_quote_id = Column(Integer, ForeignKey("market_quote.id"))
     __table_args__ = (
         UniqueConstraint("prediction_run_id", "market_contract_id"),
+        # SQL NULLs are pairwise-distinct, so the constraint above never
+        # fired for unmapped contracts (V8 evaluation): the outcome key
+        # itself must be unique per run
+        UniqueConstraint("prediction_run_id", "outcome_key"),
     )
 
 
@@ -221,6 +225,26 @@ class MarketContract(LiveBase):
     outcome_key = Column(String(32))                # home_win|draw|away_win
 
 
+class MarketSnapshot(LiveBase):
+    """The atomic evidence header a T-10 lock points at (V8 evaluation
+    F1): one row per capture attempt, with expected-vs-actual coverage
+    counts and a status gate. A run may only become canonical against a
+    snapshot whose status is 'complete' — a zero-quote or partial
+    capture stays 'failed' and the lock visibly does not happen."""
+    __tablename__ = "market_snapshot"
+    id = Column(Integer, primary_key=True)
+    fixture_id = Column(Integer, ForeignKey("fixture.id"), nullable=False)
+    captured_at = Column(DateTime(timezone=True), nullable=False)
+    status = Column(String(12), nullable=False, default="writing")
+    provider_schema_version = Column(String(32))
+    events_expected = Column(Integer)
+    events_captured = Column(Integer)
+    contracts_expected = Column(Integer)
+    quotes_written = Column(Integer)
+    depth_rows_written = Column(Integer)
+    failure_reason = Column(Text)
+
+
 class MarketQuote(LiveBase):
     """Full-book quote in integer CENTS (fixed point, never binary
     float). YES ask derives from NO bid (1 - no_bid) and vice versa —
@@ -230,6 +254,8 @@ class MarketQuote(LiveBase):
     market_contract_id = Column(Integer,
                                 ForeignKey("market_contract.id"),
                                 nullable=False)
+    market_snapshot_id = Column(Integer,
+                                ForeignKey("market_snapshot.id"))
     captured_at = Column(DateTime(timezone=True), nullable=False)
     provider_timestamp = Column(DateTime(timezone=True))
     yes_bid_c = Column(Integer)

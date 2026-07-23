@@ -21,7 +21,8 @@ import requests
 from src.live import identity
 from src.live.db import get_session, plane_ready
 from src.live.models import (Fixture, MarketContract, MarketDepthLevel,
-                             MarketEvent, MarketQuote, SourceObservation)
+                             MarketEvent, MarketQuote, MarketSnapshot,
+                             SourceObservation)
 
 KALSHI = "https://api.elections.kalshi.com/trade-api/v2"
 SERIES = "KXMLSGAME"
@@ -91,8 +92,91 @@ def _kalshi_get(url: str, **kw):
     return r.json()
 
 
+def _kalshi_paged(url: str, params: dict, key: str,
+                  page_limit: int = 200, max_pages: int = 30) -> list:
+    """Cursor-complete list retrieval (V8 evaluation F6: single-page
+    calls silently truncated events and markets). Pages until the
+    provider's cursor is exhausted or the sanity cap trips."""
+    out: list = []
+    cursor = None
+    for _ in range(max_pages):
+        p = dict(params, limit=page_limit)
+        if cursor:
+            p["cursor"] = cursor
+        d = _kalshi_get(url, params=p)
+        out.extend(d.get(key) or [])
+        cursor = d.get("cursor")
+        if not cursor:
+            break
+    return out
+
+
+# --- current provider schema (verified live Jul 23 vs api docs) -----------
+# Prices arrive as integer cents AND/OR "*_dollars" strings; sizes,
+# volume and open interest as "*_fp" fixed-point strings; the order
+# book under "orderbook_fp" with dollar-string [price, size] pairs.
+PROVIDER_SCHEMA_VERSION = "kalshi-2026-07-fp"
+
+
+def _fp_int(m: dict, field: str) -> int | None:
+    """Fixed-point count field: prefer '{field}_fp' string, fall back
+    to the legacy integer name."""
+    v = m.get(f"{field}_fp")
+    if v is not None:
+        try:
+            return int(float(v))
+        except (TypeError, ValueError):
+            pass
+    v = m.get(field)
+    return v if isinstance(v, int) else None
+
+
+def _parse_ts(v) -> datetime | None:
+    if not v:
+        return None
+    try:
+        return datetime.fromisoformat(str(v).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _rules_hash(m: dict) -> str | None:
+    raw = (m.get("rules_primary") or "") + (m.get("rules_secondary") or "")
+    return hashlib.sha256(raw.encode()).hexdigest() if raw else None
+
+
+def _depth_levels(ob_payload: dict) -> list[tuple[str, int, int]]:
+    """(side, price_c, size) rows from the CURRENT 'orderbook_fp' shape
+    (dollar-string pairs), with the legacy integer-cent 'orderbook'
+    shape as fallback. The V8 evaluation proved the old parser stored
+    ZERO depth rows against live responses."""
+    rows: list[tuple[str, int, int]] = []
+    fp = ob_payload.get("orderbook_fp")
+    if isinstance(fp, dict):
+        for side, key in (("yes", "yes_dollars"), ("no", "no_dollars")):
+            for lvl in (fp.get(key) or [])[:10]:
+                try:
+                    rows.append((side, int(round(float(lvl[0]) * 100)),
+                                 int(float(lvl[1]))))
+                except (TypeError, ValueError, IndexError):
+                    continue
+        return rows
+    legacy = ob_payload.get("orderbook")
+    if isinstance(legacy, dict):
+        for side in ("yes", "no"):
+            for lvl in (legacy.get(side) or [])[:10]:
+                try:
+                    rows.append((side, int(lvl[0]), int(lvl[1])))
+                except (TypeError, ValueError, IndexError):
+                    continue
+    return rows
+
+
 def _fixture_et_date(dt) -> str:
-    et = dt.astimezone(timezone(timedelta(hours=-4)))
+    """Kalshi ticker dates are US-Eastern WALL CLOCK — a fixed UTC-4
+    misdates late-evening fixtures after DST ends Nov 1 (V8 eval F11)."""
+    from zoneinfo import ZoneInfo
+    et = dt.astimezone(ZoneInfo("America/New_York"))
     return et.strftime("%y%b%d").upper()
 
 
@@ -255,44 +339,92 @@ def discover_and_map() -> dict:
         s.close()
 
 
+def _mapped_events_for(s, fixture_id: int | None,
+                       horizon_hours: float) -> list:
+    q = (s.query(MarketEvent)
+         .filter_by(competition_slug="mls-2026", mapping_approved=True)
+         .filter(MarketEvent.fixture_id.isnot(None)))
+    events = []
+    for me in q.all():
+        if fixture_id is not None and me.fixture_id != fixture_id:
+            continue
+        fx = s.get(Fixture, me.fixture_id)
+        if fx is None or fx.current_kickoff_utc is None:
+            continue
+        ko = fx.current_kickoff_utc
+        ko = ko if ko.tzinfo else ko.replace(tzinfo=timezone.utc)
+        if fixture_id is None and not (
+                -3 <= (ko - _now()).total_seconds() / 3600
+                <= horizon_hours):
+            continue
+        events.append(me)
+    return events
+
+
+def _quote_row(m: dict, mc_id: int, obs_id: int,
+               snapshot_id: int | None = None) -> MarketQuote:
+    """One market payload -> a MarketQuote on the CURRENT provider
+    schema (prices in cents/dollars, sizes/volume/OI as *_fp strings,
+    provider timestamp, rules hash) with legacy fallbacks."""
+    return MarketQuote(
+        market_contract_id=mc_id, captured_at=_now(),
+        market_snapshot_id=snapshot_id,
+        provider_timestamp=_parse_ts(m.get("updated_time")),
+        yes_bid_c=_cents(m, "yes_bid"), yes_ask_c=_cents(m, "yes_ask"),
+        no_bid_c=_cents(m, "no_bid"), no_ask_c=_cents(m, "no_ask"),
+        yes_bid_size=_fp_int(m, "yes_bid_size"),
+        yes_ask_size=_fp_int(m, "yes_ask_size"),
+        no_bid_size=_fp_int(m, "no_bid_size"),
+        no_ask_size=_fp_int(m, "no_ask_size"),
+        last_trade_c=_cents(m, "last_price"),
+        volume=_fp_int(m, "volume"),
+        open_interest=_fp_int(m, "open_interest"),
+        status=m.get("status"), rules_hash=_rules_hash(m),
+        fee_schedule_version=m.get("fee_type"))
+
+
+def _fetch_event_books(events) -> tuple[dict, dict, list[str]]:
+    """External I/O only (no session held): every event's markets,
+    cursor-complete, plus each market's order book. Returns
+    (markets_by_event, orderbook_by_ticker, failed_event_tickers)."""
+    markets_by_event: dict[str, list[dict]] = {}
+    books: dict[str, dict] = {}
+    failed: list[str] = []
+    for me in events:
+        try:
+            ms = _kalshi_paged(f"{KALSHI}/markets",
+                               {"event_ticker": me.kalshi_event_ticker},
+                               "markets")
+            markets_by_event[me.kalshi_event_ticker] = ms
+            for m in ms:
+                try:
+                    books[m.get("ticker")] = _kalshi_get(
+                        f"{KALSHI}/markets/{m.get('ticker')}/orderbook")
+                except requests.RequestException:
+                    pass                     # depth best-effort
+        except requests.RequestException as exc:
+            print(f"[markets] fetch {me.kalshi_event_ticker}: {exc}")
+            failed.append(me.kalshi_event_ticker)
+    return markets_by_event, books, failed
+
+
 def capture_quotes(fixture_id: int | None = None,
                    horizon_hours: float = 48.0) -> dict:
-    """Full-book snapshots for mapped events whose fixtures kick off
-    within the horizon (or one fixture when given). Cents + sizes both
-    sides + depth, hash-chained to a source observation."""
+    """Routine observation stream: quotes + depth for mapped events in
+    the horizon. NOT the lock path — lock evidence goes through
+    capture_lock_snapshot, which validates completeness."""
     if not plane_ready():
         return {"skipped": "dormant"}
     s = get_session()
     quotes = 0
     try:
-        q = (s.query(MarketEvent)
-             .filter_by(competition_slug="mls-2026",
-                        mapping_approved=True)
-             .filter(MarketEvent.fixture_id.isnot(None)))
-        events = []
-        for me in q.all():
-            fx = s.get(Fixture, me.fixture_id)
-            if fixture_id is not None and me.fixture_id != fixture_id:
-                continue
-            if fx is None or fx.current_kickoff_utc is None:
-                continue
-            ko = fx.current_kickoff_utc
-            ko = ko if ko.tzinfo else ko.replace(tzinfo=timezone.utc)
-            if fixture_id is None and not (
-                    -3 <= (ko - _now()).total_seconds() / 3600
-                    <= horizon_hours):
-                continue
-            events.append(me)
+        events = _mapped_events_for(s, fixture_id, horizon_hours)
+        markets_by_event, books, _ = _fetch_event_books(events)
         for me in events:
-            try:
-                payload = _kalshi_get(
-                    f"{KALSHI}/markets",
-                    params={"event_ticker": me.kalshi_event_ticker,
-                            "limit": 20})
-            except requests.RequestException as exc:
-                print(f"[markets] quotes {me.kalshi_event_ticker}: {exc}")
+            ms = markets_by_event.get(me.kalshi_event_ticker)
+            if ms is None:
                 continue
-            raw = json.dumps(payload, sort_keys=True)
+            raw = json.dumps(ms, sort_keys=True)
             obs = SourceObservation(
                 source="kalshi",
                 endpoint=f"markets?event={me.kalshi_event_ticker}",
@@ -300,39 +432,20 @@ def capture_quotes(fixture_id: int | None = None,
                 payload_json=raw[:200_000], observed_at=_now())
             s.add(obs)
             s.flush()
-            for m in payload.get("markets") or []:
+            for m in ms:
                 mc = s.query(MarketContract).filter_by(
                     ticker=m.get("ticker")).first()
                 if mc is None:
                     continue
-                quote = MarketQuote(
-                    market_contract_id=mc.id, captured_at=_now(),
-                    yes_bid_c=_cents(m, "yes_bid"),
-                    yes_ask_c=_cents(m, "yes_ask"),
-                    no_bid_c=_cents(m, "no_bid"),
-                    no_ask_c=_cents(m, "no_ask"),
-                    last_trade_c=_cents(m, "last_price"),
-                    volume=m.get("volume"),
-                    open_interest=m.get("open_interest"),
-                    status=m.get("status"),
-                    source_observation_id=obs.id)
+                quote = _quote_row(m, mc.id, obs.id)
+                quote.source_observation_id = obs.id
                 s.add(quote)
                 s.flush()
-                # order-book depth (best-effort; absence is fine)
-                try:
-                    ob = _kalshi_get(
-                        f"{KALSHI}/markets/{m.get('ticker')}/orderbook"
-                    ).get("orderbook") or {}
-                    for side in ("yes", "no"):
-                        for lvl in (ob.get(side) or [])[:5]:
-                            if isinstance(lvl, (list, tuple)) \
-                                    and len(lvl) >= 2:
-                                s.add(MarketDepthLevel(
-                                    market_quote_id=quote.id, side=side,
-                                    price_c=int(lvl[0]),
-                                    size=int(lvl[1])))
-                except Exception:
-                    pass
+                for side, price_c, size in _depth_levels(
+                        books.get(m.get("ticker")) or {}):
+                    s.add(MarketDepthLevel(
+                        market_quote_id=quote.id, side=side,
+                        price_c=price_c, size=size))
                 quotes += 1
         s.commit()
         return {"events": len(events), "quotes": quotes}
@@ -340,5 +453,89 @@ def capture_quotes(fixture_id: int | None = None,
         s.rollback()
         print(f"[markets] capture failed: {exc}")
         return {"error": str(exc)[:200]}
+    finally:
+        s.close()
+
+
+def capture_lock_snapshot(fixture_id: int) -> dict | None:
+    """The lock-grade capture (V8 evaluation F1): fetch EVERYTHING
+    externally first, then one transaction writing observations, a
+    MarketSnapshot header, and linked quotes; the snapshot completes
+    only when every mapped event fetched and the game family's three
+    quotes are present. Returns {'snapshot_id', 'quote_by_ticker'} on
+    success; on ANY shortfall records a failed snapshot and returns
+    None — the caller must then NOT create a canonical lock."""
+    if not plane_ready():
+        return None
+    s = get_session()
+    try:
+        events = _mapped_events_for(s, fixture_id, 0)
+        if not events:
+            print(f"[markets] lock snapshot: no mapped events "
+                  f"for fixture {fixture_id}")
+            return None
+        contracts_expected = sum(
+            s.query(MarketContract).filter_by(market_event_id=me.id).count()
+            for me in events)
+        markets_by_event, books, failed = _fetch_event_books(events)
+        snap = MarketSnapshot(
+            fixture_id=fixture_id, captured_at=_now(), status="writing",
+            provider_schema_version=PROVIDER_SCHEMA_VERSION,
+            events_expected=len(events),
+            events_captured=len(events) - len(failed),
+            contracts_expected=contracts_expected)
+        s.add(snap)
+        s.flush()
+        quote_by_ticker: dict[str, int] = {}
+        depth_rows = 0
+        game_quotes = 0
+        for me in events:
+            ms = markets_by_event.get(me.kalshi_event_ticker) or []
+            raw = json.dumps(ms, sort_keys=True)
+            obs = SourceObservation(
+                source="kalshi",
+                endpoint=f"lock:markets?event={me.kalshi_event_ticker}",
+                content_hash=hashlib.sha256(raw.encode()).hexdigest(),
+                payload_json=raw[:200_000], observed_at=_now())
+            s.add(obs)
+            s.flush()
+            for m in ms:
+                mc = s.query(MarketContract).filter_by(
+                    ticker=m.get("ticker")).first()
+                if mc is None:
+                    continue
+                quote = _quote_row(m, mc.id, obs.id, snapshot_id=snap.id)
+                quote.source_observation_id = obs.id
+                s.add(quote)
+                s.flush()
+                quote_by_ticker[m.get("ticker")] = quote.id
+                if me.series == SERIES and quote.yes_ask_c is not None:
+                    game_quotes += 1
+                for side, price_c, size in _depth_levels(
+                        books.get(m.get("ticker")) or {}):
+                    s.add(MarketDepthLevel(
+                        market_quote_id=quote.id, side=side,
+                        price_c=price_c, size=size))
+                    depth_rows += 1
+        snap.quotes_written = len(quote_by_ticker)
+        snap.depth_rows_written = depth_rows
+        # completeness gate: every event fetched AND the executable
+        # 3-way comparator (the game family's priced quotes) present
+        if failed or len(quote_by_ticker) == 0 or game_quotes < 3:
+            snap.status = "failed"
+            snap.failure_reason = (
+                f"events_failed={failed} quotes={len(quote_by_ticker)} "
+                f"game_quotes_priced={game_quotes}")[:500]
+            s.commit()
+            print(f"[markets] lock snapshot INCOMPLETE fixture "
+                  f"{fixture_id}: {snap.failure_reason}")
+            return None
+        snap.status = "complete"
+        s.commit()
+        return {"snapshot_id": snap.id, "quote_by_ticker": quote_by_ticker}
+    except Exception as exc:
+        s.rollback()
+        print(f"[markets] lock snapshot failed: {exc}")
+        return None
     finally:
         s.close()

@@ -184,6 +184,15 @@ class TestModelFit:
         assert model_mls.seed_for(10, "t10") != model_mls.seed_for(10, "scheduled")
         assert model_mls.seed_for(10, "t10") != model_mls.seed_for(11, "t10")
 
+    def test_seed_survives_database_rebuild(self):
+        """F10 acceptance: the same PROVIDER fixture keeps its seed even
+        when the auto-increment row id changes across rebuilds."""
+        a = SimpleNamespace(id=1, espn_event_id="761680")
+        b = SimpleNamespace(id=2, espn_event_id="761680")
+        assert model_mls.seed_for(a, "t10") == model_mls.seed_for(b, "t10")
+        c = SimpleNamespace(id=1, espn_event_id="761681")
+        assert model_mls.seed_for(a, "t10") != model_mls.seed_for(c, "t10")
+
     def test_seed_fits_signed_32bit(self):
         # prediction_run.simulation_seed is INTEGER on PostgreSQL —
         # an unmasked seed >= 2^31 killed the prod boot sweep (Jul 23)
@@ -219,6 +228,85 @@ class TestModelFit:
                 >= props["home_team_over_1_5"]
                 >= props["home_team_over_2_5"])
         assert len(p["scorelines"]) == 12
+
+
+class TestTeamTotalMarginals:
+    """V8 evaluation F4: team totals must come from the full goal
+    arrays. The old scoreline-sum method understated them by ~2pp in a
+    typical match and by >28pp at high scoring rates."""
+
+    def _sim(self, attack):
+        from src.models.simulator import MatchSimulator
+        raw = {"attack": attack, "defence": attack, "form": 0.5,
+               "fatigue": 0.0, "set_piece_threat": 0.30,
+               "red_card_risk": 0.06, "elo": 1500.0}
+        return MatchSimulator(n_simulations=20000, seed=7).simulate(
+            raw, dict(raw), stage="group")
+
+    def test_marginals_exceed_truncated_scoreline_sums_at_high_xg(self):
+        out = self._sim(attack=1.8)          # the evaluator's stress
+        top30 = out["scorelines"]
+        mass = sum(s["prob"] for s in top30)
+        assert 0.5 < mass < 1.0              # visibly truncated regime
+        for key, idx, n in (("home_team_over_0_5", 0, 1),
+                            ("away_team_over_2_5", 1, 3)):
+            truncated = sum(s["prob"] for s in top30
+                            if int(s["score"].split("-")[idx]) >= n)
+            # the marginal must carry the mass the display list dropped
+            assert out["props"][key] > truncated + 0.02
+
+    def test_ladder_is_coherent(self):
+        out = self._sim(attack=1.0)
+        p = out["props"]
+        assert (p["home_team_over_0_5"] >= p["home_team_over_1_5"]
+                >= p["home_team_over_2_5"] > 0)
+        # over_0_5 for a team implies at least one goal in the match
+        assert p["over_0_5"] >= p["home_team_over_0_5"]
+
+
+class TestCurrentProviderSchema:
+    """V8 evaluation F5: sizes, volume, OI, provider time, rules and
+    DEPTH now arrive as *_fp / *_dollars / orderbook_fp — the exact
+    current shapes (captured from live responses Jul 23) must parse."""
+
+    CURRENT = {
+        "ticker": "KXMLSGAME-26JUL25CLBCIN-CLB",
+        "status": "active",
+        "yes_bid": 54, "yes_ask": 55,        # integer cents present
+        "yes_bid_dollars": "0.5400", "yes_ask_dollars": "0.5500",
+        "no_bid_dollars": "0.4500", "no_ask_dollars": "0.4600",
+        "last_price_dollars": "0.5400",
+        "yes_bid_size_fp": "2642.00", "yes_ask_size_fp": "2902.00",
+        "no_bid_size_fp": "100.00", "no_ask_size_fp": "50.00",
+        "volume_fp": "135.50", "open_interest_fp": "135.50",
+        "updated_time": "2026-07-23T11:00:00Z",
+        "rules_primary": "Resolves YES if Columbus wins.",
+    }
+
+    def test_quote_row_parses_current_fields(self):
+        q = markets._quote_row(self.CURRENT, mc_id=1, obs_id=1)
+        assert (q.yes_bid_c, q.yes_ask_c) == (54, 55)
+        assert q.yes_bid_size == 2642 and q.yes_ask_size == 2902
+        assert q.volume == 135 and q.open_interest == 135
+        assert q.provider_timestamp is not None
+        assert q.rules_hash is not None
+
+    def test_quote_row_parses_dollars_only_payload(self):
+        m = {k: v for k, v in self.CURRENT.items()
+             if k not in ("yes_bid", "yes_ask")}
+        q = markets._quote_row(m, mc_id=1, obs_id=1)
+        assert (q.yes_bid_c, q.yes_ask_c) == (54, 55)
+
+    def test_depth_parses_orderbook_fp_and_legacy(self):
+        fp = {"orderbook_fp": {
+            "yes_dollars": [["0.5400", "2642.00"], ["0.5300", "100"]],
+            "no_dollars": [["0.4500", "9.00"]]}}
+        rows = markets._depth_levels(fp)
+        assert ("yes", 54, 2642) in rows and ("no", 45, 9) in rows
+        legacy = {"orderbook": {"yes": [[54, 2642]], "no": [[45, 9]]}}
+        assert markets._depth_levels(legacy) == [("yes", 54, 2642),
+                                                 ("no", 45, 9)]
+        assert markets._depth_levels({}) == []
 
 
 class TestMarketHelpers:
@@ -291,6 +379,10 @@ class TestContractRepair:
 
 class TestPredictionRuns:
     def _seed_playable(self, s, n_completed=12):
+        from src.live.models import ModelVersion
+        # run paths enforce the shadow-approval gate (V8 eval F3)
+        s.add(ModelVersion(name=model_mls.MODEL_NAME,
+                           approved_for_shadow=True))
         identity.seed_teams(CANNED_ESPN)
         teams = {t.canonical_name: t.id for t in
                  s.query(Team).filter_by(competition_slug="mls-2026")}
@@ -334,7 +426,7 @@ class TestPredictionRuns:
         assert hub["shadow"] is True
         assert hub["latest"]["seed"] == model_mls.seed_for(
             live_session.query(Fixture).filter_by(
-                espn_event_id="9001").one().id, "scheduled")
+                espn_event_id="9001").one(), "scheduled")
         assert hub["latest"]["xg"]["home"] > 0
         assert len(hub["latest"]["scorelines"]) > 0
         assert "over_2_5" in hub["latest"]["props"]
@@ -348,6 +440,15 @@ class TestPredictionRuns:
         assert runs.latest_odds() == []          # writing != complete
         assert runs.model_for_event("9001") is None
 
+    def _fake_snapshot(self, s, fixture_id):
+        from src.live.models import MarketSnapshot
+        snap = MarketSnapshot(fixture_id=fixture_id,
+                              captured_at=datetime.now(UTC),
+                              status="complete", quotes_written=3)
+        s.add(snap)
+        s.commit()
+        return {"snapshot_id": snap.id, "quote_by_ticker": {}}
+
     def test_t10_lock_is_canonical_and_single(self, live_session,
                                               monkeypatch):
         monkeypatch.setattr(config, "N_SIMULATIONS", 400)
@@ -355,8 +456,9 @@ class TestPredictionRuns:
         up.current_kickoff_utc = datetime.now(UTC) + timedelta(minutes=9)
         live_session.commit()
         sent = []
-        monkeypatch.setattr(markets, "capture_quotes",
-                            lambda fixture_id=None, **kw: {"quotes": 0})
+        snap = self._fake_snapshot(live_session, up.id)
+        monkeypatch.setattr(markets, "capture_lock_snapshot",
+                            lambda fixture_id: snap)
         import src.alerts as alerts
         monkeypatch.setattr(alerts, "send_alert",
                             lambda msg, **kw: sent.append(msg))
@@ -366,7 +468,56 @@ class TestPredictionRuns:
         lock = live_session.query(PredictionRun).filter_by(
             run_type="t10", canonical=True).one()
         assert lock.status == "complete"
+        # provenance frozen with the run (V8 eval F2)
+        assert lock.market_snapshot_id == snap["snapshot_id"]
+        assert lock.model_version_id is not None
+        assert lock.input_snapshot_hash is not None
         assert runs.model_for_event("9001")["t10_lock"] is not None
+
+    def test_no_snapshot_means_no_canonical_lock(self, live_session,
+                                                 monkeypatch):
+        """THE V8-evaluation acceptance test: market capture failing or
+        returning zero quotes must never produce a canonical lock."""
+        monkeypatch.setattr(config, "N_SIMULATIONS", 400)
+        up = self._seed_playable(live_session)
+        up.current_kickoff_utc = datetime.now(UTC) + timedelta(minutes=9)
+        live_session.commit()
+        monkeypatch.setattr(markets, "capture_lock_snapshot",
+                            lambda fixture_id: None)
+        assert runs.t10_locks()["locked"] == 0
+        assert (live_session.query(PredictionRun)
+                .filter_by(run_type="t10").count() == 0)
+
+    def test_unapproved_model_cannot_run(self, live_session,
+                                         monkeypatch):
+        """F3: without an approved ModelVersion, no runs and no locks."""
+        from src.live.models import ModelVersion
+        monkeypatch.setattr(config, "N_SIMULATIONS", 400)
+        self._seed_playable(live_session)
+        live_session.query(ModelVersion).update(
+            {"approved_for_shadow": False})
+        live_session.commit()
+        assert "not approved" in runs.scheduled_runs()["skipped"]
+        assert "not approved" in runs.t10_locks()["skipped"]
+        assert (live_session.query(PredictionRun).count() == 0)
+
+    def test_canonical_lock_is_primary_display(self, live_session,
+                                               monkeypatch):
+        """F9: a later scheduled run must not supersede the lock, and
+        the sweep refuses to create one once the lock exists."""
+        monkeypatch.setattr(config, "N_SIMULATIONS", 400)
+        up = self._seed_playable(live_session)
+        up.current_kickoff_utc = datetime.now(UTC) + timedelta(minutes=9)
+        live_session.commit()
+        snap = self._fake_snapshot(live_session, up.id)
+        monkeypatch.setattr(markets, "capture_lock_snapshot",
+                            lambda fixture_id: snap)
+        import src.alerts as alerts
+        monkeypatch.setattr(alerts, "send_alert", lambda *a, **kw: None)
+        assert runs.t10_locks()["locked"] == 1
+        assert runs.scheduled_runs(freshness_hours=0.0)["created"] == 0
+        hub = runs.model_for_event("9001")
+        assert hub["primary"]["run_type"] == "t10"
 
     def test_run_contracts_cover_mapped_prop_markets(self, live_session,
                                                      monkeypatch):

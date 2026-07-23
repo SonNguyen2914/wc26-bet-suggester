@@ -125,14 +125,38 @@ def _raw(team_id: int, model: dict, venue: str) -> dict | None:
     }
 
 
-def seed_for(fixture_id: int, run_type: str) -> int:
-    """Deterministic per-(fixture, run_type) seed, masked to 31 bits:
-    prediction_run.simulation_seed is a SIGNED 32-bit integer on
-    PostgreSQL, and an unmasked sha prefix >= 2^31 killed every boot
-    run sweep on prod (Jul 23) while sqlite happily stored it."""
-    h = hashlib.sha256(f"{MODEL_NAME}:{fixture_id}:{run_type}"
-                      .encode()).hexdigest()
+def seed_for(fixture, run_type: str) -> int:
+    """Deterministic per-(fixture, run_type) seed from STABLE identity:
+    the provider event id, never the auto-increment row id (V8
+    evaluation F10 — a database rebuild changed row ids and with them
+    every 'deterministic' seed). Masked to 31 bits because
+    prediction_run.simulation_seed is SIGNED 32-bit on PostgreSQL (an
+    unmasked sha prefix killed every boot sweep on prod Jul 23)."""
+    ident = getattr(fixture, "espn_event_id", None) or str(fixture)
+    h = hashlib.sha256(
+        f"{MODEL_NAME}:mls-2026:espn:{ident}:{run_type}"
+        .encode()).hexdigest()
     return int(h[:8], 16) & 0x7FFFFFFF
+
+
+def input_hash(fixture, model: dict) -> str:
+    """The exact-inputs fingerprint frozen on each run (V8 evaluation
+    F2): model constants + fitted league params + BOTH teams' ratings.
+    Two runs with the same hash simulated from identical inputs."""
+    basis = {
+        "model": MODEL_NAME, "shrink": SHRINK_GAMES,
+        "half_life": HALF_LIFE_DAYS,
+        "league_gpg": model["league_gpg"],
+        "venue_home": model["venue_home"],
+        "venue_away": model["venue_away"],
+        "n_fixtures": model["n_fixtures"],
+        "home": model["ratings"].get(fixture.home_team_id),
+        "away": model["ratings"].get(fixture.away_team_id),
+    }
+    import json as _json
+    return hashlib.sha256(
+        _json.dumps(basis, sort_keys=True, default=str)
+        .encode()).hexdigest()
 
 
 def predict_fixture(fixture, model: dict, run_type: str = "scheduled",
@@ -144,24 +168,24 @@ def predict_fixture(fixture, model: dict, run_type: str = "scheduled",
         return None
     from src.models.simulator import MatchSimulator
     sim = MatchSimulator(n_simulations=n_sims,
-                         seed=seed_for(fixture.id, run_type))
+                         seed=seed_for(fixture, run_type))
     out = sim.simulate(home, away, stage="group")
     # every probability a listed Kalshi family can consume: the totals
     # ladder, BTTS, margins (their "spread"), first team to score, and
-    # team totals summed from the scoreline distribution
+    # team totals — ALL taken from the simulator's full-array marginals
+    # (V8 evaluation F4: deriving team totals from the truncated
+    # scoreline display list understated them by ~2pp systematically)
     keep = ("btts", "over_0_5", "over_1_5", "over_2_5", "over_3_5",
             "over_4_5", "over_5_5", "home_margin_2", "home_margin_3",
             "away_margin_2", "away_margin_3", "home_first_goal",
-            "away_first_goal", "no_goal")
+            "away_first_goal", "no_goal",
+            "home_team_over_0_5", "home_team_over_1_5",
+            "home_team_over_2_5", "away_team_over_0_5",
+            "away_team_over_1_5", "away_team_over_2_5")
     props = {k: out["props"][k] for k in keep if k in out["props"]}
-    for side, idx in (("home", 0), ("away", 1)):
-        for n in (1, 2, 3):
-            props[f"{side}_team_over_{n - 1}_5"] = round(
-                sum(s["prob"] for s in out["scorelines"]
-                    if int(s["score"].split("-")[idx]) >= n), 4)
     return {
         "model_version": MODEL_NAME,
-        "seed": seed_for(fixture.id, run_type),
+        "seed": seed_for(fixture, run_type),
         "outcomes": out["outcomes"],
         "props": props,
         "scorelines": out["scorelines"][:12],

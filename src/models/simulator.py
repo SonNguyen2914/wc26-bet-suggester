@@ -190,6 +190,17 @@ class MatchSimulator:
             props[f"home_margin_{m_line}"] = round(float(np.mean(margin >= m_line)), 4)
             props[f"away_margin_{m_line}"] = round(float(np.mean(-margin >= m_line)), 4)
 
+        # Per-team totals (Kalshi TEAMTOTAL) — computed from the FULL goal
+        # arrays. The V8 evaluation reproduced a ~2pp systematic
+        # understatement (worse at high xG) when these were summed from the
+        # truncated top-30 scoreline display list; marginals must never be
+        # derived from a display subset.
+        for line in range(3):
+            props[f"home_team_over_{line}_5"] = round(
+                float(np.mean(goals_home > line)), 4)
+            props[f"away_team_over_{line}_5"] = round(
+                float(np.mean(goals_away > line)), 4)
+
         # --- Scoreline distribution (top 30 — deep enough that every Kalshi
         # exact-score contract finds its probability; the UI shows fewer)
         pairs, counts = np.unique(

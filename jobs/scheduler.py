@@ -228,14 +228,15 @@ def mls_boot() -> None:
             "src.live.ingest", fromlist=["x"]).ingest_season_schedules()),
         ("market_map", lambda: __import__(
             "src.live.markets", fromlist=["x"]).discover_and_map()),
-        ("shadow_runs", lambda: __import__(
-            "src.live.runs", fromlist=["x"]).scheduled_runs()),
     )
     for name, step in steps:
         try:
             print(f"[mls-boot] {name}: {step()}")
         except Exception as exc:
             print(f"[mls-boot] {name} FAILED: {exc}")
+    # approval BEFORE any run: scheduled_runs/t10_locks enforce the
+    # approved_for_shadow gate (V8 evaluation F3), so the backtest must
+    # earn (or re-earn) it first — runs then follow
     try:
         from src.live import model_mls
         bt = model_mls.backtest(n_sims=2000)
@@ -245,6 +246,11 @@ def mls_boot() -> None:
                 approved_for_shadow=bool(bt.get("beats_baseline")))
     except Exception as exc:
         print(f"[mls-boot] backtest FAILED: {exc}")
+    try:
+        from src.live import runs as live_runs
+        print(f"[mls-boot] shadow_runs: {live_runs.scheduled_runs()}")
+    except Exception as exc:
+        print(f"[mls-boot] shadow_runs FAILED: {exc}")
 
 
 def mls_window_job() -> None:

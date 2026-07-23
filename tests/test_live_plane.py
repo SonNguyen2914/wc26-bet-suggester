@@ -113,12 +113,16 @@ class TestDormancy:
 
 class TestMigrations:
     def test_baseline_upgrades_empty_database(self, tmp_path):
+        # repo root derived from THIS file — a hardcoded author-machine
+        # path made the suite non-portable (V8 evaluation audit)
+        import os
+        repo_root = os.path.dirname(os.path.dirname(
+            os.path.abspath(__file__)))
         url = f"sqlite:///{tmp_path}/mig.db"
         r = subprocess.run(
-            [sys.executable.replace("python3", "python").rsplit("/", 1)[0]
-             + "/alembic", "-x", f"url={url}", "upgrade", "head"],
-            capture_output=True, text=True,
-            cwd="/Users/ns/dev/wc26-bet-suggester")
+            [sys.executable, "-m", "alembic",
+             "-x", f"url={url}", "upgrade", "head"],
+            capture_output=True, text=True, cwd=repo_root)
         assert r.returncode == 0, r.stderr
         import sqlite3
         tables = {row[0] for row in sqlite3.connect(
