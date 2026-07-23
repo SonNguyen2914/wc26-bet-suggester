@@ -5,10 +5,10 @@ The exact version that collects the first clean MLS T-10 slate
 step 1 — do not change model behavior during the first collection slate
 unless a critical defect appears.
 
-    release:            mls-shadow-v1
+    release:            mls-shadow-v1   (git tag — the source of truth)
     frozen_at:          2026-07-23
-    backend_commit:     f1abdebec6be00316767746c1a199030cf4ac72a
-    frontend_commit:    2a0621428dde84d9f2139e8ced17b7fb4ada11dd
+    backend_ref:        tag mls-shadow-v1  (= f1abdeb + this manifest)
+    frontend_ref:       tag mls-shadow-v1  (2a06214)
     database_revision:  c21ba2ee8df4   (alembic head)
     model_version:      mls-2026-v0    (approved_for_shadow, earned)
     lock_policy:        mls-lock-v1
