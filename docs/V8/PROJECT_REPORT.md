@@ -156,3 +156,15 @@ A second independent evaluation of the V8 zip arrived the same day and was adopt
 **Live proof (prod, CLB-CIN):** one real lock snapshot captured 62 quotes — all with sizes, 833 depth rows — across 11/11 events, produced a canonical lock with full provenance and all 35 contracts joined to frozen quotes. `/api/ready` reports `shadow_ready: true, blockers: []`.
 
 **Still open (evaluator's P1/P2, not blocking shadow):** a reproducible MLS corpus export, common-random-number backtesting with uncertainty intervals, PostgreSQL integration tests in CI, raw-payload object storage, and the team/player/availability/lineup snapshot inputs before any real-money discussion. Saturday's locks are now **provenance-complete canonical evidence**, still shadow-labeled, money still locked.
+
+### V8.1 re-evaluation + the qualification build (later Jul 23)
+
+The re-evaluation upgraded the verdict conditionally — T-10 evidence integrity 3.5→8.4, the central objection ("a canonical lock can exist with zero quotes") declared closed — and left three qualifications to preserve. Two of them were built the same day (@84158a6, migration `9673668959a8`, third clean prod-PG migration):
+
+- **Qual #2 — capture-complete vs execution-ready are different states.** `MarketSnapshot.status` stays capture-completeness only; a new `execution_ready` flag is derived separately (the game 3-way must be two-sided AND fresh). A no-bid contract is now explicitly a *complete observation with a null bid* — never an incomplete capture, never an invented price. Live proof: a fresh lock's snapshot captured 62 priced quotes with `required_families_complete=true` but `execution_ready=false` because the thin MLS book hadn't updated recently — capture and tradeability, honestly distinct.
+- **Qual #3 — "full book" needs a versioned policy.** The snapshot gained `policy_version` (`mls-lock-v1`), the priced/unpriced quote split, and `oldest_quote_age_seconds`, so the lock predicate can't change meaning silently as families are added.
+- **Approval immutability** — `prediction_run.model_approved_at_run` freezes whether the model was approved *at capture*; flipping the flag later can't re-authorize an old run.
+
+And the **acceptance-audit harness** the evaluator elevated above more building: `GET /api/mls/audit` (public read-only, content-hashed) checks every canonical lock against the full invariant table — one lock per fixture, before kickoff, inside window, snapshot complete + policy-versioned + required families, contracts unique by outcome, every priced contract quote-linked, model approved-at-run, seed/hash present, three-way sums to one, no post-kickoff replacement — and **retains** missed locks and failed snapshots as evidence. It caught a pre-manifest lock as failing in rehearsal, which is the point. Live now, showing 0 locks / clean until Saturday populates it.
+
+**Qual #1 (a retrievable input document, not just a hash) was deliberately deferred** — it is the P1 corpus-export work, and the docs no longer claim "independently model-reproducible", only "market-provenance-complete".
