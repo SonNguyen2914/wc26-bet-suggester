@@ -134,6 +134,54 @@ class ModelVersion(LiveBase):
     created_at = Column(DateTime(timezone=True))
 
 
+class Player(LiveBase):
+    """Player identity (V8.1 evaluation Phase 5). Keyed by provider id;
+    team membership + availability live in the snapshot tables so a
+    provider correction never overwrites what was true at T-10."""
+    __tablename__ = "player"
+    id = Column(Integer, primary_key=True)
+    competition_slug = Column(String(32), ForeignKey("competition.slug"))
+    espn_id = Column(String(16), unique=True)
+    name = Column(String(96))
+    position = Column(String(8))
+
+
+class LineupSnapshot(LiveBase):
+    """As-of team-selection state for a fixture, with full provenance.
+    A T-10 run references the EXACT snapshot it saw — missing/unconfirmed
+    lineups are recorded as such, never silently treated as confidence."""
+    __tablename__ = "lineup_snapshot"
+    id = Column(Integer, primary_key=True)
+    fixture_id = Column(Integer, ForeignKey("fixture.id"), nullable=False)
+    captured_at = Column(DateTime(timezone=True), nullable=False)
+    observed_at = Column(DateTime(timezone=True))
+    provider = Column(String(24))
+    parser_version = Column(String(16))
+    source_observation_id = Column(
+        Integer, ForeignKey("source_observation.id"))
+    status = Column(String(16))              # confirmed | partial | pending
+    home_confirmed = Column(Boolean)
+    away_confirmed = Column(Boolean)
+    home_formation = Column(String(16))
+    away_formation = Column(String(16))
+    home_gk_player_id = Column(Integer, ForeignKey("player.id"))
+    away_gk_player_id = Column(Integer, ForeignKey("player.id"))
+
+
+class LineupEntry(LiveBase):
+    """One player's selection state within a lineup snapshot."""
+    __tablename__ = "lineup_entry"
+    id = Column(Integer, primary_key=True)
+    lineup_snapshot_id = Column(
+        Integer, ForeignKey("lineup_snapshot.id"), nullable=False)
+    side = Column(String(8), nullable=False)   # home | away
+    player_id = Column(Integer, ForeignKey("player.id"))
+    starter = Column(Boolean)
+    is_goalkeeper = Column(Boolean)
+    position = Column(String(8))
+    jersey = Column(String(8))
+
+
 class ModelInputArtifact(LiveBase):
     """The exact, retrievable input DOCUMENT a run simulated from
     (V8.1 evaluation Phase 2 / qualification #1). input_snapshot_hash
@@ -183,6 +231,11 @@ class PredictionRun(LiveBase):
     # ModelVersion flag later must not retroactively re-authorize an old
     # run). Frozen True here because the F3 gate refuses to run otherwise.
     model_approved_at_run = Column(Boolean)
+    # input-quality states frozen with the run (V8.1 eval Phase 5):
+    # TEAM_DATA_FRESH / PLAYER_DATA_FRESH / AVAILABILITY_COMPLETE /
+    # LINEUP_CONFIRMED / GOALKEEPER_CONFIRMED. Missing data is recorded
+    # as false, never absorbed into the model as confidence.
+    input_quality_json = Column(Text)
     __table_args__ = (
         # ONE canonical complete T-10 per fixture — the same partial
         # unique invariant on SQLite (tests) and PostgreSQL (production).

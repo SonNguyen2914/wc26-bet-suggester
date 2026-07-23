@@ -43,13 +43,27 @@ def approved_model_version(s) -> ModelVersion | None:
             .first())
 
 
+def _input_quality(model: dict, lineup: dict | None) -> dict:
+    """The five input-quality states frozen on each run (V8.1 eval
+    Phase 5). TEAM_DATA_FRESH reflects the model's own rating basis;
+    the lineup-derived states come from the captured lineup (all false
+    when no lineup was available — missing data is never confidence)."""
+    q = {"TEAM_DATA_FRESH": bool(model.get("ratings")),
+         "PLAYER_DATA_FRESH": False, "AVAILABILITY_COMPLETE": False,
+         "LINEUP_CONFIRMED": False, "GOALKEEPER_CONFIRMED": False}
+    if lineup and lineup.get("quality"):
+        q.update(lineup["quality"])
+    return q
+
+
 def _write_run(s, fixture, run_type: str, model: dict, mv: ModelVersion,
-               canonical: bool = False,
-               snapshot: dict | None = None) -> PredictionRun | None:
+               canonical: bool = False, snapshot: dict | None = None,
+               lineup: dict | None = None) -> PredictionRun | None:
     """The transactional core. Returns the committed run or None.
     For canonical locks the caller supplies a COMPLETE MarketSnapshot
     (capture_lock_snapshot) — its id and ticker->quote map are frozen
-    onto the run and its contracts (V8 evaluation F1/F2)."""
+    onto the run and its contracts (V8 evaluation F1/F2) — plus the
+    lineup snapshot the lock saw (Phase 5)."""
     pred = model_mls.predict_fixture(fixture, model, run_type=run_type)
     if pred is None:
         return None
@@ -77,6 +91,9 @@ def _write_run(s, fixture, run_type: str, model: dict, mv: ModelVersion,
         model_approved_at_run=bool(mv.approved_for_shadow),
         input_snapshot_hash=ihash,
         model_input_artifact_id=artifact.id,
+        lineup_snapshot_id=(lineup or {}).get("snapshot_id"),
+        availability_snapshot_id=(lineup or {}).get("snapshot_id"),
+        input_quality_json=json.dumps(_input_quality(model, lineup)),
         market_snapshot_id=(snapshot or {}).get("snapshot_id"),
         simulation_seed=pred["seed"],
         simulation_count=config.N_SIMULATIONS,
@@ -245,12 +262,17 @@ def t10_locks() -> dict:
             snapshot = markets.capture_lock_snapshot(f.id)
             if snapshot is None:
                 continue
+            # 1b. the lineup snapshot the lock SAW (Phase 5). A pending
+            # lineup is recorded, not a blocker — the model doesn't use
+            # it yet, but the shadow record must show what was available
+            from src.live import lineups
+            lineup = lineups.capture_lineup(f.id)
             # 2-12. the transactional run (isolated per fixture: one
             # failed lock must stay visibly missing, not take the rest
             # of the slate down with it)
             try:
                 run = _write_run(s, f, "t10", model, mv, canonical=True,
-                                 snapshot=snapshot)
+                                 snapshot=snapshot, lineup=lineup)
             except Exception as exc:
                 s.rollback()
                 print(f"[runs] t10 {f.espn_event_id} failed: {exc}")
@@ -321,6 +343,8 @@ def model_for_event(espn_event_id: str) -> dict | None:
                              for c in contracts
                              if c.outcome_key in THREE_WAY},
                 "tickers": tickers,
+                "input_quality": (json.loads(run.input_quality_json)
+                                  if run.input_quality_json else None),
             }
             if run.payload_json:
                 try:

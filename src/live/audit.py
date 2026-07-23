@@ -72,6 +72,11 @@ def _lock_checks(s, f, lock, n_locks) -> dict:
         "model_approved_at_run": bool(lock.model_approved_at_run),
         "input_hash_present": bool(lock.input_snapshot_hash),
         "input_artifact_retained": lock.model_input_artifact_id is not None,
+        # a lineup snapshot must be REFERENCED (Phase 5) — whether or not
+        # the lineup was confirmed. Its absence is a provenance gap; a
+        # PENDING lineup inside it is honest data, not a failure.
+        "lineup_snapshot_referenced": lock.lineup_snapshot_id is not None,
+        "input_quality_recorded": bool(lock.input_quality_json),
         "seed_present": lock.simulation_seed is not None,
         "three_way_present": set(three) == set(THREE_WAY),
         "three_way_sums_to_one": abs(sum(three.values()) - 1.0) < 0.02
@@ -88,6 +93,8 @@ def _lock_checks(s, f, lock, n_locks) -> dict:
         "market_snapshot_id": lock.market_snapshot_id,
         "contracts": len(contracts),
         "priced_contracts": len(priced),
+        "input_quality": (json.loads(lock.input_quality_json)
+                          if lock.input_quality_json else None),
         "checks": checks,
         "all_pass": all(checks.values()),
     }

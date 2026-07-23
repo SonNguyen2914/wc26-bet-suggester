@@ -24,10 +24,11 @@ from datetime import datetime, timezone
 
 from src.live import audit as live_audit
 from src.live.db import get_session, plane_ready
-from src.live.models import (Competition, Fixture, MarketContract,
+from src.live.models import (Competition, Fixture, LineupEntry,
+                             LineupSnapshot, MarketContract,
                              MarketDepthLevel, MarketEvent, MarketQuote,
                              MarketSnapshot, ModelInputArtifact,
-                             ModelVersion, PredictionContract,
+                             ModelVersion, Player, PredictionContract,
                              PredictionRun, Team, TeamAlias)
 
 CORPUS_SCHEMA = "corpus-v1"
@@ -83,6 +84,11 @@ def build_corpus(version: str = "mls-shadow-2026-v1") -> dict:
         quote_ids = {q.id for q in quotes}
         depth = [d for d in s.query(MarketDepthLevel).all()
                  if d.market_quote_id in quote_ids]
+        lineups = [ln for ln in s.query(LineupSnapshot).all()
+                   if ln.fixture_id in fixture_ids]
+        lineup_ids = {ln.id for ln in lineups}
+        lineup_entries = [le for le in s.query(LineupEntry).all()
+                          if le.lineup_snapshot_id in lineup_ids]
 
         sections = {
             "competitions.json": [_dump(x) for x in
@@ -104,6 +110,9 @@ def build_corpus(version: str = "mls-shadow-2026-v1") -> dict:
             "market_snapshots.json": [_dump(x) for x in snapshots],
             "market_quotes.json": [_dump(x) for x in quotes],
             "market_depth_levels.json": [_dump(x) for x in depth],
+            "players.json": [_dump(x) for x in s.query(Player).all()],
+            "lineup_snapshots.json": [_dump(x) for x in lineups],
+            "lineup_entries.json": [_dump(x) for x in lineup_entries],
             # audit carries missed_locks + failed_snapshots = the
             # anti-survivorship-bias record
             "audit.json": live_audit.lock_audit(),
@@ -133,6 +142,8 @@ def build_corpus(version: str = "mls-shadow-2026-v1") -> dict:
             "depth_rows": len(depth),
             "missed_locks": audit_summary.get("missed_locks", 0),
             "failed_snapshots": audit_summary.get("failed_snapshots", 0),
+            "lineup_snapshots": len(lineups),
+            "players": len(sections["players.json"]),
         }
         manifest = {
             "corpus_version": version,

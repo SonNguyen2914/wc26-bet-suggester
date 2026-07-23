@@ -309,6 +309,64 @@ class TestCurrentProviderSchema:
         assert markets._depth_levels({}) == []
 
 
+def _roster_summary(home_confirmed=True, away_confirmed=True,
+                    home_gk=True):
+    def team(side, confirmed, gk):
+        roster = []
+        if confirmed:
+            roster.append({"starter": True, "jersey": "1",
+                           "athlete": {"id": f"{side}gk", "displayName": f"{side} keeper"},
+                           "position": {"abbreviation": "G" if gk else "D"}})
+            for i in range(10):
+                roster.append({"starter": True, "jersey": str(i + 2),
+                               "athlete": {"id": f"{side}{i}", "displayName": f"{side} p{i}"},
+                               "position": {"abbreviation": "M"}})
+        return {"homeAway": side, "formation": "4-3-3" if confirmed else None,
+                "roster": roster}
+    return {"rosters": [team("home", home_confirmed, home_gk),
+                        team("away", away_confirmed, True)]}
+
+
+class TestLineupPlane:
+    def test_parse_confirmed_lineup(self):
+        from src.live import lineups
+        p = lineups.parse_lineup(_roster_summary())
+        assert p["home"]["confirmed"] and p["home"]["starters"] == 11
+        assert p["home"]["goalkeeper"]["name"] == "home keeper"
+        assert p["home"]["formation"] == "4-3-3"
+        q = lineups.lineup_quality(p)
+        assert q["LINEUP_CONFIRMED"] and q["GOALKEEPER_CONFIRMED"]
+        assert q["AVAILABILITY_COMPLETE"]
+
+    def test_parse_pending_lineup_is_not_confidence(self):
+        from src.live import lineups
+        p = lineups.parse_lineup(_roster_summary(home_confirmed=False))
+        assert not p["home"]["confirmed"]
+        q = lineups.lineup_quality(p)
+        # a half-announced slate must NOT read as confirmed/complete
+        assert not q["LINEUP_CONFIRMED"]
+        assert not q["AVAILABILITY_COMPLETE"]
+
+    def test_capture_writes_snapshot_with_provenance(self, live_session):
+        from src.live import identity, lineups
+        from src.live.models import (Fixture, LineupEntry, LineupSnapshot,
+                                     Player)
+        identity.seed_teams(CANNED_ESPN)
+        fx = Fixture(competition_slug="mls-2026", espn_event_id="5000",
+                     current_kickoff_utc=datetime.now(UTC), status="pre")
+        live_session.add(fx)
+        live_session.commit()
+        res = lineups.capture_lineup(fx.id, summary=_roster_summary())
+        assert res["status"] == "confirmed"
+        assert res["quality"]["LINEUP_CONFIRMED"]
+        snap = live_session.query(LineupSnapshot).one()
+        assert snap.provider == "espn" and snap.parser_version
+        assert snap.source_observation_id is not None
+        assert snap.home_gk_player_id is not None
+        assert live_session.query(LineupEntry).count() == 22
+        assert live_session.query(Player).count() == 22
+
+
 class TestMarketHelpers:
     def test_cents_prefers_native_integer(self):
         assert markets._cents({"yes_bid": 57,
@@ -462,16 +520,31 @@ class TestPredictionRuns:
         import src.alerts as alerts
         monkeypatch.setattr(alerts, "send_alert",
                             lambda msg, **kw: sent.append(msg))
+        import src.live.lineups as lineups_mod
+        monkeypatch.setattr(
+            lineups_mod, "capture_lineup",
+            lambda fixture_id, **kw: {
+                "snapshot_id": 77, "status": "pending",
+                "quality": {"LINEUP_CONFIRMED": False,
+                            "GOALKEEPER_CONFIRMED": False,
+                            "AVAILABILITY_COMPLETE": False,
+                            "PLAYER_DATA_FRESH": False}})
         assert runs.t10_locks()["locked"] == 1
         assert runs.t10_locks()["locked"] == 0        # already locked
         assert len(sent) == 1 and "PAPER" in sent[0]
         lock = live_session.query(PredictionRun).filter_by(
             run_type="t10", canonical=True).one()
         assert lock.status == "complete"
-        # provenance frozen with the run (V8 eval F2)
+        # provenance frozen with the run (V8 eval F2 + Phase 5)
         assert lock.market_snapshot_id == snap["snapshot_id"]
         assert lock.model_version_id is not None
         assert lock.input_snapshot_hash is not None
+        assert lock.lineup_snapshot_id == 77
+        # a PENDING lineup is recorded honestly, never absorbed as truth
+        import json as _json
+        iq = _json.loads(lock.input_quality_json)
+        assert iq["LINEUP_CONFIRMED"] is False
+        assert iq["TEAM_DATA_FRESH"] is True
         assert runs.model_for_event("9001")["t10_lock"] is not None
 
     def test_no_snapshot_means_no_canonical_lock(self, live_session,
