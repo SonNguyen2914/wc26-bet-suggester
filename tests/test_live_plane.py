@@ -143,3 +143,22 @@ class TestUrlNormalization:
         ) == "postgresql+psycopg://u@h/db"
         assert _normalize_pg_url("sqlite:///x.db") == "sqlite:///x.db"
         assert _normalize_pg_url("") == ""
+
+
+class TestPlaneIsolation:
+    def test_live_boot_failure_never_raises(self, monkeypatch):
+        """A live-plane failure must not be able to kill the archive."""
+        import config
+        from src.live import db as livedb
+        monkeypatch.setattr(config, "LIVE_DATABASE_URL",
+                            "postgresql+psycopg://bad:bad@127.0.0.1:1/x")
+        monkeypatch.setattr(livedb, "_engine", None)
+        monkeypatch.setattr(livedb, "_Session", None)
+        monkeypatch.setattr(livedb, "LIVE_BOOT_ERROR", None)
+        import subprocess
+        monkeypatch.setattr(subprocess, "run", lambda *a, **k: type(
+            "R", (), {"returncode": 1, "stderr": "boom", "stdout": ""})())
+        livedb.migrate_and_seed()          # must NOT raise
+        assert livedb.LIVE_BOOT_ERROR and "boom" in livedb.LIVE_BOOT_ERROR
+        st = livedb.status()
+        assert st["boot_failed"] is True and "boom" in st["error"]
