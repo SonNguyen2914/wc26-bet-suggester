@@ -210,3 +210,27 @@ Schema (migration `521bd3137595`, clean on PostgreSQL 18.1): `player` identity; 
 Live-verified: a real ESPN capture of a completed match parses to confirmed + GK; a fixture days out honestly reads `LINEUP_CONFIRMED: false` while `TEAM_DATA_FRESH: true` — exactly the "no silent confidence" behavior. When Saturday's lineups drop ~1h before kickoff, T-10 will capture them confirmed. 418 tests; both CI pipelines green.
 
 Roadmap: steps 1, 3, 4, 5, and now 6 done; step 2 (run/audit slates) is Saturday; step 7 (the M0–M5 model ladder with rolling-origin validation and bootstrap CIs) is next.
+
+### Step 7 — the model ladder + honest evaluation (Jul 23)
+
+Roadmap Phase 6, and the most scientifically consequential step. The V8 review named two evaluation flaws: Monte Carlo noise "masquerading as model improvement" (the model and baseline used different seeds), and a point-estimate edge with no uncertainty. Both are fixed (@2e2e351, no migration; `GET /api/mls/model-eval`, public).
+
+`src/live/model_eval.py` defines the ladder — M0 (league + venue), M1 (raw ratings), M2 (recency + partial pooling = mls-2026-v0) — and scores each with **analytic independent-Poisson 3-way probabilities** (a goal grid, exact) under rolling-origin validation. Analytic means *zero simulation noise*: every variant is compared on identical ground, so a difference is signal, not seed luck. A **match-cluster bootstrap** puts a 95% CI on every pairwise edge. An `approval_record` emits the decision (metrics, CI, limitations) and never grants above shadow.
+
+The result on the live 162-fixture season is the honest finding the review demanded:
+
+| variant | log loss | |
+|---|---|---|
+| M0 league+venue | 1.078 | |
+| M1 raw ratings | 1.166 | **overfits — worse than the baseline** |
+| M2 recency+pooling | 1.070 | best |
+
+| edge | Δ log loss | 95% CI | significant |
+|---|---|---|---|
+| M2 vs M0 | +0.008 | [−0.012, +0.029] | **No** |
+| M2 vs M1 | +0.096 | [+0.021, +0.177] | Yes |
+| M1 vs M0 | −0.088 | [−0.186, +0.007] | No |
+
+The reading: raw team ratings *overfit* MLS's noisy small samples and lose to a league-average baseline; recency + partial pooling *rescues* them decisively (M2 ≫ M1, significant); but M2's edge over the naive baseline is **within noise**. So the model's construction is validated while a durable forecasting edge is **not** — which is precisely why the money gate stays closed, now backed by a confidence interval instead of a bare number. The approval record says it plainly: shadow means "safe to collect prospective evidence," not "edge established."
+
+Roadmap: steps 1, 3, 4, 5, 6, 7 done; step 2 (run/audit the slate) is Saturday; step 8 (execution-quality paper trading) is next. Levels 1–3 ready; 4–6 not, correctly.
