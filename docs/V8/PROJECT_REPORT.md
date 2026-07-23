@@ -190,3 +190,13 @@ With the input artifact done (Phase 2) and the baseline frozen, the next roadmap
 **The acceptance, proven against production:** downloaded the full corpus from prod over HTTP, ran `python scripts/analyze_corpus.py <dir>` with no database environment — **integrity CLEAN, 15/15 prod runs replay exactly, max delta 0.0**, from the downloaded files alone. This is the evaluator's Phase 3 condition met: download, one command, reproduce, no production database.
 
 Forecast scoring reads 0 today (no settled fixtures have runs yet); it fills in the moment Saturday's locks settle. Roadmap position: steps 1 (freeze/tag), 3 (artifact), and 4 (corpus) done; step 2 (run/audit slates) waits for Saturday; step 5 (PostgreSQL-in-CI) is next.
+
+### Step 5 — PostgreSQL in CI (Jul 23)
+
+The evaluator was explicit that four clean production migrations are good operational evidence but not a substitute for automated real-Postgres validation — SQLite cannot prove partial unique indexes, the exact migration DDL, transaction isolation, or concurrent lock creation. Now CI does, blocking on every push (@8885b94).
+
+`.github/workflows/ci.yml` runs a `postgres:16` service and executes: the SQLite unit suite, migration empty→head AND previous-release→head on real Postgres, then `tests/test_postgres_integration.py` — five tests that skip in the SQLite suite and run only against a real server: migration-from-empty, the **partial unique index actually rejecting a second canonical complete t10 on Postgres** (the DDL that killed migration #1), `UNIQUE(run, outcome_key)` rejecting duplicate null-contract rows (SQL NULLs are pairwise-distinct, so the old constraint never fired), lock evidence round-tripping across a fresh engine (a process restart), and **two concurrent workers contending the canonical slot with exactly one winning** (a `lock_timeout` turns Postgres's correct block into an observable error). Verified locally against PostgreSQL 18.1 and green on GitHub Actions against postgres:16.
+
+A frontend CI landed alongside (@2dc84cc): `npm install` + tsc + lint + build, blocking. Adding it surfaced three real lint errors latent since the Next 16 / React 19 rules (impure `Date.now()` in render, two `setState`-in-effect patterns) — all fixed — and a cross-platform lockfile gap (Tailwind v4's Linux-only native optional deps), reconciled with `--os=linux` lockfile additions and `npm install`. Both pipelines green.
+
+Roadmap: steps 1 (freeze), 3 (artifact), 4 (corpus), and **5 (PostgreSQL-in-CI)** done; step 2 (run/audit slates) waits for Saturday; step 6 (roster/availability/lineup inputs) is next.
