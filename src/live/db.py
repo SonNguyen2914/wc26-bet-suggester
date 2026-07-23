@@ -64,3 +64,58 @@ def startup_check() -> None:
         raise RuntimeError(
             "live database migrations are behind — run "
             "`alembic upgrade head` before serving the live plane")
+
+
+def migrate_and_seed() -> None:
+    """Deploy-time migration + idempotent seed. Called ONCE from run.py
+    before the server starts — deliberate and logged, never ad hoc from
+    request handling. Failure raises, which fails startup (the decision:
+    a live plane behind on migrations must not serve)."""
+    if not live_enabled():
+        print("[live] LIVE_DATABASE_URL absent — live plane dormant")
+        return
+    import os
+    import subprocess
+    import sys
+    root = os.path.join(os.path.dirname(__file__), "..", "..")
+    r = subprocess.run([sys.executable, "-m", "alembic", "upgrade", "head"],
+                       cwd=root, capture_output=True, text=True)
+    if r.returncode != 0:
+        raise RuntimeError(f"live migration failed: {r.stderr[-500:]}")
+    print("[live] migrations at head")
+    from src.live.models import Competition
+    s = get_session()
+    try:
+        if s.get(Competition, "mls-2026") is None:
+            s.add(Competition(
+                slug="mls-2026", name="Major League Soccer",
+                provider_league_id=253, season=2026, timezone="UTC",
+                match_duration_minutes=90, supports_draw=True,
+                regular_time_only=True, has_group_stage=False,
+                has_knockout_stage=True,        # playoffs, later phase
+                model_version="mls-2026-v0"))
+            s.commit()
+            print("[live] seeded competition mls-2026")
+    finally:
+        s.close()
+
+
+def status() -> dict:
+    """Externally-verifiable live-plane state for /api/ready."""
+    if not live_enabled():
+        return {"enabled": False}
+    out = {"enabled": True, "connected": False,
+           "migrations_current": False, "competition_seeded": False}
+    try:
+        out["migrations_current"] = bool(migrations_current())
+        from src.live.models import Competition
+        s = get_session()
+        try:
+            out["connected"] = True
+            out["competition_seeded"] = (
+                s.get(Competition, "mls-2026") is not None)
+        finally:
+            s.close()
+    except Exception as exc:
+        out["error"] = str(exc)[:200]
+    return out

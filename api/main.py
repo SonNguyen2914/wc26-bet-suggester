@@ -191,11 +191,21 @@ def ready():
     expected_results = sum(1 for m in load_schedule()
                            if m.fully_resolved and m.kickoff < now)
     bundles = len(archive.available_lock_bundles())
-    ok = (results >= expected_results and ledger == 84 and bundles == 6)
-    return {"ready": ok,
+    from src.live import db as live_db
+    live = live_db.status()
+    archive_ok = (results >= expected_results and ledger == 84
+                  and bundles == 6)
+    live_ok = (not live["enabled"]) or (
+        live.get("connected") and live.get("migrations_current")
+        and live.get("competition_seeded"))
+    return {"ready": bool(archive_ok and live_ok),
+            "mode": ("mls_shadow" if config.MLS_SHADOW_ENABLED
+                     else "archive"),
             "results": results, "expected_results": expected_results,
             "ledger_positions": ledger, "expected_ledger": 84,
             "lock_bundles": bundles, "expected_lock_bundles": 6,
+            "live": live,
+            "real_money_signals": config.REAL_MONEY_SIGNALS_ENABLED,
             "time": now.isoformat()}
 
 
