@@ -152,7 +152,9 @@ class TestBookMatcher:
         b = mls.find_book("2026-07-22T23:30Z", "LA Galaxy",
                           "St. Louis CITY SC", self._BOOKS)
         assert b["event_ticker"].endswith("LAGSTL")
-        b = mls.find_book("2026-07-22T23:30Z", "New York Red Bulls",
+        # ESPN's real displayName (verified live Jul 23) — the test
+        # originally encoded "New York Red Bulls" and hid the bug
+        b = mls.find_book("2026-07-22T23:30Z", "Red Bull New York",
                           "Charlotte FC", self._BOOKS)
         assert b["event_ticker"].endswith("NYRBCLT")
 

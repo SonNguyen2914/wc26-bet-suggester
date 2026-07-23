@@ -316,11 +316,41 @@ def parse_summary(d: dict) -> dict:
     }
 
 
+def parse_team_colors(d: dict) -> dict[str, dict]:
+    """ESPN teams payload -> {abbrev: {color, alt}} hex strings."""
+    out = {}
+    leagues = (d.get("sports") or [{}])[0].get("leagues") or [{}]
+    for t in leagues[0].get("teams") or []:
+        team = t.get("team") or {}
+        ab = team.get("abbreviation")
+        if ab:
+            out[ab] = {"color": team.get("color"),
+                       "alt": team.get("alternateColor")}
+    return out
+
+
+def team_colors() -> dict[str, dict]:
+    """Club signature colors (1h cache — they change never)."""
+    def fetch():
+        d = _get_json(f"{ESPN_BASE}/teams")
+        return parse_team_colors(d) if d else None
+    return _cached("team_colors", 3600, fetch) or {}
+
+
 def match_summary(event_id: str) -> dict | None:
     """One match's live stat page. 30s cache (it IS the live view)."""
     def fetch():
         d = _get_json(f"{ESPN_BASE}/summary", {"event": event_id})
-        return parse_summary(d) if d else None
+        if not d:
+            return None
+        out = parse_summary(d)
+        colors = team_colors()
+        for side in ("home", "away"):
+            c = colors.get((out.get(side) or {}).get("abbrev") or "")
+            if c:
+                out[side]["color"] = c.get("color")
+                out[side]["alt_color"] = c.get("alt")
+        return out
     return _cached(f"sum:{event_id}", 30, fetch)
 
 
@@ -372,7 +402,10 @@ _KALSHI_ALIASES = {
     "los angeles g": "la galaxy",
     "los angeles f": "los angeles fc",
     "saint louis": "st louis city",
-    "new york rb": "new york red bulls",
+    # ESPN's displayName is "Red Bull New York", NOT "New York Red
+    # Bulls" — the old alias never matched, so every RBNY fixture
+    # showed "no open book" (caught on Son's phone, RBNY-CLT Jul 25)
+    "new york rb": "red bull new york",
 }
 
 

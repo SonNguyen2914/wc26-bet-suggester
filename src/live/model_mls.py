@@ -160,6 +160,13 @@ def predict_fixture(fixture, model: dict, run_type: str = "scheduled",
             "away_games": model["ratings"][fixture.away_team_id]["games"],
             "league_gpg": round(model["league_gpg"], 3),
             "venue_home": round(model["venue_home"], 3),
+            # fitted ratings relative to league 1.0 — the honest "how
+            # they play" numbers (attack >1 scores more than average,
+            # defence <1 concedes less)
+            "home_attack": round(model["ratings"][fixture.home_team_id]["attack"], 3),
+            "home_defence": round(model["ratings"][fixture.home_team_id]["defence"], 3),
+            "away_attack": round(model["ratings"][fixture.away_team_id]["attack"], 3),
+            "away_defence": round(model["ratings"][fixture.away_team_id]["defence"], 3),
         },
     }
 
