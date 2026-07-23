@@ -126,3 +126,20 @@ class TestMigrations:
             "SELECT name FROM sqlite_master WHERE type='table'")}
         assert {"prediction_run", "market_quote", "team_alias",
                 "alembic_version"} <= tables
+
+
+class TestUrlNormalization:
+    def test_provider_schemes_route_to_psycopg3(self):
+        from config import _normalize_pg_url
+        assert _normalize_pg_url(
+            "postgres://u:p@h:5432/db"
+        ) == "postgresql+psycopg://u:p@h:5432/db"
+        assert _normalize_pg_url(
+            "postgresql://u:p@h/db"
+        ) == "postgresql+psycopg://u:p@h/db"
+        # already-pinned and sqlite URLs pass through untouched
+        assert _normalize_pg_url(
+            "postgresql+psycopg://u@h/db"
+        ) == "postgresql+psycopg://u@h/db"
+        assert _normalize_pg_url("sqlite:///x.db") == "sqlite:///x.db"
+        assert _normalize_pg_url("") == ""

@@ -232,7 +232,20 @@ AUTO_EXECUTION_ENABLED = _parse_flag(
 # writes happen anywhere, shadow endpoints report not-ready. Set it to
 # the Railway PostgreSQL connection string once provisioned (backups ON
 # before first reliance — the launch decision's O2).
-LIVE_DATABASE_URL = os.getenv("LIVE_DATABASE_URL", "").strip()
+def _normalize_pg_url(url: str) -> str:
+    """Railway (and most providers) hand out postgres:// or postgresql://
+    connection strings. SQLAlchemy rejects the former outright and routes
+    the latter to psycopg2 — we ship psycopg 3. Pin the driver in the
+    scheme so the URL works exactly as provisioned."""
+    url = url.strip()
+    if url.startswith("postgres://"):
+        url = "postgresql://" + url[len("postgres://"):]
+    if url.startswith("postgresql://"):
+        url = "postgresql+psycopg://" + url[len("postgresql://"):]
+    return url
+
+
+LIVE_DATABASE_URL = _normalize_pg_url(os.getenv("LIVE_DATABASE_URL", ""))
 ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "").strip()
 RATE_LIMIT_SECONDS = float(os.getenv("RATE_LIMIT_SECONDS", "30"))
 
