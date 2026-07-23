@@ -110,8 +110,11 @@ def _try_map(s, row: MarketEvent, tdate: str | None) -> bool:
 
 
 def _ensure_contracts(s, row: MarketEvent) -> None:
-    """Create contract rows (side label -> outcome key) for an event
-    that has none yet. Throttled; failures retry next sweep."""
+    """Create contract rows (side label -> outcome key) for an event,
+    and REPAIR existing rows whose outcome_key is still NULL — an event
+    discovered before its fixture existed got label-only contracts, and
+    they must heal once the mapping lands (seen live Jul 23: only 'Tie'
+    resolvable pre-mapping). Throttled; failures retry next sweep."""
     payload = _kalshi_get(f"{KALSHI}/markets",
                           params={"event_ticker": row.kalshi_event_ticker,
                                   "limit": 20})
@@ -128,11 +131,14 @@ def _ensure_contracts(s, row: MarketEvent) -> None:
                     okey = "home_win"
                 elif t.id == fx.away_team_id:
                     okey = "away_win"
-        if not s.query(MarketContract).filter_by(
-                ticker=m.get("ticker")).first():
+        existing = s.query(MarketContract).filter_by(
+            ticker=m.get("ticker")).first()
+        if existing is None:
             s.add(MarketContract(market_event_id=row.id,
                                  ticker=m.get("ticker"),
                                  side_label=label, outcome_key=okey))
+        elif existing.outcome_key is None and okey:
+            existing.outcome_key = okey
 
 
 def discover_and_map() -> dict:
@@ -175,9 +181,12 @@ def discover_and_map() -> dict:
                     unmapped += 1
             s.flush()
             day = _ticker_day(tdate)
-            if (day and day >= horizon_floor
-                    and not s.query(MarketContract)
-                    .filter_by(market_event_id=row.id).first()):
+            existing = s.query(MarketContract).filter_by(
+                market_event_id=row.id).all()
+            needs = (not existing
+                     or (row.fixture_id is not None
+                         and any(c.outcome_key is None for c in existing)))
+            if day and day >= horizon_floor and needs:
                 try:
                     _ensure_contracts(s, row)
                     contracts_filled += 1

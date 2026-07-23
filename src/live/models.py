@@ -157,6 +157,10 @@ class PredictionRun(LiveBase):
     created_at = Column(DateTime(timezone=True))
     completed_at = Column(DateTime(timezone=True))
     failure_reason = Column(Text)
+    # display extras (xg, scorelines, props, basis) frozen WITH the run —
+    # recomputing later against refreshed ratings would silently diverge
+    # from the stored contracts
+    payload_json = Column(Text)
     __table_args__ = (
         # ONE canonical complete T-10 per fixture — the same partial
         # unique invariant on SQLite (tests) and PostgreSQL (production).

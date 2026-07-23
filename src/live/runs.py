@@ -11,6 +11,7 @@ makes a second canonical lock physically impossible.
 """
 from __future__ import annotations
 
+import json
 import os
 from datetime import datetime, timedelta, timezone
 
@@ -45,7 +46,13 @@ def _write_run(s, fixture, run_type: str, model: dict,
         status="writing", canonical=False,
         git_revision=GIT_REV,
         simulation_seed=pred["seed"],
-        simulation_count=config.N_SIMULATIONS)
+        simulation_count=config.N_SIMULATIONS,
+        payload_json=json.dumps({
+            "xg": pred.get("xg"),
+            "scorelines": pred.get("scorelines"),
+            "props": pred.get("props"),
+            "basis": pred.get("basis"),
+        })[:100_000])
     s.add(run)
     s.flush()
     # contracts: the three-way outcomes, attached to mapped market
@@ -80,10 +87,12 @@ def _write_run(s, fixture, run_type: str, model: dict,
     return run
 
 
-def scheduled_runs(horizon_hours: float = 168.0) -> dict:
+def scheduled_runs(horizon_hours: float = 168.0,
+                   freshness_hours: float = 4.0) -> dict:
     """Rolling shadow odds: every upcoming fixture inside the horizon
-    gets a fresh 'scheduled' run unless one is younger than 4h. The
-    default horizon matches the dashboard's seven-day fixture list —
+    gets a fresh 'scheduled' run unless one is younger than
+    freshness_hours (operator sweeps may pass 0 to force regeneration).
+    The default horizon matches the dashboard's seven-day fixture list —
     "odds up and running for all matches" means every visible fixture."""
     if not (plane_ready() and config.MLS_SHADOW_ENABLED):
         return {"skipped": "off"}
@@ -109,7 +118,7 @@ def scheduled_runs(horizon_hours: float = 168.0) -> dict:
                      .order_by(PredictionRun.captured_at.desc())
                      .first())
             if fresh and (_now() - _utc(fresh.captured_at)
-                          ) < timedelta(hours=4):
+                          ) < timedelta(hours=freshness_hours):
                 skipped += 1
                 continue
             # one bad fixture must not kill the whole sweep — the prod
@@ -208,7 +217,16 @@ def model_for_event(espn_event_id: str) -> dict | None:
         def _payload(run):
             contracts = (s.query(PredictionContract)
                          .filter_by(prediction_run_id=run.id).all())
-            return {
+            # outcome -> Kalshi ticker via the APPROVED mapping chain, so
+            # the frontend joins model to book by ticker, never by
+            # guessing at side labels
+            tickers = {}
+            for c in contracts:
+                if c.market_contract_id:
+                    mc = s.get(MarketContract, c.market_contract_id)
+                    if mc:
+                        tickers[c.outcome_key] = mc.ticker
+            out = {
                 "run_id": run.id, "run_type": run.run_type,
                 "captured_at": (_utc(run.captured_at).isoformat()
                                 if run.captured_at else None),
@@ -216,7 +234,14 @@ def model_for_event(espn_event_id: str) -> dict | None:
                 "n_simulations": run.simulation_count,
                 "outcomes": {c.outcome_key: round(c.raw_probability, 4)
                              for c in contracts},
+                "tickers": tickers,
             }
+            if run.payload_json:
+                try:
+                    out.update(json.loads(run.payload_json))
+                except (ValueError, TypeError):
+                    pass
+            return out
 
         latest = (s.query(PredictionRun)
                   .filter_by(fixture_id=f.id, status="complete")

@@ -176,11 +176,13 @@ def mls_match(event_id: str):
 
 
 @app.post("/api/admin/mls/sweep")
-def mls_admin_sweep(request: Request):
+def mls_admin_sweep(request: Request, force: bool = Query(False)):
     """Operator-only: run the shadow sweeps NOW and return their result
-    dicts — the remote eyes for a boot that reports zero runs. The
-    middleware already enforces the token in read-only mode; the
-    explicit check keeps this locked even if that mode is ever off."""
+    dicts — the remote eyes for a boot that reports zero runs. force
+    regenerates runs regardless of freshness (e.g. after a model or
+    payload change). The middleware already enforces the token in
+    read-only mode; the explicit check keeps this locked even if that
+    mode is ever off."""
     if not _admin_ok(request):
         raise HTTPException(403, "operator credentials required")
     from src.live import ingest as live_ingest
@@ -188,7 +190,8 @@ def mls_admin_sweep(request: Request):
     from src.live import runs as live_runs
     return {"window": live_ingest.refresh_window(),
             "map": live_markets.discover_and_map(),
-            "runs": live_runs.scheduled_runs(),
+            "runs": live_runs.scheduled_runs(
+                freshness_hours=0.0 if force else 4.0),
             "generated_at": utcnow().isoformat()}
 
 

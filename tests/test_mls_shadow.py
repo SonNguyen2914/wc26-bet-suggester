@@ -219,6 +219,59 @@ class TestMarketHelpers:
         assert markets._fixture_et_date(dt) == "26JUL26"
 
 
+class TestContractRepair:
+    def test_null_outcome_keys_heal_once_mapping_lands(self, live_session,
+                                                       monkeypatch):
+        """An event discovered before its fixture existed has label-only
+        contracts; once mapped, _ensure_contracts must repair them."""
+        from src.live.models import MarketContract, MarketEvent
+        identity.seed_teams(CANNED_ESPN)
+        teams = {t.canonical_name: t.id for t in
+                 live_session.query(Team).filter_by(
+                     competition_slug="mls-2026")}
+        fx = Fixture(competition_slug="mls-2026", espn_event_id="801",
+                     home_team_id=teams["Columbus Crew"],
+                     away_team_id=teams["New York City FC"],
+                     current_kickoff_utc=datetime(2026, 7, 25, 23, 30,
+                                                  tzinfo=UTC),
+                     status="pre")
+        live_session.add(fx)
+        live_session.flush()
+        ev = MarketEvent(competition_slug="mls-2026",
+                         kalshi_event_ticker="KXMLSGAME-26JUL25CLBNYC",
+                         series="KXMLSGAME", title="Columbus vs New York City",
+                         fixture_id=fx.id, mapping_approved=True,
+                         mapped_via="alias")
+        live_session.add(ev)
+        live_session.flush()
+        # the pre-mapping state: only Tie resolvable
+        for ticker, label, okey in (
+                ("KXMLSGAME-26JUL25CLBNYC-CLB", "Columbus", None),
+                ("KXMLSGAME-26JUL25CLBNYC-NYC", "New York City", None),
+                ("KXMLSGAME-26JUL25CLBNYC-TIE", "Tie", "draw")):
+            live_session.add(MarketContract(
+                market_event_id=ev.id, ticker=ticker,
+                side_label=label, outcome_key=okey))
+        live_session.commit()
+        monkeypatch.setattr(markets, "_kalshi_get", lambda url, **kw: {
+            "markets": [
+                {"ticker": "KXMLSGAME-26JUL25CLBNYC-CLB",
+                 "yes_sub_title": "Columbus"},
+                {"ticker": "KXMLSGAME-26JUL25CLBNYC-NYC",
+                 "yes_sub_title": "New York City"},
+                {"ticker": "KXMLSGAME-26JUL25CLBNYC-TIE",
+                 "yes_sub_title": "Tie"},
+            ]})
+        markets._ensure_contracts(live_session, ev)
+        live_session.commit()
+        keys = {c.ticker: c.outcome_key for c in
+                live_session.query(MarketContract).filter_by(
+                    market_event_id=ev.id)}
+        assert keys["KXMLSGAME-26JUL25CLBNYC-CLB"] == "home_win"
+        assert keys["KXMLSGAME-26JUL25CLBNYC-NYC"] == "away_win"
+        assert keys["KXMLSGAME-26JUL25CLBNYC-TIE"] == "draw"
+
+
 class TestPredictionRuns:
     def _seed_playable(self, s, n_completed=12):
         identity.seed_teams(CANNED_ESPN)
@@ -258,12 +311,16 @@ class TestPredictionRuns:
         assert row["run_type"] == "scheduled" and not row["locked"]
         # freshness: an immediate second sweep creates nothing
         assert runs.scheduled_runs()["created"] == 0
-        # the hub payload carries provenance
+        # the hub payload carries provenance AND the frozen display
+        # extras (xg/scorelines/props travel WITH the stored run)
         hub = runs.model_for_event("9001")
         assert hub["shadow"] is True
         assert hub["latest"]["seed"] == model_mls.seed_for(
             live_session.query(Fixture).filter_by(
                 espn_event_id="9001").one().id, "scheduled")
+        assert hub["latest"]["xg"]["home"] > 0
+        assert len(hub["latest"]["scorelines"]) > 0
+        assert "over_2_5" in hub["latest"]["props"]
 
     def test_incomplete_runs_are_invisible(self, live_session):
         up = self._seed_playable(live_session)
