@@ -244,3 +244,25 @@ Roadmap Phase 7 — the execution-strategy evidence layer, deliberately separate
 Live-verified against a real frozen lock book, the engine did the disciplined thing: it **rejected every signal with `not_execution_ready`**, because the MLS books days out aren't fresh or two-sided — exactly when you must *not* pretend a fill is possible. The fill machinery itself (100 contracts, weighted-average price, slippage, partial fills) is proven by unit test. Real fills wait for live books at Saturday's T-10. Scoped to the unambiguous 3-way winner for v1; prop settlement is a later extension.
 
 Roadmap: steps 1, 3, 4, 5, 6, 7, 8 done; step 2 (run/audit + now settle the slate) is Saturday; step 9 (the central correlated-exposure risk engine + kill switches) is next. Levels 1–3 ready; 4–6 not — but the machinery for level 4 (execution-quality paper) now exists and collects evidence.
+
+### Steps 9–11 — risk engine, observability, frontend E2E (Jul 23)
+
+The remaining *buildable* roadmap steps, shipped together.
+
+**Step 9 — central risk engine** (`src/live/risk.py`, `GET /api/mls/risk`). ONE server-side policy authority, shared by paper trading and any future executor so no order path can bypass it. Two named-reason gate classes (market tradeability + position exposure), kill switches on top (config `GLOBAL_/COMPETITION_TRADING_DISABLED` plus data-driven), and **correlation grouping** — home win / home −1.5 / home team over / home first goal collapse to one match-direction budget, so the same opinion can't be stacked across families. Versioned `RISK_POLICY` with explicit settings, no hidden constants. Paper trading now routes both gate classes through it.
+
+**Step 11 — observability** (`src/live/observability.py`, `GET /api/mls/metrics`, `docs/V8/RUNBOOK.md`). Machine-readable operational metrics — data freshness, lock success rate, missed locks, failed snapshots, paper P&L, settlement lag — plus a runbook with a procedure for every incident the review named (missed lock, provider outage, Kalshi schema change, postponement, wrong mapping, failed migration, settlement lag, restore) and the kill-switch reference.
+
+**Step 10 — frontend E2E** (Playwright, in CI). The frontend had no automated tests; now a decision-safety suite asserts the invariants that hold regardless of volatile data — the board deep-links into MLS mode with shadow framing, the match hub labels the model "shadow · not advice" and shows the fee-aware **Net edge** column (never a bare "edge" or a generic "TAKE"), the not-advice disclaimer is present, and back-navigation returns to the MLS board. It runs against a built app proxied to the live backend, blocking on every push.
+
+433 backend tests, both CI pipelines green (backend runs real-Postgres integration; frontend runs the E2E). Money stays locked.
+
+### Where the buildable work ends
+
+Steps 12–15 are **not code to write** — they are gates:
+- **12, prospective paper period** — needs calendar time (Saturday onward) to elapse and produce settled evidence;
+- **13, formal model + operations approval review** — a written decision made *on* that evidence, not a feature;
+- **14, manual real-money recommendations** — gated on 13, and on data/risk/operator controls that exist but must be *judged sufficient*;
+- **15, automated execution** — a separate project requiring real exchange credentials, the demo environment, order/fill reconciliation, and legal/compliance review of Kalshi's developer agreement and the operator's jurisdiction.
+
+The platform is now built up to the edge of what code can responsibly deliver in shadow: levels 1–3 ready, the machinery for level 4 (execution-quality paper) in place and collecting evidence, and every path above real-money still closed by design. The next thing that moves the project is not another commit — it is Saturday's slate producing the first prospective evidence.
