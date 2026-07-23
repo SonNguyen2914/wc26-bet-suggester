@@ -144,7 +144,7 @@ def upgrade() -> None:
     sa.ForeignKeyConstraint(['model_version_id'], ['model_version.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
-    op.create_index('uq_fixture_canonical_t10', 'prediction_run', ['fixture_id'], unique=True, postgresql_where=sa.text("run_type = 't10' AND canonical IS 1 AND status = 'complete'"), sqlite_where=sa.text("run_type = 't10' AND canonical IS 1 AND status = 'complete'"))
+    op.create_index('uq_fixture_canonical_t10', 'prediction_run', ['fixture_id'], unique=True, postgresql_where=sa.text("run_type = 't10' AND canonical AND status = 'complete'"), sqlite_where=sa.text("run_type = 't10' AND canonical = 1 AND status = 'complete'"))
     op.create_table('market_contract',
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('market_event_id', sa.Integer(), nullable=False),
@@ -212,7 +212,7 @@ def downgrade() -> None:
     op.drop_table('market_depth_level')
     op.drop_table('market_quote')
     op.drop_table('market_contract')
-    op.drop_index('uq_fixture_canonical_t10', table_name='prediction_run', postgresql_where=sa.text("run_type = 't10' AND canonical IS 1 AND status = 'complete'"), sqlite_where=sa.text("run_type = 't10' AND canonical IS 1 AND status = 'complete'"))
+    op.drop_index('uq_fixture_canonical_t10', table_name='prediction_run', postgresql_where=sa.text("run_type = 't10' AND canonical AND status = 'complete'"), sqlite_where=sa.text("run_type = 't10' AND canonical = 1 AND status = 'complete'"))
     op.drop_table('prediction_run')
     op.drop_table('market_event')
     op.drop_table('fixture_change')

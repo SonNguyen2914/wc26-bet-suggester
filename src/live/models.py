@@ -22,7 +22,7 @@ from __future__ import annotations
 import uuid
 
 from sqlalchemy import (Boolean, Column, DateTime, Float, ForeignKey, Index,
-                        Integer, String, Text, UniqueConstraint)
+                        Integer, String, Text, UniqueConstraint, text)
 from sqlalchemy.orm import declarative_base
 
 LiveBase = declarative_base()
@@ -158,14 +158,19 @@ class PredictionRun(LiveBase):
     __table_args__ = (
         # ONE canonical complete T-10 per fixture — the same partial
         # unique invariant on SQLite (tests) and PostgreSQL (production).
+        # Explicit per-dialect WHERE text: building this from detached
+        # typeless Column() objects rendered `canonical IS 1`, which
+        # SQLite accepts and PostgreSQL rejects — the first live-plane
+        # migration died on it (Jul 23). A compilation test now pins
+        # both dialects' DDL.
         Index("uq_fixture_canonical_t10", "fixture_id",
               unique=True,
-              postgresql_where=(Column("run_type") == "t10")
-              & (Column("canonical").is_(True))
-              & (Column("status") == "complete"),
-              sqlite_where=(Column("run_type") == "t10")
-              & (Column("canonical").is_(True))
-              & (Column("status") == "complete")),
+              postgresql_where=text(
+                  "run_type = 't10' AND canonical AND "
+                  "status = 'complete'"),
+              sqlite_where=text(
+                  "run_type = 't10' AND canonical = 1 AND "
+                  "status = 'complete'")),
     )
 
 

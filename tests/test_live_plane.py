@@ -162,3 +162,20 @@ class TestPlaneIsolation:
         assert livedb.LIVE_BOOT_ERROR and "boom" in livedb.LIVE_BOOT_ERROR
         st = livedb.status()
         assert st["boot_failed"] is True and "boom" in st["error"]
+
+
+class TestPartialIndexDdl:
+    def test_compiles_validly_for_both_dialects(self):
+        """`canonical IS 1` killed the first PG migration — pin the DDL."""
+        from sqlalchemy.dialects import postgresql, sqlite
+        from sqlalchemy.schema import CreateIndex
+        idx = next(i for i in
+                   __import__("src.live.models", fromlist=["PredictionRun"])
+                   .PredictionRun.__table__.indexes
+                   if i.name == "uq_fixture_canonical_t10")
+        pg = str(CreateIndex(idx).compile(dialect=postgresql.dialect()))
+        sq = str(CreateIndex(idx).compile(dialect=sqlite.dialect()))
+        assert "IS 1" not in pg and "IS 1" not in sq
+        assert "canonical AND" in pg          # bare boolean, valid PG
+        assert "canonical = 1" in sq          # integer form, valid SQLite
+        assert "WHERE" in pg and "UNIQUE" in pg
