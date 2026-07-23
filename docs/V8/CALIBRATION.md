@@ -1,5 +1,8 @@
 # CALIBRATION — V8: `mls-2026-v0` Validation (July 23, 2026)
 
+> **SUPERSEDED BY V9** (`docs/V9/CALIBRATION.md`, Jul 23) — the definitive
+> evaluation is now the analytic model-development ladder with bootstrap CIs.
+
 *Successor to `docs/V7/CALIBRATION.md` (the WC26 battery, which remains the
 reference for everything tournament-side). This document records how the MLS model
 earned — and only just earned — its shadow approval, and what would have to be true

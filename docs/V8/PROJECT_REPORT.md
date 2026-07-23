@@ -1,5 +1,9 @@
 # Project Report — V8: The MLS Expansion (July 22–23, 2026)
 
+> **SUPERSEDED BY V9** (`docs/V9/PROJECT_REPORT.md`, Jul 23) — this report
+> and its addenda remain the detailed record of the expansion; V9 tells the
+> full arc as one consolidated story.
+
 *Successor to `docs/V7/PROJECT_REPORT.md` (the World Cup arc + evaluation). This
 report covers the ~36 hours in which the completed-tournament archive became a
 two-plane, multi-league platform with a live shadow pipeline. V7's report remains

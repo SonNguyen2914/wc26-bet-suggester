@@ -1,5 +1,10 @@
 # WC26 Bet Suggester → Multi-League Platform — Project Documentation & Roadmap
 
+> **SUPERSEDED BY V9** (`docs/V9/PROJECT_DOC.md`, Jul 23) — V8 remains the
+> expansion snapshot; the evaluation-remediation-through-roadmap arc (atomic
+> evidence chain, reproducible inputs, corpus, model ladder + CIs, paper
+> trading, risk engine, observability, slate audit) lives in V9.
+
 **V8 — July 23, 2026. THE EXPANSION EDITION.** V7 closed the evaluation arc and froze
 the World Cup as a hardened read-only archive. V8 opens the next one: in the ~36 hours
 after V7 was written, the project **became a two-plane platform** — the WC26 archive
