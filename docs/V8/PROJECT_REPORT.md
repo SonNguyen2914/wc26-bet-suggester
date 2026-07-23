@@ -168,3 +168,15 @@ The re-evaluation upgraded the verdict conditionally — T-10 evidence integrity
 And the **acceptance-audit harness** the evaluator elevated above more building: `GET /api/mls/audit` (public read-only, content-hashed) checks every canonical lock against the full invariant table — one lock per fixture, before kickoff, inside window, snapshot complete + policy-versioned + required families, contracts unique by outcome, every priced contract quote-linked, model approved-at-run, seed/hash present, three-way sums to one, no post-kickoff replacement — and **retains** missed locks and failed snapshots as evidence. It caught a pre-manifest lock as failing in rehearsal, which is the point. Live now, showing 0 locks / clean until Saturday populates it.
 
 **Qual #1 (a retrievable input document, not just a hash) was deliberately deferred** — it is the P1 corpus-export work, and the docs no longer claim "independently model-reproducible", only "market-provenance-complete".
+
+### Phase 2 — the retrievable input artifact (Jul 23, last build)
+
+The re-evaluation's full launch-gate roadmap (six levels, sixteen phases) named ONE immediate task: the retrievable canonical input artifact — the last provenance gap, and the qualification #1 deliberately deferred earlier. Built and deployed before Saturday (@4f3ab19, migration `c21ba2ee8df4`, the 4th clean prod-PG migration):
+
+`input_snapshot_hash` proved integrity but not reproducibility, because the bytes it hashed weren't kept. Now every run stores a `model_input_artifact` — the exact canonical document it simulated from (model params, fitted league params, both teams' ratings, seed, draw count, the source-fixture provider ids that fed the fit, and the data cutoff), deduped by content hash, deterministically serialized (sorted keys, float round-trip, UTC, no machine paths). `replay_from_artifact` reconstructs the engine inputs from that document ALONE and re-runs the sim with the frozen seed; `GET /api/mls/replay/{run_id}` (public) does it live.
+
+**Live proof, prod:** a real run replays with `max_delta: 0.0` — bit-identical reproduction from the stored bytes, no live database touched. This moves the project across the roadmap's second major launch level:
+
+- **Level 3 — Research reproducibility:** *now reached* (was "not ready"). The project can accurately say **independently model-reproducible**: hand someone the artifact document and the seed, they get the same probabilities.
+
+The claim language is updated accordingly — "market-provenance-complete AND independently model-reproducible." What remains is genuinely the slower science the roadmap lays out: Levels 4–6 (execution-quality paper trading, manual real-money, automated execution), each gated on prospective evidence, lineup-quality inputs, a risk engine, and validated fills — none of it emergency, none of it blocking Saturday's first provenance-complete, independently-reproducible locks.
