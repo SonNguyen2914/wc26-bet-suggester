@@ -367,6 +367,68 @@ class TestLineupPlane:
         assert live_session.query(Player).count() == 22
 
 
+class TestModelLadderEval:
+    def test_analytic_3way_is_exact_and_normalized(self):
+        from src.live import model_eval
+        p = model_eval.analytic_3way(1.6, 1.2)
+        assert abs(sum(p.values()) - 1.0) < 1e-9
+        assert p["home_win"] > p["away_win"]     # higher home rate
+        # equal rates -> home and away symmetric, draw sizeable
+        q = model_eval.analytic_3way(1.3, 1.3)
+        assert abs(q["home_win"] - q["away_win"]) < 1e-9
+        assert q["draw"] > 0.2
+
+    def test_analytic_is_deterministic_no_mc_noise(self):
+        from src.live import model_eval
+        a = model_eval.analytic_3way(1.7, 1.1)
+        b = model_eval.analytic_3way(1.7, 1.1)
+        assert a == b                            # exact, not sampled
+
+    def test_ladder_eval_ranks_and_bounds_ci(self, live_session):
+        """On a separable season, M2 should not be worse than M0, and
+        every edge carries a bootstrap CI."""
+        from src.live import identity, model_eval
+        from src.live.models import Fixture, Team
+        identity.seed_teams(CANNED_ESPN)
+        ids = [t.id for t in live_session.query(Team).filter_by(
+            competition_slug="mls-2026")]
+        now = datetime.now(UTC)
+        k = 0
+        # a strong team (ids[0]) and a weak one (ids[1]) with signal
+        for rnd in range(10):
+            for a, b, hg, ag in ((0, 1, 3, 0), (2, 3, 1, 1),
+                                 (0, 2, 2, 0), (1, 3, 0, 1),
+                                 (3, 0, 0, 2), (2, 1, 2, 1)):
+                k += 1
+                live_session.add(Fixture(
+                    competition_slug="mls-2026", espn_event_id=f"e{k}",
+                    home_team_id=ids[a], away_team_id=ids[b],
+                    current_kickoff_utc=now - timedelta(days=200 - k),
+                    status="post", home_goals=hg, away_goals=ag))
+        live_session.commit()
+        rep = model_eval.evaluate_ladder(n_boot=300)
+        assert rep["n_scored"] > 10
+        assert set(rep["variants"]) == {"M0", "M1", "M2"}
+        for name in ("M0", "M1", "M2"):
+            assert 0 < rep["variants"][name]["log_loss"] < 5
+        edge = rep["edges"]["M2_vs_M0"]
+        assert "ci95" in edge and len(edge["ci95"]) == 2
+        assert isinstance(edge["significant"], bool)
+        # M2 (ratings+recency) should not lose to M0 (no team info) here
+        assert rep["variants"]["M2"]["log_loss"] <= \
+            rep["variants"]["M0"]["log_loss"] + 0.02
+
+    def test_approval_record_never_exceeds_shadow(self, live_session):
+        from src.live import model_eval
+        rec = model_eval.approval_record(
+            {"eval_version": "x", "n_scored": 5,
+             "variants": {"M2": {"log_loss": 1.0, "brier": 0.6}},
+             "edges": {"M2_vs_M0": {"delta_log_loss": 0.01}}})
+        assert rec["approved_mode"] == "shadow"
+        assert "NOT" in rec["approval_meaning"]
+        assert any("prospective" in x for x in rec["limitations"])
+
+
 class TestMarketHelpers:
     def test_cents_prefers_native_integer(self):
         assert markets._cents({"yes_bid": 57,

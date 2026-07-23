@@ -216,6 +216,27 @@ def mls_audit():
     return out or {"skipped": "dormant"}
 
 
+@app.get("/api/mls/model-eval")
+def mls_model_eval():
+    """The model-development ladder evaluation: M0/M1/M2 scored with
+    analytic (noise-free) 3-way probabilities under rolling-origin
+    validation, with match-cluster bootstrap CIs on each pairwise edge,
+    plus the approval-decision record. Public read-only; 1h cache
+    (rolling-origin + bootstrap is expensive)."""
+    from src.mls import _cached
+
+    def _run():
+        from src.live import model_eval
+        rep = model_eval.evaluate_ladder(n_boot=1000)
+        rep["approval_record"] = model_eval.approval_record(rep)
+        return rep
+    try:
+        return _cached("mls_model_eval", 3600, _run)
+    except Exception as exc:
+        print(f"[mls] model-eval failed: {exc}")
+        raise HTTPException(503, "model-eval unavailable")
+
+
 @app.get("/api/mls/corpus")
 def mls_corpus(full: bool = Query(False)):
     """The prospective research corpus. Default returns the MANIFEST
