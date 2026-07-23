@@ -200,3 +200,13 @@ The evaluator was explicit that four clean production migrations are good operat
 A frontend CI landed alongside (@2dc84cc): `npm install` + tsc + lint + build, blocking. Adding it surfaced three real lint errors latent since the Next 16 / React 19 rules (impure `Date.now()` in render, two `setState`-in-effect patterns) — all fixed — and a cross-platform lockfile gap (Tailwind v4's Linux-only native optional deps), reconciled with `--os=linux` lockfile additions and `npm install`. Both pipelines green.
 
 Roadmap: steps 1 (freeze), 3 (artifact), 4 (corpus), and **5 (PostgreSQL-in-CI)** done; step 2 (run/audit slates) waits for Saturday; step 6 (roster/availability/lineup inputs) is next.
+
+### Step 6 — the live MLS input plane (Jul 23)
+
+Roadmap Phase 5, the evaluator's most important modeling addition before any money talk. The build follows the decision's discipline: capture team-selection inputs with provenance and label their quality, but do NOT let the model consume them yet (that waits for validation) — and critically, *missing data must never be silently treated as confidence*.
+
+Schema (migration `521bd3137595`, clean on PostgreSQL 18.1): `player` identity; an as-of `lineup_snapshot` with full provenance (observed_at, provider, parser_version, content-hashed source observation, per-side confirmed/formation/GK); per-player `lineup_entry`; and `prediction_run.input_quality_json`. `src/live/lineups.py` parses ESPN's `rosters` (a lineup is confirmed at 11 starters; the GK is the starter at position 'G') and writes a provenance-complete snapshot — a *pending* lineup is recorded, not skipped. The T-10 lock captures the lineup it saw, sets `lineup_snapshot_id`/`availability_snapshot_id`, and freezes the five states: TEAM_DATA_FRESH / PLAYER_DATA_FRESH / AVAILABILITY_COMPLETE / LINEUP_CONFIRMED / GOALKEEPER_CONFIRMED. The audit records `lineup_snapshot_referenced` and echoes the states; the corpus carries players/lineups/entries; the match hub shows an honest input-quality row.
+
+Live-verified: a real ESPN capture of a completed match parses to confirmed + GK; a fixture days out honestly reads `LINEUP_CONFIRMED: false` while `TEAM_DATA_FRESH: true` — exactly the "no silent confidence" behavior. When Saturday's lineups drop ~1h before kickoff, T-10 will capture them confirmed. 418 tests; both CI pipelines green.
+
+Roadmap: steps 1, 3, 4, 5, and now 6 done; step 2 (run/audit slates) is Saturday; step 7 (the M0–M5 model ladder with rolling-origin validation and bootstrap CIs) is next.
