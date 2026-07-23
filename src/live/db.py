@@ -11,6 +11,12 @@ def live_enabled() -> bool:
     return bool(config.LIVE_DATABASE_URL)
 
 
+def plane_ready() -> bool:
+    """Enabled AND the boot migration/seed didn't fail. Shadow jobs gate
+    on this so a boot-failed plane isn't hammered every interval."""
+    return live_enabled() and not LIVE_BOOT_ERROR
+
+
 def get_engine():
     """Lazy engine; never created while the plane is dormant."""
     global _engine

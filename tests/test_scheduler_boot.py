@@ -77,9 +77,11 @@ class _RecordingScheduler:
 
 class TestBootRegistration:
     def test_single_chained_boot_job(self):
-        # THE regression guard: exactly one one-shot at boot — the ordered
-        # chain. Re-adding a separate restore/prime/bracket "date" job
-        # reintroduces the race.
+        # THE regression guard: the ARCHIVE boot is exactly one ordered
+        # chain — re-adding a separate restore/prime/bracket "date" job
+        # reintroduces the race. The MLS live plane gets its OWN isolated
+        # one-shot (plane isolation: a live failure must never delay or
+        # break the archive chain), and nothing else.
         orig = sched.BackgroundScheduler
         sched.BackgroundScheduler = _RecordingScheduler
         try:
@@ -88,7 +90,8 @@ class TestBootRegistration:
             sched.BackgroundScheduler = orig
         one_shots = [(func, kw.get("id")) for func, trigger, kw in s.jobs
                      if trigger == "date"]
-        assert one_shots == [(sched.boot_sequence, "boot_sequence")]
+        assert one_shots == [(sched.boot_sequence, "boot_sequence"),
+                             (sched.mls_boot, "mls_boot")]
 
     def test_recurring_jobs_still_registered(self):
         # The chain must not have cannibalized the steady-state jobs.

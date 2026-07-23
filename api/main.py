@@ -165,7 +165,28 @@ def mls_match(event_id: str):
                              (out.get("away") or {}).get("name") or "")
     except Exception as exc:            # the hub must not die on the book
         print(f"[mls] book match failed for {event_id}: {exc}")
-    return {"match": out, "book": book,
+    model = None
+    try:                                # nor on the live plane
+        from src.live import runs as live_runs
+        model = live_runs.model_for_event(event_id)
+    except Exception as exc:
+        print(f"[mls] model section failed for {event_id}: {exc}")
+    return {"match": out, "book": book, "model": model,
+            "generated_at": utcnow().isoformat()}
+
+
+@app.get("/api/mls/odds")
+def mls_odds():
+    """The shadow odds board: every upcoming fixture's newest complete
+    prediction run. Shadow-labeled; never a recommendation."""
+    odds = []
+    try:
+        from src.live import runs as live_runs
+        odds = live_runs.latest_odds()
+    except Exception as exc:
+        print(f"[mls] odds board failed: {exc}")
+    return {"odds": odds, "shadow": True,
+            "real_money_signals": config.REAL_MONEY_SIGNALS_ENABLED,
             "generated_at": utcnow().isoformat()}
 
 
@@ -193,6 +214,12 @@ def ready():
     bundles = len(archive.available_lock_bundles())
     from src.live import db as live_db
     live = live_db.status()
+    if live.get("connected"):
+        try:
+            from src.live import runs as live_runs
+            live["shadow"] = live_runs.shadow_counts()
+        except Exception as exc:
+            live["shadow"] = {"error": str(exc)[:200]}
     archive_ok = (results >= expected_results and ledger == 84
                   and bundles == 6)
     live_ok = (not live["enabled"]) or (

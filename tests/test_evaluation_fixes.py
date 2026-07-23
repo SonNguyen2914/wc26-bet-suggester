@@ -379,3 +379,21 @@ class TestOperatingModes:
     def test_live_plane_dormant_without_url(self):
         import config
         assert config.LIVE_DATABASE_URL == ""   # test env: dormant
+
+
+class TestEngineLeagueGeneralization:
+    def test_wc_behavior_unchanged_without_league_keys(self):
+        a, b = predict_xg(_team(), _team())
+        c, d = predict_xg(_team(league_base=None), _team())
+        assert (a, b) == (c, d)
+
+    def test_league_base_and_venue_scale(self):
+        base_h, base_a = predict_xg(_team(), _team())
+        h, a = predict_xg(_team(league_base=1.55, venue_mult=1.18),
+                          _team(venue_mult=0.85))
+        # home scaled by (1.55/1.30)*1.18, away by (1.55/1.30)*0.85 —
+        # centered set-piece shifts by a constant, so compare open-play
+        # part via the ratio of (xg + baseline-correction)
+        assert h > base_h and a < base_a * 1.2
+        h2, a2 = predict_xg(_team(league_base=1.30), _team())
+        assert (h2, a2) == (base_h, base_a)   # explicit WC base = default

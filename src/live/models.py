@@ -89,6 +89,8 @@ class Fixture(LiveBase):
     current_kickoff_utc = Column(DateTime(timezone=True))
     venue = Column(String(96))
     status = Column(String(16))
+    home_goals = Column(Integer)          # final score once status=post
+    away_goals = Column(Integer)
     round = Column(String(32))
     observed_at = Column(DateTime(timezone=True))
     provider_updated_at = Column(DateTime(timezone=True))

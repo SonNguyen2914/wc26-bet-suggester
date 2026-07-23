@@ -36,13 +36,21 @@ def predict_xg(home_raw: dict, away_raw: dict) -> tuple[float, float]:
     home = build_team_features(home_raw)
     away = build_team_features(away_raw)
 
+    # League generalization (Jul 23): scoring base and per-side venue
+    # multipliers ride IN the raw dicts so other competitions reuse this
+    # engine without forking it. Absent (every WC26 caller), the
+    # constants reproduce tournament behavior exactly — pinned by tests.
+    base = home_raw.get("league_base") or LEAGUE_BASE_XG
+    venue_home = home_raw.get("venue_mult", 1.0)
+    venue_away = away_raw.get("venue_mult", 1.0)
+
     # Open play: attack vs opposing defence, scaled by form + fatigue.
     # (Attack comes from total xGF, so this term already carries average
     # set-piece production — hence the centered adjustment below.)
-    home_open = LEAGUE_BASE_XG * home["attack"] * away["defence"] \
-        * (0.85 + 0.30 * home["form"]) * home["fatigue_mult"]
-    away_open = LEAGUE_BASE_XG * away["attack"] * home["defence"] \
-        * (0.85 + 0.30 * away["form"]) * away["fatigue_mult"]
+    home_open = base * home["attack"] * away["defence"] \
+        * (0.85 + 0.30 * home["form"]) * home["fatigue_mult"] * venue_home
+    away_open = base * away["attack"] * home["defence"] \
+        * (0.85 + 0.30 * away["form"]) * away["fatigue_mult"] * venue_away
 
     # Set pieces: deviation from the competition mean only.
     home_xg = home_open + (home["set_piece_threat"] - SET_PIECE_BASELINE)

@@ -211,6 +211,83 @@ def boot_sequence() -> None:
             print(f"[boot] {name} FAILED: {exc}")
 
 
+# --- MLS shadow plane (launch decision: shadow mode, money locked) ---------
+# Lazy imports inside each job: an import failure in the live plane must
+# never take the scheduler (and with it the WC26 archive) down.
+
+def mls_boot() -> None:
+    """One-shot live-plane boot: identity -> season history -> market map
+    -> first shadow runs -> walk-forward validation. Each step isolated;
+    all no-op instantly when the live DB is dormant."""
+    if not config.MLS_SHADOW_ENABLED:
+        return
+    steps = (
+        ("seed_teams", lambda: __import__(
+            "src.live.identity", fromlist=["x"]).seed_teams()),
+        ("season_ingest", lambda: __import__(
+            "src.live.ingest", fromlist=["x"]).ingest_season_schedules()),
+        ("market_map", lambda: __import__(
+            "src.live.markets", fromlist=["x"]).discover_and_map()),
+        ("shadow_runs", lambda: __import__(
+            "src.live.runs", fromlist=["x"]).scheduled_runs()),
+    )
+    for name, step in steps:
+        try:
+            print(f"[mls-boot] {name}: {step()}")
+        except Exception as exc:
+            print(f"[mls-boot] {name} FAILED: {exc}")
+    try:
+        from src.live import model_mls
+        bt = model_mls.backtest(n_sims=2000)
+        print(f"[mls-boot] backtest: {bt}")
+        if "error" not in bt and bt.get("n", 0) >= 30:
+            model_mls.ensure_model_version(
+                approved_for_shadow=bool(bt.get("beats_baseline")))
+    except Exception as exc:
+        print(f"[mls-boot] backtest FAILED: {exc}")
+
+
+def mls_window_job() -> None:
+    """Rolling fixture refresh: reschedules, status flips, final scores."""
+    try:
+        from src.live import ingest
+        ingest.refresh_window()
+    except Exception as exc:
+        print(f"[mls-window] error: {exc}")
+
+
+def mls_markets_job() -> None:
+    """Kalshi discovery/mapping + full-book capture for the horizon."""
+    try:
+        from src.live import markets
+        markets.discover_and_map()
+        markets.capture_quotes()
+    except Exception as exc:
+        print(f"[mls-markets] error: {exc}")
+
+
+def mls_runs_job() -> None:
+    """Fresh shadow odds for every upcoming fixture in the horizon."""
+    try:
+        from src.live import runs
+        r = runs.scheduled_runs()
+        if r.get("created"):
+            print(f"[mls-runs] {r}")
+    except Exception as exc:
+        print(f"[mls-runs] error: {exc}")
+
+
+def mls_t10_job() -> None:
+    """The atomic T-10 lock sweep (book freeze + canonical run)."""
+    try:
+        from src.live import runs
+        r = runs.t10_locks()
+        if r.get("locked"):
+            print(f"[mls-t10] {r}")
+    except Exception as exc:
+        print(f"[mls-t10] error: {exc}")
+
+
 def start_scheduler() -> BackgroundScheduler:
     scheduler = BackgroundScheduler(timezone="UTC")
     scheduler.add_job(hourly_predictions, "cron", minute=0, id="hourly")
@@ -242,4 +319,17 @@ def start_scheduler() -> BackgroundScheduler:
     # job — as independent one-shots these raced each other (see
     # boot_sequence docstring).
     scheduler.add_job(boot_sequence, "date", id="boot_sequence")
+    # MLS shadow plane: registered unconditionally, every job no-ops
+    # instantly when MLS_SHADOW_ENABLED is off or the live DB is dormant.
+    scheduler.add_job(mls_window_job, "interval", minutes=15,
+                      id="mls_window", coalesce=True, max_instances=1)
+    scheduler.add_job(mls_markets_job, "interval", minutes=10,
+                      id="mls_markets", coalesce=True, max_instances=1)
+    scheduler.add_job(mls_runs_job, "interval", minutes=15,
+                      id="mls_runs", coalesce=True, max_instances=1)
+    scheduler.add_job(mls_t10_job, "interval", seconds=60,
+                      id="mls_t10", coalesce=True, max_instances=1)
+    # Live-plane boot is its OWN one-shot, never chained into the archive
+    # boot_sequence: a live failure must not delay or break the archive.
+    scheduler.add_job(mls_boot, "date", id="mls_boot")
     return scheduler
