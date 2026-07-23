@@ -180,3 +180,51 @@ class TestScoutingParsers:
         assert lf[0]["form"] == "L" and lf[0]["games"][0]["opponent"] == "NYC"
         h = mls._parse_h2h(d)
         assert h[0]["result"] == "W" and h[0]["perspective"] == "CLB"
+
+
+class TestModelKeyParser:
+    """Ticker-tail -> model probability key (never label text)."""
+
+    def test_totals_ladder(self):
+        assert mls.model_key_for("KXMLSTOTAL",
+                                 "KXMLSTOTAL-26JUL25CLBCIN-1",
+                                 "CLBCIN") == "over_0_5"
+        assert mls.model_key_for("KXMLSTOTAL",
+                                 "KXMLSTOTAL-26JUL25CLBCIN-6",
+                                 "CLBCIN") == "over_5_5"
+
+    def test_btts_and_spread_sides(self):
+        assert mls.model_key_for("KXMLSBTTS",
+                                 "KXMLSBTTS-26JUL25CLBCIN-BTTS",
+                                 "CLBCIN") == "btts"
+        assert mls.model_key_for("KXMLSSPREAD",
+                                 "KXMLSSPREAD-26JUL25CLBCIN-CLB2",
+                                 "CLBCIN") == "home_margin_2"
+        assert mls.model_key_for("KXMLSSPREAD",
+                                 "KXMLSSPREAD-26JUL25CLBCIN-CIN3",
+                                 "CLBCIN") == "away_margin_3"
+
+    def test_team_totals_and_score(self):
+        assert mls.model_key_for("KXMLSTEAMTOTAL",
+                                 "KXMLSTEAMTOTAL-26JUL25CLBCIN-CIN2",
+                                 "CLBCIN") == "away_team_over_1_5"
+        assert mls.model_key_for("KXMLSSCORE",
+                                 "KXMLSSCORE-26JUL25CLBCIN-CLB4CIN2",
+                                 "CLBCIN") == "score_4_2"
+
+    def test_near_collision_codes(self):
+        # NYRB (home) vs NYC (away): "NYC" must not read as a prefix
+        assert mls.model_key_for("KXMLSSPREAD",
+                                 "KXMLSSPREAD-26MAY16NYRBNYC-NYRB2",
+                                 "NYRBNYC") == "home_margin_2"
+        assert mls.model_key_for("KXMLSSPREAD",
+                                 "KXMLSSPREAD-26MAY16NYRBNYC-NYC2",
+                                 "NYRBNYC") == "away_margin_2"
+
+    def test_unmodeled_families_are_market_only(self):
+        assert mls.model_key_for("KXMLSMOV",
+                                 "KXMLSMOV-26JUL25CLBCIN-REG",
+                                 "CLBCIN") is None
+        assert mls.model_key_for("KXMLS1H",
+                                 "KXMLS1H-26JUL25CLBCIN-CLB",
+                                 "CLBCIN") is None

@@ -200,8 +200,9 @@ def event_markets(event_ticker: str) -> list[dict]:
     """One event's tradeable markets, 15s cache — cheap enough for the
     match page's 30s poll to ride."""
     def fetch():
+        # limit 50: correct-score events carry 30+ markets
         md = _get_json(f"{KALSHI_BASE}/markets",
-                       {"event_ticker": event_ticker, "limit": 20})
+                       {"event_ticker": event_ticker, "limit": 50})
         if md is None:
             return None
         return [m for m in (md.get("markets") or [])
@@ -439,6 +440,109 @@ def _fixture_et_date(iso_date: str) -> str | None:
         return None
     et = dt.astimezone(timezone(timedelta(hours=-4)))     # EDT (season)
     return et.strftime("%y%b%d").upper()
+
+
+# --- every per-match Kalshi family (discovered live Jul 23: 17 MLS
+# series, 12 of them per-match) -------------------------------------------
+
+MATCH_FAMILIES = [
+    ("winner", "KXMLSGAME", "Winner · 3-way"),
+    ("total", "KXMLSTOTAL", "Total goals"),
+    ("btts", "KXMLSBTTS", "Both teams to score"),
+    ("spread", "KXMLSSPREAD", "Spread"),
+    ("team_total", "KXMLSTEAMTOTAL", "Team totals"),
+    ("score", "KXMLSSCORE", "Correct score"),
+    ("ftts", "KXMLSFTTS", "First team to score"),
+    ("mov", "KXMLSMOV", "Method of victory"),
+    ("h1", "KXMLS1H", "1st half · winner"),
+    ("h1_total", "KXMLS1HTOTAL", "1st half · total"),
+    ("h1_spread", "KXMLS1HSPREAD", "1st half · spread"),
+    ("h1_btts", "KXMLS1HBTTS", "1st half · BTTS"),
+]
+
+
+def model_key_for(series: str, ticker: str, suffix_codes: str) -> str | None:
+    """One Kalshi market ticker -> the model's probability key, parsed
+    from the machine-readable ticker TAIL (never the display label).
+    suffix_codes = the letters after the date in the event suffix
+    ("CLBCIN"), used to tell home codes from away codes: the suffix is
+    home-first, so a tail code that PREFIXES it is the home side (this
+    also survives NYRB/NYC-style near-collisions). None = the model has
+    no number for this market; it renders market-only."""
+    import re as _re
+    tail = (ticker or "").rsplit("-", 1)[-1]
+    if series == "KXMLSBTTS":
+        return "btts" if tail == "BTTS" else None
+    if series == "KXMLSTOTAL":
+        # tail 1 = over 0.5 ... tail 6 = over 5.5
+        return f"over_{int(tail) - 1}_5" if tail.isdigit() else None
+    if series == "KXMLSSPREAD":
+        m = _re.match(r"^([A-Z]+)(\d+)$", tail)
+        if not m:
+            return None
+        side = "home" if suffix_codes.startswith(m.group(1)) else "away"
+        # tail n = "wins by more than n-0.5" = margin >= n
+        return f"{side}_margin_{int(m.group(2))}"
+    if series == "KXMLSTEAMTOTAL":
+        m = _re.match(r"^([A-Z]+)(\d+)$", tail)
+        if not m:
+            return None
+        side = "home" if suffix_codes.startswith(m.group(1)) else "away"
+        return f"{side}_team_over_{int(m.group(2)) - 1}_5"
+    if series == "KXMLSSCORE":
+        m = _re.match(r"^([A-Z]+)(\d+)([A-Z]+)(\d+)$", tail)
+        if not m:
+            return None                     # "any other" style tails
+        h, a = int(m.group(2)), int(m.group(4))
+        if not suffix_codes.startswith(m.group(1)):
+            h, a = a, h                     # defensive: observed home-first
+        return f"score_{h}_{a}"
+    if series == "KXMLSFTTS":
+        if tail in ("NONE", "NEITHER", "NOGOAL"):
+            return "no_goal"
+        if tail.isalpha():
+            side = "home" if suffix_codes.startswith(tail) else "away"
+            return f"{side}_first_goal"
+    return None                              # MOV + 1H: market-only
+
+
+def find_all_books(fixture_date: str, home_name: str,
+                   away_name: str) -> list[dict]:
+    """Every Kalshi market family for one fixture. The GAME event is
+    located by the approved-name matching; every other family shares
+    its ticker suffix ({date}{HOME}{AWAY}), so the join is exact and
+    needs no name resolution at all. 30s bundle cache."""
+    game = find_book(fixture_date, home_name, away_name)
+    if game is None:
+        return []
+    suffix = game["event_ticker"].split("-", 1)[1]
+    suffix_codes = suffix[7:]                # strip the YYMONDD date
+
+    def fetch():
+        fams = [{"key": "winner", "label": "Winner · 3-way",
+                 "event_ticker": game["event_ticker"],
+                 "markets": [dict(r, model_key=None)
+                             for r in game["markets"]]}]
+        for key, series, label in MATCH_FAMILIES:
+            if series == "KXMLSGAME":
+                continue
+            ticker = f"{series}-{suffix}"
+            ms = event_markets(ticker)
+            time.sleep(0.1)                  # burst-throttle (Kalshi 429s)
+            rows = [{
+                "ticker": m.get("ticker"),
+                "label": m.get("yes_sub_title") or m.get("title"),
+                "yes_ask": m.get("yes_ask_dollars"),
+                "yes_bid": m.get("yes_bid_dollars"),
+                "status": m.get("status"),
+                "model_key": model_key_for(series, m.get("ticker", ""),
+                                           suffix_codes),
+            } for m in ms or []]
+            if rows:
+                fams.append({"key": key, "label": label,
+                             "event_ticker": ticker, "markets": rows})
+        return fams
+    return _cached(f"allbooks:{suffix}", 30, fetch) or []
 
 
 def find_book(fixture_date: str, home_name: str, away_name: str,

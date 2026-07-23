@@ -26,7 +26,14 @@ from src.live.models import (Fixture, MarketContract, MarketDepthLevel,
 KALSHI = "https://api.elections.kalshi.com/trade-api/v2"
 SERIES = "KXMLSGAME"
 
-_OUTCOME_BY_ORDER = ("home_win", "draw", "away_win")   # not relied upon
+# every per-match family (Jul 23 discovery: 17 MLS series, 12 per-match).
+# GAME comes first: it anchors the fixture mapping via approved aliases,
+# and every other family suffix-joins to it in the same sweep.
+FAMILY_SERIES = (
+    "KXMLSGAME", "KXMLSTOTAL", "KXMLSBTTS", "KXMLSSPREAD",
+    "KXMLSTEAMTOTAL", "KXMLSSCORE", "KXMLSFTTS", "KXMLSMOV",
+    "KXMLS1H", "KXMLS1HTOTAL", "KXMLS1HSPREAD", "KXMLS1HBTTS",
+)
 
 
 def _now():
@@ -47,6 +54,13 @@ def _cents(m: dict, field: str) -> int | None:
 
 def _ticker_date(event_ticker: str) -> str | None:
     m = re.match(rf"{SERIES}-(\d{{2}}[A-Z]{{3}}\d{{2}})", event_ticker or "")
+    return m.group(1) if m else None
+
+
+def _ticker_date_any(event_ticker: str) -> str | None:
+    """Date segment for ANY family's event ticker."""
+    m = re.match(r"^KXMLS[A-Z0-9]*-(\d{2}[A-Z]{3}\d{2})",
+                 event_ticker or "")
     return m.group(1) if m else None
 
 
@@ -110,27 +124,39 @@ def _try_map(s, row: MarketEvent, tdate: str | None) -> bool:
 
 
 def _ensure_contracts(s, row: MarketEvent) -> None:
-    """Create contract rows (side label -> outcome key) for an event,
-    and REPAIR existing rows whose outcome_key is still NULL — an event
-    discovered before its fixture existed got label-only contracts, and
-    they must heal once the mapping lands (seen live Jul 23: only 'Tie'
-    resolvable pre-mapping). Throttled; failures retry next sweep."""
+    """Create contract rows for an event, and REPAIR existing rows whose
+    outcome_key is still NULL — an event discovered before its fixture
+    existed got label-only contracts, and they must heal once the
+    mapping lands (seen live Jul 23: only 'Tie' resolvable pre-mapping).
+
+    outcome keys: the GAME family resolves its side labels through the
+    APPROVED alias table; every other family's key is parsed from the
+    machine-readable ticker tail (src.mls.model_key_for) — no label
+    guessing anywhere. Throttled; failures retry next sweep."""
+    from src.mls import model_key_for
     payload = _kalshi_get(f"{KALSHI}/markets",
                           params={"event_ticker": row.kalshi_event_ticker,
-                                  "limit": 20})
+                                  "limit": 50})
     fx = s.get(Fixture, row.fixture_id) if row.fixture_id else None
+    suffix_codes = ""
+    if "-" in (row.kalshi_event_ticker or ""):
+        suffix_codes = row.kalshi_event_ticker.split("-", 1)[1][7:]
     for m in payload.get("markets") or []:
         label = (m.get("yes_sub_title") or m.get("title") or "").strip()
         okey = None
-        if label.lower() == "tie":
-            okey = "draw"
+        if row.series == SERIES:
+            if label.lower() == "tie":
+                okey = "draw"
+            else:
+                t = identity.resolve("kalshi", label)
+                if t and fx:
+                    if t.id == fx.home_team_id:
+                        okey = "home_win"
+                    elif t.id == fx.away_team_id:
+                        okey = "away_win"
         else:
-            t = identity.resolve("kalshi", label)
-            if t and fx:
-                if t.id == fx.home_team_id:
-                    okey = "home_win"
-                elif t.id == fx.away_team_id:
-                    okey = "away_win"
+            okey = model_key_for(row.series, m.get("ticker", ""),
+                                 suffix_codes)
         existing = s.query(MarketContract).filter_by(
             ticker=m.get("ticker")).first()
         if existing is None:
@@ -141,59 +167,84 @@ def _ensure_contracts(s, row: MarketEvent) -> None:
             existing.outcome_key = okey
 
 
+def _ticker_suffix(event_ticker: str) -> str | None:
+    return (event_ticker.split("-", 1)[1]
+            if "-" in (event_ticker or "") else None)
+
+
 def discover_and_map() -> dict:
-    """Fetch the KXMLSGAME event list; attach events to fixtures via the
-    approved-alias rule; ensure contract rows exist for every current or
-    future event. Historical events are recorded but their contracts are
-    not fetched (rate-limit budget goes to the live slate)."""
+    """Sweep EVERY per-match family. GAME events attach to fixtures via
+    the approved-alias rule; all other families share the game event's
+    ticker suffix ({date}{HOME}{AWAY}), so they inherit its fixture by
+    exact suffix join — no name resolution at all. Contract rows exist
+    (and heal) for every current or future event; historical events are
+    recorded without contract fetches (rate budget goes to the slate)."""
     if not plane_ready():
         return {"skipped": "dormant"}
-    try:
-        events = _kalshi_get(f"{KALSHI}/events",
-                             params={"series_ticker": SERIES,
-                                     "limit": 100}).get("events") or []
-    except requests.RequestException as exc:
-        print(f"[markets] discovery failed: {exc}")
-        return {"error": str(exc)[:200]}
     s = get_session()
-    mapped = unmapped = contracts_filled = 0
+    seen = mapped = unmapped = contracts_filled = 0
     horizon_floor = (_now() - timedelta(days=1)).date()
     try:
-        for ev in events:
-            ticker = ev.get("event_ticker")
-            if not ticker:
+        for series in FAMILY_SERIES:
+            try:
+                events = _kalshi_get(
+                    f"{KALSHI}/events",
+                    params={"series_ticker": series,
+                            "limit": 100}).get("events") or []
+            except requests.RequestException as exc:
+                print(f"[markets] discovery {series} failed: {exc}")
                 continue
-            tdate = _ticker_date(ticker)
-            row = s.query(MarketEvent).filter_by(
-                kalshi_event_ticker=ticker).first()
-            if row is None:
-                row = MarketEvent(competition_slug="mls-2026",
-                                  kalshi_event_ticker=ticker,
-                                  series=SERIES,
-                                  title=ev.get("title") or "",
-                                  settlement_scope="regular_time",
-                                  mapping_approved=False)
-                s.add(row)
-            if not row.mapping_approved:
-                if _try_map(s, row, tdate):
-                    mapped += 1
-                else:
-                    unmapped += 1
-            s.flush()
-            day = _ticker_day(tdate)
-            existing = s.query(MarketContract).filter_by(
-                market_event_id=row.id).all()
-            needs = (not existing
-                     or (row.fixture_id is not None
-                         and any(c.outcome_key is None for c in existing)))
-            if day and day >= horizon_floor and needs:
-                try:
-                    _ensure_contracts(s, row)
-                    contracts_filled += 1
-                except requests.RequestException as exc:
-                    print(f"[markets] contracts {ticker}: {exc}")
+            seen += len(events)
+            for ev in events:
+                ticker = ev.get("event_ticker")
+                if not ticker:
+                    continue
+                tdate = _ticker_date_any(ticker)
+                row = s.query(MarketEvent).filter_by(
+                    kalshi_event_ticker=ticker).first()
+                if row is None:
+                    row = MarketEvent(competition_slug="mls-2026",
+                                      kalshi_event_ticker=ticker,
+                                      series=series,
+                                      title=ev.get("title") or "",
+                                      settlement_scope=(
+                                          "first_half"
+                                          if series.startswith("KXMLS1H")
+                                          else "regular_time"),
+                                      mapping_approved=False)
+                    s.add(row)
+                if not row.mapping_approved:
+                    ok = False
+                    if series == SERIES:
+                        ok = _try_map(s, row, tdate)
+                    else:
+                        suffix = _ticker_suffix(ticker)
+                        game = s.query(MarketEvent).filter_by(
+                            kalshi_event_ticker=f"{SERIES}-{suffix}"
+                        ).first() if suffix else None
+                        if game is not None and game.fixture_id:
+                            row.fixture_id = game.fixture_id
+                            row.mapped_via = "suffix"
+                            row.mapping_approved = True
+                            ok = True
+                    mapped += int(ok)
+                    unmapped += int(not ok)
+                s.flush()
+                day = _ticker_day(tdate)
+                existing = s.query(MarketContract).filter_by(
+                    market_event_id=row.id).all()
+                needs = (not existing
+                         or (row.fixture_id is not None
+                             and any(c.outcome_key is None
+                                     for c in existing)))
+                if day and day >= horizon_floor and needs:
+                    try:
+                        _ensure_contracts(s, row)
+                        contracts_filled += 1
+                    except requests.RequestException as exc:
+                        print(f"[markets] contracts {ticker}: {exc}")
         s.commit()
-        return {"events_seen": len(events), "newly_mapped": mapped,
+        return {"events_seen": seen, "newly_mapped": mapped,
                 "unmapped": unmapped,
                 "contracts_filled": contracts_filled}
     except Exception as exc:

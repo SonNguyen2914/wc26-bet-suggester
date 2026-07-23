@@ -159,10 +159,14 @@ def mls_match(event_id: str):
     if out is None:
         raise HTTPException(502, "summary unavailable")
     book = None
+    books = []
     try:
-        book = mls.find_book(out.get("date"),
-                             (out.get("home") or {}).get("name") or "",
-                             (out.get("away") or {}).get("name") or "")
+        books = mls.find_all_books(
+            out.get("date"),
+            (out.get("home") or {}).get("name") or "",
+            (out.get("away") or {}).get("name") or "")
+        # legacy shape (deploy-skew safety): the winner family alone
+        book = next((f for f in books if f.get("key") == "winner"), None)
     except Exception as exc:            # the hub must not die on the book
         print(f"[mls] book match failed for {event_id}: {exc}")
     model = None
@@ -171,7 +175,7 @@ def mls_match(event_id: str):
         model = live_runs.model_for_event(event_id)
     except Exception as exc:
         print(f"[mls] model section failed for {event_id}: {exc}")
-    return {"match": out, "book": book, "model": model,
+    return {"match": out, "book": book, "books": books, "model": model,
             "generated_at": utcnow().isoformat()}
 
 

@@ -55,17 +55,29 @@ def _write_run(s, fixture, run_type: str, model: dict,
         })[:100_000])
     s.add(run)
     s.flush()
-    # contracts: the three-way outcomes, attached to mapped market
-    # contracts where they exist
+    # the model's full probability surface: 3-way outcomes, props
+    # (totals/BTTS/margins/first-goal/team totals), and scorelines
+    prob_for: dict[str, float] = dict(pred["outcomes"])
+    prob_for.update(pred.get("props") or {})
+    for sl in pred.get("scorelines") or []:
+        h, a = sl["score"].split("-")
+        prob_for[f"score_{h}_{a}"] = sl["prob"]
+    # contracts: the three-way outcomes are ALWAYS stored; every other
+    # mapped market the model prices joins the same batch (full-book
+    # locks across all families, launch decision O6/O7)
     mapped: dict[str, int] = {}
-    me = (s.query(MarketEvent)
-          .filter_by(fixture_id=fixture.id, mapping_approved=True)
-          .first())
-    if me:
+    extra: list[tuple[int, str]] = []
+    for me in (s.query(MarketEvent)
+               .filter_by(fixture_id=fixture.id, mapping_approved=True)
+               .all()):
         for mc in s.query(MarketContract).filter_by(
                 market_event_id=me.id).all():
-            if mc.outcome_key:
+            if not mc.outcome_key:
+                continue
+            if mc.outcome_key in ("home_win", "draw", "away_win"):
                 mapped[mc.outcome_key] = mc.id
+            elif mc.outcome_key in prob_for:
+                extra.append((mc.id, mc.outcome_key))
     total = 0.0
     for okey in ("home_win", "draw", "away_win"):
         p = pred["outcomes"][okey]
@@ -74,6 +86,10 @@ def _write_run(s, fixture, run_type: str, model: dict,
             prediction_run_id=run.id,
             market_contract_id=mapped.get(okey),
             outcome_key=okey, raw_probability=p))
+    for cid, okey in extra:
+        s.add(PredictionContract(
+            prediction_run_id=run.id, market_contract_id=cid,
+            outcome_key=okey, raw_probability=prob_for[okey]))
     # integrity invariants BEFORE completion (the decision's checklist)
     if not (0.99 <= total <= 1.01):
         run.status = "failed"
@@ -214,15 +230,18 @@ def model_for_event(espn_event_id: str) -> dict | None:
         if f is None:
             return None
 
+        THREE_WAY = ("home_win", "draw", "away_win")
+
         def _payload(run):
             contracts = (s.query(PredictionContract)
                          .filter_by(prediction_run_id=run.id).all())
             # outcome -> Kalshi ticker via the APPROVED mapping chain, so
             # the frontend joins model to book by ticker, never by
-            # guessing at side labels
+            # guessing at side labels. Runs now carry contracts for EVERY
+            # priced family; "outcomes" stays strictly the 3-way.
             tickers = {}
             for c in contracts:
-                if c.market_contract_id:
+                if c.market_contract_id and c.outcome_key in THREE_WAY:
                     mc = s.get(MarketContract, c.market_contract_id)
                     if mc:
                         tickers[c.outcome_key] = mc.ticker
@@ -233,7 +252,8 @@ def model_for_event(espn_event_id: str) -> dict | None:
                 "seed": run.simulation_seed,
                 "n_simulations": run.simulation_count,
                 "outcomes": {c.outcome_key: round(c.raw_probability, 4)
-                             for c in contracts},
+                             for c in contracts
+                             if c.outcome_key in THREE_WAY},
                 "tickers": tickers,
             }
             if run.payload_json:
@@ -321,7 +341,9 @@ def latest_odds() -> list[dict]:
                                 if run.captured_at else None),
                 "model_version": model_mls.MODEL_NAME,
                 "outcomes": {c.outcome_key: round(c.raw_probability, 4)
-                             for c in contracts},
+                             for c in contracts
+                             if c.outcome_key in ("home_win", "draw",
+                                                  "away_win")},
                 "locked": run.run_type == "t10" and run.canonical,
             })
         return out

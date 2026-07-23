@@ -146,14 +146,25 @@ def predict_fixture(fixture, model: dict, run_type: str = "scheduled",
     sim = MatchSimulator(n_simulations=n_sims,
                          seed=seed_for(fixture.id, run_type))
     out = sim.simulate(home, away, stage="group")
+    # every probability a listed Kalshi family can consume: the totals
+    # ladder, BTTS, margins (their "spread"), first team to score, and
+    # team totals summed from the scoreline distribution
+    keep = ("btts", "over_0_5", "over_1_5", "over_2_5", "over_3_5",
+            "over_4_5", "over_5_5", "home_margin_2", "home_margin_3",
+            "away_margin_2", "away_margin_3", "home_first_goal",
+            "away_first_goal", "no_goal")
+    props = {k: out["props"][k] for k in keep if k in out["props"]}
+    for side, idx in (("home", 0), ("away", 1)):
+        for n in (1, 2, 3):
+            props[f"{side}_team_over_{n - 1}_5"] = round(
+                sum(s["prob"] for s in out["scorelines"]
+                    if int(s["score"].split("-")[idx]) >= n), 4)
     return {
         "model_version": MODEL_NAME,
         "seed": seed_for(fixture.id, run_type),
         "outcomes": out["outcomes"],
-        "props": {k: out["props"][k] for k in
-                  ("btts", "over_1_5", "over_2_5", "over_3_5")
-                  if k in out["props"]},
-        "scorelines": out["scorelines"][:6],
+        "props": props,
+        "scorelines": out["scorelines"][:12],
         "xg": out["xg"],
         "basis": {
             "home_games": model["ratings"][fixture.home_team_id]["games"],

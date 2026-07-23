@@ -203,6 +203,23 @@ class TestModelFit:
         assert model_mls.predict_fixture(
             _fx(98, -1, 1, 42, None, None), m) is None
 
+    def test_props_cover_every_kalshi_family(self):
+        fixtures = [_fx(i, 5 + i, 1, 2, 2, 1) for i in range(6)]
+        m = model_mls.fit(fixtures, datetime.now(UTC))
+        p = model_mls.predict_fixture(_fx(99, -1, 1, 2, None, None),
+                                      m, n_sims=800)
+        props = p["props"]
+        # totals ladder, margins (spread), first goal, team totals
+        for k in ("over_0_5", "over_5_5", "home_margin_2",
+                  "away_margin_3", "home_first_goal",
+                  "home_team_over_0_5", "away_team_over_2_5"):
+            assert k in props, k
+        # team totals must be internally consistent (monotone ladder)
+        assert (props["home_team_over_0_5"]
+                >= props["home_team_over_1_5"]
+                >= props["home_team_over_2_5"])
+        assert len(p["scorelines"]) == 12
+
 
 class TestMarketHelpers:
     def test_cents_prefers_native_integer(self):
@@ -350,6 +367,39 @@ class TestPredictionRuns:
             run_type="t10", canonical=True).one()
         assert lock.status == "complete"
         assert runs.model_for_event("9001")["t10_lock"] is not None
+
+    def test_run_contracts_cover_mapped_prop_markets(self, live_session,
+                                                     monkeypatch):
+        """A mapped totals contract must join the batch with the run's
+        own stored probability (full-family locks, O6/O7)."""
+        from src.live.models import MarketContract, MarketEvent
+        import json as _json
+        monkeypatch.setattr(config, "N_SIMULATIONS", 400)
+        up = self._seed_playable(live_session)
+        ev = MarketEvent(competition_slug="mls-2026",
+                         kalshi_event_ticker="KXMLSTOTAL-26JUL25CLBNYC",
+                         series="KXMLSTOTAL", title="CLB vs NYC: Total",
+                         fixture_id=up.id, mapping_approved=True,
+                         mapped_via="suffix")
+        live_session.add(ev)
+        live_session.flush()
+        mc = MarketContract(market_event_id=ev.id,
+                            ticker="KXMLSTOTAL-26JUL25CLBNYC-3",
+                            side_label="Over 2.5 goals scored",
+                            outcome_key="over_2_5")
+        live_session.add(mc)
+        live_session.commit()
+        assert runs.scheduled_runs()["created"] >= 1
+        run = (live_session.query(PredictionRun)
+               .filter_by(fixture_id=up.id, status="complete").one())
+        from src.live.models import PredictionContract
+        row = (live_session.query(PredictionContract)
+               .filter_by(prediction_run_id=run.id,
+                          market_contract_id=mc.id).one())
+        stored = _json.loads(run.payload_json)
+        assert row.outcome_key == "over_2_5"
+        assert row.raw_probability == pytest.approx(
+            stored["props"]["over_2_5"])
 
     def test_shadow_counts_shape(self, live_session):
         self._seed_playable(live_session)
