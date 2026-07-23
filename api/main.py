@@ -175,6 +175,23 @@ def mls_match(event_id: str):
             "generated_at": utcnow().isoformat()}
 
 
+@app.post("/api/admin/mls/sweep")
+def mls_admin_sweep(request: Request):
+    """Operator-only: run the shadow sweeps NOW and return their result
+    dicts — the remote eyes for a boot that reports zero runs. The
+    middleware already enforces the token in read-only mode; the
+    explicit check keeps this locked even if that mode is ever off."""
+    if not _admin_ok(request):
+        raise HTTPException(403, "operator credentials required")
+    from src.live import ingest as live_ingest
+    from src.live import markets as live_markets
+    from src.live import runs as live_runs
+    return {"window": live_ingest.refresh_window(),
+            "map": live_markets.discover_and_map(),
+            "runs": live_runs.scheduled_runs(),
+            "generated_at": utcnow().isoformat()}
+
+
 @app.get("/api/mls/odds")
 def mls_odds():
     """The shadow odds board: every upcoming fixture's newest complete
