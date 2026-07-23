@@ -266,3 +266,11 @@ Steps 12–15 are **not code to write** — they are gates:
 - **15, automated execution** — a separate project requiring real exchange credentials, the demo environment, order/fill reconciliation, and legal/compliance review of Kalshi's developer agreement and the operator's jurisdiction.
 
 The platform is now built up to the edge of what code can responsibly deliver in shadow: levels 1–3 ready, the machinery for level 4 (execution-quality paper) in place and collecting evidence, and every path above real-money still closed by design. The next thing that moves the project is not another commit — it is Saturday's slate producing the first prospective evidence.
+
+### Step 2 (the audit half) — the slate scorecard (Jul 23)
+
+Step 2 is "run and audit several complete slates." The **run** genuinely needs Saturday: a T-10 lock only fires within 11 minutes of a real kickoff against a tradeable book, and forcing one early would capture stale books and *replace* the real lock — corrupting the very evidence the slate is meant to produce. So that half waits, correctly. The **audit** half is buildable now, and is: `src/live/slate.py` (`GET /api/mls/slate?date=YYYYMMDD`) classifies every fixture on a matchday into exactly one state — PASS / MISSED / CAPTURE_FAILED / LOCK_FAILED / EXECUTION_NOT_READY / SETTLEMENT_FAILED / LEGACY_UNSCORABLE / PENDING / INTEGRITY_FAILED — so no fixture disappears because it failed, and reports the operational-qualification invariants (no duplicate canonical locks, no post-kickoff locks, every fixture classified). Integrity rides the existing audit; a not-execution-ready lock is *flagged*, not failed — it is valid evidence.
+
+Live on prod, Saturday's 15-fixture slate reads all **PENDING** with clean qualification. As the day unfolds each fixture moves itself to PASS the moment its T-10 lock fires, or to EXECUTION_NOT_READY / MISSED, with settlement landing after the whistle. The scorecard the evaluator asked for now populates automatically — the operator watches one endpoint instead of reconstructing the slate by hand.
+
+So step 2 is built as far as code allows: the auditing is done and verified; the running is Saturday's job, and the harness is standing by to grade it.
