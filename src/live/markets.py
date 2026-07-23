@@ -117,6 +117,11 @@ def _kalshi_paged(url: str, params: dict, key: str,
 # book under "orderbook_fp" with dollar-string [price, size] pairs.
 PROVIDER_SCHEMA_VERSION = "kalshi-2026-07-fp"
 
+# The lock-completeness predicate is versioned so "full book" cannot
+# change meaning silently as families are added (V8.1 eval qual #3).
+# v1: required = GAME 3-way; all other families captured-when-present.
+LOCK_POLICY_VERSION = "mls-lock-v1"
+
 
 def _fp_int(m: dict, field: str) -> int | None:
     """Fixed-point count field: prefer '{field}_fp' string, fall back
@@ -480,6 +485,7 @@ def capture_lock_snapshot(fixture_id: int) -> dict | None:
         markets_by_event, books, failed = _fetch_event_books(events)
         snap = MarketSnapshot(
             fixture_id=fixture_id, captured_at=_now(), status="writing",
+            policy_version=LOCK_POLICY_VERSION,
             provider_schema_version=PROVIDER_SCHEMA_VERSION,
             events_expected=len(events),
             events_captured=len(events) - len(failed),
@@ -487,8 +493,11 @@ def capture_lock_snapshot(fixture_id: int) -> dict | None:
         s.add(snap)
         s.flush()
         quote_by_ticker: dict[str, int] = {}
-        depth_rows = 0
-        game_quotes = 0
+        depth_rows = with_prices = without_prices = 0
+        game_two_sided = 0                   # bid AND ask (execution)
+        game_quotes = 0                      # ask present (capture)
+        oldest_age = 0
+        now = _now()
         for me in events:
             ms = markets_by_event.get(me.kalshi_event_ticker) or []
             raw = json.dumps(ms, sort_keys=True)
@@ -496,7 +505,7 @@ def capture_lock_snapshot(fixture_id: int) -> dict | None:
                 source="kalshi",
                 endpoint=f"lock:markets?event={me.kalshi_event_ticker}",
                 content_hash=hashlib.sha256(raw.encode()).hexdigest(),
-                payload_json=raw[:200_000], observed_at=_now())
+                payload_json=raw[:200_000], observed_at=now)
             s.add(obs)
             s.flush()
             for m in ms:
@@ -509,19 +518,42 @@ def capture_lock_snapshot(fixture_id: int) -> dict | None:
                 s.add(quote)
                 s.flush()
                 quote_by_ticker[m.get("ticker")] = quote.id
-                if me.series == SERIES and quote.yes_ask_c is not None:
-                    game_quotes += 1
+                if quote.yes_ask_c is not None or quote.yes_bid_c is not None:
+                    with_prices += 1
+                else:
+                    without_prices += 1
+                if quote.provider_timestamp is not None:
+                    age = int((now - quote.provider_timestamp)
+                              .total_seconds())
+                    oldest_age = max(oldest_age, age)
+                if me.series == SERIES:
+                    if quote.yes_ask_c is not None:
+                        game_quotes += 1
+                    if (quote.yes_ask_c is not None
+                            and quote.yes_bid_c is not None):
+                        game_two_sided += 1
                 for side, price_c, size in _depth_levels(
                         books.get(m.get("ticker")) or {}):
                     s.add(MarketDepthLevel(
                         market_quote_id=quote.id, side=side,
                         price_c=price_c, size=size))
                     depth_rows += 1
+        # required families for policy v1 = the GAME 3-way (the
+        # executable comparator); everything else is captured-when-present
+        required_ok = (not failed) and game_quotes >= 3
         snap.quotes_written = len(quote_by_ticker)
+        snap.quotes_with_prices = with_prices
+        snap.quotes_without_prices = without_prices
         snap.depth_rows_written = depth_rows
-        # completeness gate: every event fetched AND the executable
-        # 3-way comparator (the game family's priced quotes) present
-        if failed or len(quote_by_ticker) == 0 or game_quotes < 3:
+        snap.oldest_quote_age_seconds = oldest_age or None
+        snap.required_families_complete = required_ok
+        # execution-ready is DISTINCT from capture-complete: the game
+        # comparator must be two-sided (bid AND ask) and reasonably fresh
+        snap.execution_ready = (game_two_sided >= 3
+                                and (oldest_age <= 600 or oldest_age == 0))
+        # CAPTURE-completeness gate (not tradeability): every event
+        # fetched AND the executable 3-way comparator present
+        if not required_ok or len(quote_by_ticker) == 0:
             snap.status = "failed"
             snap.failure_reason = (
                 f"events_failed={failed} quotes={len(quote_by_ticker)} "
@@ -532,7 +564,8 @@ def capture_lock_snapshot(fixture_id: int) -> dict | None:
             return None
         snap.status = "complete"
         s.commit()
-        return {"snapshot_id": snap.id, "quote_by_ticker": quote_by_ticker}
+        return {"snapshot_id": snap.id, "quote_by_ticker": quote_by_ticker,
+                "execution_ready": snap.execution_ready}
     except Exception as exc:
         s.rollback()
         print(f"[markets] lock snapshot failed: {exc}")

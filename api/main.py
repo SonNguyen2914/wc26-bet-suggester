@@ -199,6 +199,23 @@ def mls_admin_sweep(request: Request, force: bool = Query(False)):
             "generated_at": utcnow().isoformat()}
 
 
+@app.get("/api/mls/audit")
+def mls_audit():
+    """The lock acceptance audit: every T-10 lock's integrity
+    invariants, retained missed-locks and failed snapshots, and a
+    content hash. Public read-only — it exposes only aggregate research
+    integrity, and publishing it is the transparency the fail-closed
+    lock design exists to demonstrate. 30s cache."""
+    from src.mls import _cached
+    try:
+        from src.live import audit as live_audit
+        out = _cached("mls_audit", 30, live_audit.lock_audit)
+    except Exception as exc:
+        print(f"[mls] audit failed: {exc}")
+        raise HTTPException(503, "audit unavailable")
+    return out or {"skipped": "dormant"}
+
+
 @app.get("/api/mls/odds")
 def mls_odds():
     """The shadow odds board: every upcoming fixture's newest complete

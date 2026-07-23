@@ -161,6 +161,11 @@ class PredictionRun(LiveBase):
     # recomputing later against refreshed ratings would silently diverge
     # from the stored contracts
     payload_json = Column(Text)
+    # immutable approval-decision record: whether the model version was
+    # approved for shadow AT CAPTURE TIME (V8.1 eval — flipping the
+    # ModelVersion flag later must not retroactively re-authorize an old
+    # run). Frozen True here because the F3 gate refuses to run otherwise.
+    model_approved_at_run = Column(Boolean)
     __table_args__ = (
         # ONE canonical complete T-10 per fixture — the same partial
         # unique invariant on SQLite (tests) and PostgreSQL (production).
@@ -235,13 +240,25 @@ class MarketSnapshot(LiveBase):
     id = Column(Integer, primary_key=True)
     fixture_id = Column(Integer, ForeignKey("fixture.id"), nullable=False)
     captured_at = Column(DateTime(timezone=True), nullable=False)
+    # `status` is CAPTURE-completeness only (all expected records
+    # observed or explicitly recorded absent). Tradeability is a
+    # SEPARATE concept — `execution_ready` — because a complete
+    # capture can legitimately contain no-bid contracts (V8.1 eval
+    # qualification #2). The lock predicate itself is versioned so
+    # "full book" cannot change meaning silently (qualification #3).
     status = Column(String(12), nullable=False, default="writing")
+    policy_version = Column(String(24))
     provider_schema_version = Column(String(32))
     events_expected = Column(Integer)
     events_captured = Column(Integer)
     contracts_expected = Column(Integer)
     quotes_written = Column(Integer)
+    quotes_with_prices = Column(Integer)
+    quotes_without_prices = Column(Integer)
     depth_rows_written = Column(Integer)
+    oldest_quote_age_seconds = Column(Integer)
+    required_families_complete = Column(Boolean)
+    execution_ready = Column(Boolean)
     failure_reason = Column(Text)
 
 

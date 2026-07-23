@@ -519,6 +519,57 @@ class TestPredictionRuns:
         hub = runs.model_for_event("9001")
         assert hub["primary"]["run_type"] == "t10"
 
+    def test_lock_audit_passes_a_clean_lock(self, live_session,
+                                            monkeypatch):
+        """The acceptance audit reports a real snapshot-backed lock as
+        all-pass, with retained failed snapshots and missed locks."""
+        from src.live import audit
+        from src.live.models import MarketSnapshot
+        monkeypatch.setattr(config, "N_SIMULATIONS", 400)
+        up = self._seed_playable(live_session)
+        up.current_kickoff_utc = datetime.now(UTC) + timedelta(minutes=9)
+        live_session.commit()
+        snap = self._fake_snapshot(live_session, up.id)
+        # give the snapshot the manifest fields a clean lock needs
+        row = live_session.get(MarketSnapshot, snap["snapshot_id"])
+        row.policy_version = "mls-lock-v1"
+        row.required_families_complete = True
+        live_session.commit()
+        monkeypatch.setattr(markets, "capture_lock_snapshot",
+                            lambda fixture_id: snap)
+        import src.alerts as alerts
+        monkeypatch.setattr(alerts, "send_alert", lambda *a, **kw: None)
+        assert runs.t10_locks()["locked"] == 1
+        rep = audit.lock_audit()
+        assert rep["summary"]["canonical_locks"] == 1
+        lock = rep["locks"][0]
+        assert lock["all_pass"], [k for k, v in lock["checks"].items()
+                                  if not v]
+        assert lock["checks"]["priced_contracts_quote_linked"]
+        assert lock["checks"]["model_approved_at_run"]
+        assert lock["checks"]["no_post_kickoff_replacement"]
+        # the report is content-hashed and stable for one DB state
+        assert rep["content_hash"] == audit.lock_audit()["content_hash"]
+
+    def test_lock_audit_retains_missed_locks(self, live_session,
+                                             monkeypatch):
+        """A kicked-off, shadow-touched fixture with no canonical lock is
+        RETAINED as a missed lock, not silently dropped."""
+        from src.live import audit
+        from src.live.models import Fixture as F
+        monkeypatch.setattr(config, "N_SIMULATIONS", 400)
+        self._seed_playable(live_session)
+        # a scheduled run exists (shadow-touched) but the fixture then
+        # kicked off with no lock
+        runs.scheduled_runs()
+        up = live_session.query(F).filter_by(espn_event_id="9001").one()
+        up.current_kickoff_utc = datetime.now(UTC) - timedelta(minutes=5)
+        live_session.commit()
+        rep = audit.lock_audit()
+        missed = [m for m in rep["missed_locks"]
+                  if m["espn_event_id"] == "9001"]
+        assert len(missed) == 1
+
     def test_run_contracts_cover_mapped_prop_markets(self, live_session,
                                                      monkeypatch):
         """A mapped totals contract must join the batch with the run's
