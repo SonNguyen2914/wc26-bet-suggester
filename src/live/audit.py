@@ -17,8 +17,8 @@ import json
 from datetime import datetime, timezone
 
 from src.live.db import get_session, plane_ready
-from src.live.models import (Fixture, MarketSnapshot, PredictionContract,
-                             PredictionRun)
+from src.live.models import (Fixture, MarketSnapshot, ModelInputArtifact,
+                             PredictionContract, PredictionRun)
 
 AUDIT_VERSION = "mls-lock-audit-v1"
 THREE_WAY = ("home_win", "draw", "away_win")
@@ -71,6 +71,7 @@ def _lock_checks(s, f, lock, n_locks) -> dict:
         "model_version_present": lock.model_version_id is not None,
         "model_approved_at_run": bool(lock.model_approved_at_run),
         "input_hash_present": bool(lock.input_snapshot_hash),
+        "input_artifact_retained": lock.model_input_artifact_id is not None,
         "seed_present": lock.simulation_seed is not None,
         "three_way_present": set(three) == set(THREE_WAY),
         "three_way_sums_to_one": abs(sum(three.values()) - 1.0) < 0.02
@@ -106,6 +107,46 @@ def _lock_checks(s, f, lock, n_locks) -> dict:
             "execution_ready": snap.execution_ready,
         }
     return row
+
+
+def verify_replay(run_id: str, tol: float = 1e-6) -> dict:
+    """Independent-reproducibility check (Phase 2 acceptance): replay a
+    run FROM ITS STORED INPUT ARTIFACT ALONE and confirm the outcomes
+    match the stored contracts. This is the proof behind the
+    'independently model-reproducible' claim, so it reads only the
+    artifact bytes — never the live ratings — to reconstruct."""
+    import json as _json
+
+    from src.live import model_mls
+    if not plane_ready():
+        return {"skipped": "dormant"}
+    s = get_session()
+    try:
+        run = s.get(PredictionRun, run_id)
+        if run is None or run.model_input_artifact_id is None:
+            return {"run_id": run_id, "replayable": False,
+                    "reason": "no input artifact"}
+        art = s.get(ModelInputArtifact, run.model_input_artifact_id)
+        doc = _json.loads(art.document_json)
+        replayed = model_mls.replay_from_artifact(doc)
+        if replayed is None:
+            return {"run_id": run_id, "replayable": False,
+                    "reason": "artifact missing ratings"}
+        stored = {c.outcome_key: c.raw_probability
+                  for c in s.query(PredictionContract)
+                  .filter_by(prediction_run_id=run_id).all()
+                  if c.outcome_key in THREE_WAY}
+        deltas = {k: abs(replayed.get(k, 0.0) - stored.get(k, 0.0))
+                  for k in THREE_WAY}
+        return {
+            "run_id": run_id,
+            "replayable": all(d <= tol for d in deltas.values()),
+            "max_delta": max(deltas.values()) if deltas else None,
+            "artifact_hash": art.content_hash,
+            "schema_version": art.schema_version,
+        }
+    finally:
+        s.close()
 
 
 def lock_audit() -> dict:

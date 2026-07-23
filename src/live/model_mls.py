@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import hashlib
 import math
+import os
 from datetime import timezone
 
 from src.live.db import get_session, plane_ready
@@ -104,6 +105,13 @@ def fit(fixtures, as_of) -> dict | None:
         "venue_away": (tot_away / tot_w) / league_gpg,
         "ratings": ratings,
         "n_fixtures": len(fixtures),
+        # provenance for the retrievable input artifact: exactly which
+        # completed fixtures (by stable provider id) fed this fit, and
+        # the cutoff — so a fit can be reconstructed independently
+        "source_fixtures": sorted(
+            str(f.espn_event_id) for f in fixtures
+            if getattr(f, "espn_event_id", None)),
+        "as_of": as_of.isoformat(),
     }
 
 
@@ -139,24 +147,98 @@ def seed_for(fixture, run_type: str) -> int:
     return int(h[:8], 16) & 0x7FFFFFFF
 
 
-def input_hash(fixture, model: dict) -> str:
-    """The exact-inputs fingerprint frozen on each run (V8 evaluation
-    F2): model constants + fitted league params + BOTH teams' ratings.
-    Two runs with the same hash simulated from identical inputs."""
-    basis = {
-        "model": MODEL_NAME, "shrink": SHRINK_GAMES,
-        "half_life": HALF_LIFE_DAYS,
-        "league_gpg": model["league_gpg"],
-        "venue_home": model["venue_home"],
-        "venue_away": model["venue_away"],
-        "n_fixtures": model["n_fixtures"],
-        "home": model["ratings"].get(fixture.home_team_id),
-        "away": model["ratings"].get(fixture.away_team_id),
-    }
+INPUT_ARTIFACT_SCHEMA = "model-input-v1"
+_GIT_REV = os.getenv("RAILWAY_GIT_COMMIT_SHA", "")[:40]
+
+
+def _canonical(doc: dict) -> str:
+    """Deterministic serialization for hashing + storage: sorted keys,
+    compact separators, full-precision float round-trip, no machine
+    paths. The same inputs on any machine produce the same bytes."""
     import json as _json
-    return hashlib.sha256(
-        _json.dumps(basis, sort_keys=True, default=str)
-        .encode()).hexdigest()
+    return _json.dumps(doc, sort_keys=True, ensure_ascii=False,
+                       separators=(",", ":"))
+
+
+def build_input_artifact(fixture, model: dict,
+                         run_type: str) -> tuple[dict, str, str]:
+    """The exact, RETRIEVABLE input document a run simulates from
+    (V8.1 evaluation Phase 2). Contains everything needed to replay the
+    run independently: model constants, fitted league params, BOTH
+    teams' ratings, the seed, the draw count, the source-fixture ids,
+    and the cutoff. Returns (document, canonical_bytes, content_hash)."""
+    import config
+    home_r = model["ratings"].get(fixture.home_team_id)
+    away_r = model["ratings"].get(fixture.away_team_id)
+    doc = {
+        "schema_version": INPUT_ARTIFACT_SCHEMA,
+        "model": MODEL_NAME,
+        "code_revision": _GIT_REV,
+        "fixture": {
+            "provider": "espn",
+            "event_id": str(getattr(fixture, "espn_event_id", "")),
+            "competition": "mls-2026",
+        },
+        "data_cutoff": model.get("as_of"),
+        "model_parameters": {
+            "shrink_games": SHRINK_GAMES,
+            "half_life_days": HALF_LIFE_DAYS,
+            "min_games": MIN_GAMES,
+        },
+        "league": {
+            "league_gpg": model["league_gpg"],
+            "venue_home": model["venue_home"],
+            "venue_away": model["venue_away"],
+            "n_fixtures": model["n_fixtures"],
+        },
+        "team_ratings": {"home": home_r, "away": away_r},
+        "simulation": {
+            "seed": seed_for(fixture, run_type),
+            "draws": config.N_SIMULATIONS,
+            "run_type": run_type,
+        },
+        "source_fixtures": model.get("source_fixtures", []),
+        "exclusions": [],
+    }
+    canon = _canonical(doc)
+    return doc, canon, hashlib.sha256(canon.encode()).hexdigest()
+
+
+def input_hash(fixture, model: dict, run_type: str = "scheduled") -> str:
+    """Back-compat: the content hash of the retrievable input artifact."""
+    return build_input_artifact(fixture, model, run_type)[2]
+
+
+def replay_from_artifact(document: dict,
+                         n_sims: int | None = None) -> dict | None:
+    """Deterministic replay (V8.1 evaluation Phase 2 acceptance test):
+    from the stored input DOCUMENT alone — no live database — rebuild
+    the two teams' engine features and re-run the simulation with the
+    frozen seed. Same inputs + same seed => same probabilities."""
+    from src.models.simulator import MatchSimulator
+    from src.models.xg_model import SET_PIECE_BASELINE
+    tr = document.get("team_ratings") or {}
+    lg = document.get("league") or {}
+    sim_cfg = document.get("simulation") or {}
+    if not tr.get("home") or not tr.get("away"):
+        return None
+
+    def raw(r, venue):
+        return {
+            "attack": r["attack"], "defence": r["defence"],
+            "form": 0.5, "fatigue": 0.0,
+            "set_piece_threat": SET_PIECE_BASELINE,
+            "red_card_risk": 0.06, "elo": 1500.0,
+            "league_base": lg["league_gpg"],
+            "venue_mult": lg[f"venue_{venue}"],
+        }
+
+    sim = MatchSimulator(
+        n_simulations=n_sims or sim_cfg.get("draws"),
+        seed=sim_cfg.get("seed"))
+    out = sim.simulate(raw(tr["home"], "home"),
+                       raw(tr["away"], "away"), stage="group")
+    return out["outcomes"]
 
 
 def predict_fixture(fixture, model: dict, run_type: str = "scheduled",

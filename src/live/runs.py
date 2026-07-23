@@ -19,8 +19,8 @@ import config
 from src.live import markets, model_mls
 from src.live.db import get_session, plane_ready
 from src.live.models import (Fixture, MarketContract, MarketEvent,
-                             ModelVersion, PredictionContract,
-                             PredictionRun)
+                             ModelInputArtifact, ModelVersion,
+                             PredictionContract, PredictionRun)
 
 GIT_REV = os.getenv("RAILWAY_GIT_COMMIT_SHA", "")[:40]
 
@@ -53,6 +53,19 @@ def _write_run(s, fixture, run_type: str, model: dict, mv: ModelVersion,
     pred = model_mls.predict_fixture(fixture, model, run_type=run_type)
     if pred is None:
         return None
+    # the retrievable input artifact (Phase 2): store the exact bytes the
+    # run simulated from, deduped by content hash, and link the run to it
+    _doc, canon, ihash = model_mls.build_input_artifact(
+        fixture, model, run_type)
+    artifact = (s.query(ModelInputArtifact)
+                .filter_by(content_hash=ihash).first())
+    if artifact is None:
+        artifact = ModelInputArtifact(
+            schema_version=model_mls.INPUT_ARTIFACT_SCHEMA,
+            content_hash=ihash, size_bytes=len(canon.encode()),
+            document_json=canon, created_at=_now())
+        s.add(artifact)
+        s.flush()
     ko = _utc(fixture.current_kickoff_utc)
     run = PredictionRun(
         fixture_id=fixture.id, run_type=run_type,
@@ -62,7 +75,8 @@ def _write_run(s, fixture, run_type: str, model: dict, mv: ModelVersion,
         git_revision=GIT_REV,
         model_version_id=mv.id,
         model_approved_at_run=bool(mv.approved_for_shadow),
-        input_snapshot_hash=model_mls.input_hash(fixture, model),
+        input_snapshot_hash=ihash,
+        model_input_artifact_id=artifact.id,
         market_snapshot_id=(snapshot or {}).get("snapshot_id"),
         simulation_seed=pred["seed"],
         simulation_count=config.N_SIMULATIONS,

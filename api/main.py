@@ -216,6 +216,22 @@ def mls_audit():
     return out or {"skipped": "dormant"}
 
 
+@app.get("/api/mls/replay/{run_id}")
+def mls_replay(run_id: str):
+    """Independent reproducibility check: replay a run from its stored
+    input artifact ALONE and confirm it reproduces the stored
+    probabilities. Public read-only — this IS the evidence behind the
+    'independently model-reproducible' claim."""
+    if not (run_id.replace("-", "").isalnum() and len(run_id) <= 36):
+        raise HTTPException(404, "unknown run")
+    try:
+        from src.live import audit as live_audit
+        return live_audit.verify_replay(run_id)
+    except Exception as exc:
+        print(f"[mls] replay failed for {run_id}: {exc}")
+        raise HTTPException(503, "replay unavailable")
+
+
 @app.get("/api/mls/odds")
 def mls_odds():
     """The shadow odds board: every upcoming fixture's newest complete

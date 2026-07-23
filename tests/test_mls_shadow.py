@@ -603,6 +603,59 @@ class TestPredictionRuns:
         assert row.raw_probability == pytest.approx(
             stored["props"]["over_2_5"])
 
+    def test_input_artifact_stored_and_linked(self, live_session,
+                                              monkeypatch):
+        """Every run stores its retrievable input document, hash-linked
+        to the run (Phase 2)."""
+        from src.live.models import ModelInputArtifact, PredictionRun
+        monkeypatch.setattr(config, "N_SIMULATIONS", 400)
+        self._seed_playable(live_session)
+        runs.scheduled_runs()
+        run = (live_session.query(PredictionRun)
+               .filter_by(status="complete").first())
+        assert run.model_input_artifact_id is not None
+        art = live_session.get(ModelInputArtifact,
+                               run.model_input_artifact_id)
+        assert art.content_hash == run.input_snapshot_hash
+        import json
+        doc = json.loads(art.document_json)
+        assert doc["schema_version"] == "model-input-v1"
+        assert doc["team_ratings"]["home"] and doc["team_ratings"]["away"]
+        assert doc["simulation"]["seed"] == run.simulation_seed
+        assert len(doc["source_fixtures"]) >= 5
+
+    def test_artifact_hash_is_deterministic(self, live_session):
+        """The hash (hence dedup) depends only on the inputs: same
+        fixture + model + run_type => identical bytes and hash."""
+        from src.live import model_mls
+        from src.live.models import Fixture
+        self._seed_playable(live_session)
+        model = model_mls.current_model()
+        f = live_session.query(Fixture).filter_by(
+            espn_event_id="9001").one()
+        _, c1, h1 = model_mls.build_input_artifact(f, model, "t10")
+        _, c2, h2 = model_mls.build_input_artifact(f, model, "t10")
+        assert c1 == c2 and h1 == h2
+        # a different run_type changes the seed, hence the artifact
+        _, _, h3 = model_mls.build_input_artifact(f, model, "scheduled")
+        assert h3 != h1
+
+    def test_run_is_replayable_from_artifact_alone(self, live_session,
+                                                   monkeypatch):
+        """THE Phase-2 acceptance test: replay from the stored document
+        ALONE (no live ratings) reproduces the stored probabilities."""
+        from src.live import audit
+        from src.live.models import PredictionRun
+        monkeypatch.setattr(config, "N_SIMULATIONS", 600)
+        self._seed_playable(live_session)
+        runs.scheduled_runs()
+        run = (live_session.query(PredictionRun)
+               .filter_by(status="complete").first())
+        rep = audit.verify_replay(run.id)
+        assert rep["replayable"], rep
+        # deterministic: same seed + same inputs => essentially identical
+        assert rep["max_delta"] < 1e-6
+
     def test_shadow_counts_shape(self, live_session):
         self._seed_playable(live_session)
         c = runs.shadow_counts()

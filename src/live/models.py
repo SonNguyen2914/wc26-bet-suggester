@@ -134,6 +134,21 @@ class ModelVersion(LiveBase):
     created_at = Column(DateTime(timezone=True))
 
 
+class ModelInputArtifact(LiveBase):
+    """The exact, retrievable input DOCUMENT a run simulated from
+    (V8.1 evaluation Phase 2 / qualification #1). input_snapshot_hash
+    proves integrity; this stores the BYTES so another machine can
+    replay the run and get the same probabilities. Deduped by
+    content_hash — identical inputs share one artifact."""
+    __tablename__ = "model_input_artifact"
+    id = Column(Integer, primary_key=True)
+    schema_version = Column(String(24), nullable=False)
+    content_hash = Column(String(64), unique=True, nullable=False)
+    size_bytes = Column(Integer)
+    document_json = Column(Text, nullable=False)   # canonical serialization
+    created_at = Column(DateTime(timezone=True))
+
+
 class PredictionRun(LiveBase):
     __tablename__ = "prediction_run"
     id = Column(String(36), primary_key=True, default=_uuid)
@@ -149,6 +164,8 @@ class PredictionRun(LiveBase):
     simulation_seed = Column(Integer)
     simulation_count = Column(Integer)
     input_snapshot_hash = Column(String(64))
+    model_input_artifact_id = Column(
+        Integer, ForeignKey("model_input_artifact.id"))
     team_snapshot_id = Column(Integer)
     player_snapshot_id = Column(Integer)
     availability_snapshot_id = Column(Integer)
