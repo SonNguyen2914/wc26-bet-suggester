@@ -100,25 +100,16 @@ def simulate_fill(ladder: list[tuple[int, int]], requested: int) -> dict:
             "slippage_c": avg - best, "levels": used}
 
 
-def _gate(contract, quote: MarketQuote, snap: MarketSnapshot,
-          net_edge: float) -> str | None:
-    """Return a rejection reason, or None if all entry gates pass."""
+def _market_gate(quote, snap, net_edge, model_approved) -> str | None:
+    """Delegate to the central risk engine — one policy authority for
+    every order path (V8.1 eval Phase 8)."""
+    from src.live import risk
     pol = EXEC_POLICY
-    if not (snap and snap.execution_ready):
-        return "not_execution_ready"
-    if snap.oldest_quote_age_seconds is not None \
-            and snap.oldest_quote_age_seconds > pol["max_quote_age_s"]:
-        return "quote_stale"
-    if quote.yes_ask_c is None:
-        return "no_executable_ask"
-    if (quote.yes_ask_size or 0) < pol["min_top_size"]:
-        return "insufficient_size"
-    if quote.yes_bid_c is not None \
-            and (quote.yes_ask_c - quote.yes_bid_c) > pol["max_spread_c"]:
-        return "spread_too_wide"
-    if net_edge <= pol["min_net_edge"]:
-        return "net_edge_too_low"
-    return None
+    return risk.market_gate(
+        quote, snap, net_edge, min_net_edge=pol["min_net_edge"],
+        min_size=pol["min_top_size"], max_spread_c=pol["max_spread_c"],
+        max_quote_age_s=pol["max_quote_age_s"],
+        model_approved=model_approved)
 
 
 def paper_trade_lock(run_id: str) -> dict:
@@ -133,10 +124,10 @@ def paper_trade_lock(run_id: str) -> dict:
         run = s.get(PredictionRun, run_id)
         if run is None or not (run.run_type == "t10" and run.canonical):
             return {"skipped": "not a canonical lock"}
-        if approved_model_version(s) is None:
-            return {"skipped": "model not approved for shadow"}
+        model_approved = approved_model_version(s) is not None
         snap = (s.get(MarketSnapshot, run.market_snapshot_id)
                 if run.market_snapshot_id else None)
+        fx = s.get(Fixture, run.fixture_id)
         for c in (s.query(PredictionContract)
                   .filter_by(prediction_run_id=run_id).all()):
             if c.outcome_key not in THREE_WAY or not c.market_quote_id \
@@ -152,7 +143,7 @@ def paper_trade_lock(run_id: str) -> dict:
             ask = (quote.yes_ask_c or 0) / 100.0
             fee = 0.07 * ask * (1 - ask)
             net_edge = c.raw_probability - (ask + fee)
-            reason = _gate(c, quote, snap, net_edge)
+            reason = _market_gate(quote, snap, net_edge, model_approved)
             sig = PaperSignal(
                 prediction_run_id=run_id,
                 market_contract_id=c.market_contract_id,
@@ -175,10 +166,19 @@ def paper_trade_lock(run_id: str) -> dict:
             fill = simulate_fill(ladder, EXEC_POLICY["target_contracts"])
             if fill["filled"] == 0:
                 sig.decision = "reject"
-                sig.reject_reason = "no_depth"
+                sig.reject_reason = "DEPTH_INSUFFICIENT"
                 continue
             fee_total = _fee_c(fill["avg_price_c"]) * fill["filled"]
             cost = fill["filled"] * fill["avg_price_c"] + fee_total
+            # EXPOSURE gates — the central risk authority, after the fill
+            # cost is known (position size / correlation / bankroll / kill)
+            from src.live import risk
+            risk_reason = risk.exposure_gate(
+                s, fx, c.outcome_key, cost, fill["slippage_c"])
+            if risk_reason:
+                sig.decision = "reject"
+                sig.reject_reason = risk_reason
+                continue
             s.add(PaperFill(
                 paper_signal_id=sig.id,
                 requested_contracts=EXEC_POLICY["target_contracts"],

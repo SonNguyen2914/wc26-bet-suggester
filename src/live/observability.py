@@ -1,0 +1,109 @@
+"""Operational observability (V8.1 evaluation Phase 10).
+
+A machine-readable metrics surface for the MLS shadow plane: data
+freshness, lock success, missed locks, market coverage, paper P&L, and
+scheduler health. Served at /api/mls/metrics for an operator or a
+monitor to alert on — the numbers the review asked to track (quote age,
+missing families, canonical-lock success rate, missed locks, settlement
+lag). Read-only aggregation; never mutates.
+"""
+from __future__ import annotations
+
+from datetime import datetime, timezone
+
+from src.live.db import get_session, plane_ready
+from src.live.models import (Fixture, MarketEvent, MarketSnapshot,
+                             PaperFill, PaperSignal, PredictionRun)
+
+
+def _now():
+    return datetime.now(timezone.utc)
+
+
+def _utc(dt):
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
+def _age_s(dt):
+    if dt is None:
+        return None
+    return int((_now() - _utc(dt)).total_seconds())
+
+
+def metrics() -> dict:
+    if not plane_ready():
+        return {"skipped": "dormant"}
+    s = get_session()
+    try:
+        # fixture freshness — how long since the newest observation
+        newest_fx = (s.query(Fixture)
+                     .filter_by(competition_slug="mls-2026")
+                     .order_by(Fixture.observed_at.desc()).first())
+        # locks: kicked-off shadow-touched fixtures should each have one
+        touched = {r[0] for r in s.query(
+            PredictionRun.fixture_id).distinct().all()}
+        kicked = [f for f in s.query(Fixture)
+                  .filter_by(competition_slug="mls-2026").all()
+                  if f.id in touched and f.current_kickoff_utc
+                  and _utc(f.current_kickoff_utc) < _now()]
+        locked = [f for f in kicked
+                  if s.query(PredictionRun)
+                  .filter_by(fixture_id=f.id, run_type="t10",
+                             canonical=True, status="complete").first()]
+        # snapshot freshness (the freshest lock book's quote age)
+        latest_snap = (s.query(MarketSnapshot).filter_by(status="complete")
+                       .order_by(MarketSnapshot.captured_at.desc()).first())
+        # paper economics
+        fills = s.query(PaperFill).all()
+        settled = [f for f in fills if f.status == "settled"]
+        pnl = sum(f.pnl_c or 0 for f in settled)
+        # settlement lag: open fills whose fixture is already post
+        stale_settle = 0
+        for fill, sig, fx in (s.query(PaperFill, PaperSignal, Fixture)
+                              .join(PaperSignal,
+                                    PaperFill.paper_signal_id
+                                    == PaperSignal.id)
+                              .join(Fixture,
+                                    PaperSignal.fixture_id == Fixture.id)
+                              .filter(PaperFill.status == "open",
+                                      Fixture.status == "post").all()):
+            stale_settle += 1
+        return {
+            "generated_at": _now().isoformat(),
+            "data": {
+                "fixture_obs_age_s": _age_s(
+                    newest_fx.observed_at if newest_fx else None),
+                "latest_lock_snapshot_age_s": _age_s(
+                    latest_snap.captured_at if latest_snap else None),
+                "latest_snapshot_quote_age_s": (
+                    latest_snap.oldest_quote_age_seconds
+                    if latest_snap else None),
+                "mapped_market_events": s.query(MarketEvent)
+                .filter_by(mapping_approved=True).count(),
+            },
+            "locks": {
+                "kicked_off_shadow_fixtures": len(kicked),
+                "canonical_locked": len(locked),
+                "missed_locks": len(kicked) - len(locked),
+                "lock_success_rate": (round(len(locked) / len(kicked), 3)
+                                      if kicked else None),
+                "failed_snapshots": s.query(MarketSnapshot)
+                .filter_by(status="failed").count(),
+            },
+            "runs": {
+                "complete": s.query(PredictionRun)
+                .filter_by(status="complete").count(),
+                "failed": s.query(PredictionRun)
+                .filter_by(status="failed").count(),
+            },
+            "paper": {
+                "signals": s.query(PaperSignal).count(),
+                "fills": len(fills),
+                "open": sum(1 for f in fills if f.status == "open"),
+                "settled": len(settled),
+                "settled_pnl_c": pnl,
+                "unsettled_after_final": stale_settle,
+            },
+        }
+    finally:
+        s.close()

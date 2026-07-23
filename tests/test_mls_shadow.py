@@ -478,7 +478,7 @@ class TestPaperTrading:
         sig = live_session.query(PaperSignal).filter_by(
             outcome_key="home_win").one()
         assert sig.decision == "reject"
-        assert sig.reject_reason == "net_edge_too_low"
+        assert sig.reject_reason == "NET_EDGE_TOO_LOW"
         assert live_session.query(PaperFill).count() == 0
 
     def test_not_execution_ready_rejects(self, live_session, monkeypatch):
@@ -490,7 +490,7 @@ class TestPaperTrading:
         sig = live_session.query(PaperSignal).filter_by(
             outcome_key="home_win").one()
         assert sig.decision == "reject"
-        assert sig.reject_reason == "not_execution_ready"
+        assert sig.reject_reason == "NOT_EXECUTION_READY"
 
     def test_settlement_pays_hits_and_records_pnl(self, live_session,
                                                   monkeypatch):
@@ -510,6 +510,97 @@ class TestPaperTrading:
         assert fill.pnl_c == fill.payout_c - fill.cost_c
         # settle is idempotent
         assert paper.settle_paper()["settled"] == 0
+
+
+class TestRiskEngine:
+    def test_correlation_groups_collapse_families(self):
+        from src.live import risk
+        for k in ("home_win", "home_margin_2", "home_team_over_1_5",
+                  "home_first_goal"):
+            assert risk.correlation_group(k) == "home"
+        assert risk.correlation_group("away_win") == "away"
+        assert risk.correlation_group("draw") == "draw"
+        assert risk.correlation_group("over_2_5") == "over"
+
+    def test_kill_switch_halts_everything(self, live_session, monkeypatch):
+        from src.live import risk
+        from types import SimpleNamespace as NS
+        monkeypatch.setattr(config, "GLOBAL_TRADING_DISABLED", True)
+        r = risk.exposure_gate(live_session, NS(id=1, home_team_id=1,
+                                                away_team_id=2),
+                               "home_win", 1000, 0)
+        assert r == "KILL_SWITCH:GLOBAL_TRADING_DISABLED"
+
+    def test_correlated_exposure_limit(self, live_session, monkeypatch):
+        """Stacking correlated home bets on one match hits the shared
+        match-direction budget before the per-match one."""
+        from src.live import paper, risk
+        from src.live.models import (Fixture, PaperFill, PaperSignal,
+                                     PredictionRun)
+        pol = risk.RISK_POLICY
+        # an existing open home position near the correlated cap
+        fx = Fixture(id=5, competition_slug="mls-2026", espn_event_id="r5",
+                     home_team_id=1, away_team_id=2)
+        run = PredictionRun(id="rr5", fixture_id=5, run_type="t10",
+                            status="complete")
+        live_session.add_all([fx, run])
+        live_session.flush()
+        sig = PaperSignal(fixture_id=5, outcome_key="home_win",
+                          decision="fill", prediction_run_id="rr5")
+        live_session.add(sig); live_session.flush()
+        live_session.add(PaperFill(
+            paper_signal_id=sig.id, status="open",
+            cost_c=pol["max_correlated_exposure_c"] - 500))
+        live_session.commit()
+        # a new home_margin bet (same direction) that would exceed it
+        r = risk.exposure_gate(live_session, fx, "home_margin_2", 1000, 0)
+        assert r == "CORRELATED_EXPOSURE_LIMIT"
+        # an AWAY bet (different direction) is not blocked by that budget
+        r2 = risk.exposure_gate(live_session, fx, "away_win", 1000, 0)
+        assert r2 != "CORRELATED_EXPOSURE_LIMIT"
+
+    def test_paper_uses_risk_engine_for_exposure(self, live_session,
+                                                 monkeypatch):
+        """Paper trading rejects via the shared risk authority when a
+        fill would blow the total-open cap."""
+        from src.live import paper, risk
+        from src.live.models import PaperSignal
+        monkeypatch.setattr(config, "PAPER_TRADING_ENABLED", True)
+        # shrink the total-open cap so one fill exceeds it
+        monkeypatch.setitem(risk.RISK_POLICY, "max_total_open_c", 100)
+        TestPaperTrading()._lock_with_book(live_session, ask=45,
+                                           model_p=0.60)
+        paper.paper_trade_lock("lock")
+        sig = live_session.query(PaperSignal).filter_by(
+            outcome_key="home_win").one()
+        assert sig.decision == "reject"
+        assert sig.reject_reason in ("TOTAL_RISK_LIMIT", "BANKROLL_RESERVE")
+
+
+class TestObservability:
+    def test_metrics_shape_and_lock_success(self, live_session,
+                                            monkeypatch):
+        from src.live import observability, risk
+        from src.live.models import (Fixture, PredictionRun)
+        # a kicked-off shadow-touched fixture WITHOUT a lock = a miss
+        fx = Fixture(id=9, competition_slug="mls-2026", espn_event_id="m9",
+                     status="post",
+                     current_kickoff_utc=datetime.now(UTC)
+                     - timedelta(hours=1))
+        live_session.add(fx)
+        live_session.add(PredictionRun(id="sr9", fixture_id=9,
+                                       run_type="scheduled",
+                                       status="complete"))
+        live_session.commit()
+        m = observability.metrics()
+        assert set(m) >= {"data", "locks", "runs", "paper"}
+        assert m["locks"]["kicked_off_shadow_fixtures"] >= 1
+        assert m["locks"]["missed_locks"] >= 1
+        assert m["locks"]["lock_success_rate"] is not None
+        # risk assessment is well-formed
+        r = risk.assess()
+        assert r["policy_version"] == "risk-v1"
+        assert "active_kill_switches" in r
 
 
 class TestModelLadderEval:

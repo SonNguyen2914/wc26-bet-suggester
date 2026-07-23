@@ -233,6 +233,16 @@ AUTO_EXECUTION_ENABLED = _parse_flag(
 PAPER_TRADING_ENABLED = _parse_flag(
     os.getenv("PAPER_TRADING_ENABLED"), True, "PAPER_TRADING_ENABLED")
 
+# Risk-engine kill switches (V8.1 eval Phase 8). The SAFEST state is no
+# new orders — each of these, when true, halts new fills/orders. They
+# gate paper trading now and any future executor. Default false; the
+# risk engine also computes data-driven switches (stale market data etc).
+GLOBAL_TRADING_DISABLED = _parse_flag(
+    os.getenv("GLOBAL_TRADING_DISABLED"), False, "GLOBAL_TRADING_DISABLED")
+COMPETITION_TRADING_DISABLED = _parse_flag(
+    os.getenv("COMPETITION_TRADING_DISABLED"), False,
+    "COMPETITION_TRADING_DISABLED")
+
 # --- Live data plane (PostgreSQL; the archive DB stays untouched) ---------
 # Absent = the live plane is DORMANT: no engine is created, no MLS
 # writes happen anywhere, shadow endpoints report not-ready. Set it to

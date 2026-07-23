@@ -216,6 +216,34 @@ def mls_audit():
     return out or {"skipped": "dormant"}
 
 
+@app.get("/api/mls/risk")
+def mls_risk():
+    """The risk engine's live state: the versioned policy, any active
+    kill switches, and current open exposure. Public read-only. 15s
+    cache."""
+    from src.mls import _cached
+    try:
+        from src.live import risk
+        return _cached("mls_risk", 15, risk.assess) or {}
+    except Exception as exc:
+        print(f"[mls] risk assess failed: {exc}")
+        raise HTTPException(503, "risk unavailable")
+
+
+@app.get("/api/mls/metrics")
+def mls_metrics():
+    """Operational metrics for observability (V8.1 eval Phase 10):
+    fixture/quote freshness, lock success, missed locks, scheduler
+    health, paper P&L. Public read-only, machine-readable. 15s cache."""
+    from src.mls import _cached
+    try:
+        from src.live import observability
+        return _cached("mls_metrics", 15, observability.metrics) or {}
+    except Exception as exc:
+        print(f"[mls] metrics failed: {exc}")
+        raise HTTPException(503, "metrics unavailable")
+
+
 @app.get("/api/mls/paper")
 def mls_paper():
     """The paper-trading ledger P&L: signals, fills, rejections (with
