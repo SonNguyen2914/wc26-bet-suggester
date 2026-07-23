@@ -180,3 +180,13 @@ The re-evaluation's full launch-gate roadmap (six levels, sixteen phases) named 
 - **Level 3 — Research reproducibility:** *now reached* (was "not ready"). The project can accurately say **independently model-reproducible**: hand someone the artifact document and the seed, they get the same probabilities.
 
 The claim language is updated accordingly — "market-provenance-complete AND independently model-reproducible." What remains is genuinely the slower science the roadmap lays out: Levels 4–6 (execution-quality paper trading, manual real-money, automated execution), each gated on prospective evidence, lineup-quality inputs, a risk engine, and validated fills — none of it emergency, none of it blocking Saturday's first provenance-complete, independently-reproducible locks.
+
+### Phase 3 — the prospective research corpus (Jul 23)
+
+With the input artifact done (Phase 2) and the baseline frozen, the next roadmap item was the versioned corpus exporter — and it reuses the artifact plumbing directly (@3f5e0a9, no migration).
+
+`src/live/corpus.py` emits a self-contained bundle of every research entity — fixtures + results, teams/aliases, model versions, the input artifacts, prediction runs + every contract, market events/contracts, lock snapshots, frozen quotes + depth, and the audit section carrying **missed locks and failed snapshots** (no survivorship bias). Per-file sha256 plus a `manifest_hash` over the data (not timestamps), and published versions are immutable (export refuses to overwrite). `scripts/analyze_corpus.py` is the one documented command: it reads **only the files**, verifies every hash, replays each run from its stored artifact, scores forecasts where results exist, and links model to frozen book. `GET /api/mls/corpus` serves the manifest (or `?full=1` the whole bundle).
+
+**The acceptance, proven against production:** downloaded the full corpus from prod over HTTP, ran `python scripts/analyze_corpus.py <dir>` with no database environment — **integrity CLEAN, 15/15 prod runs replay exactly, max delta 0.0**, from the downloaded files alone. This is the evaluator's Phase 3 condition met: download, one command, reproduce, no production database.
+
+Forecast scoring reads 0 today (no settled fixtures have runs yet); it fills in the moment Saturday's locks settle. Roadmap position: steps 1 (freeze/tag), 3 (artifact), and 4 (corpus) done; step 2 (run/audit slates) waits for Saturday; step 5 (PostgreSQL-in-CI) is next.
