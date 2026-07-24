@@ -733,7 +733,7 @@ class TestSlateReport:
         cap = past - timedelta(minutes=8)
         live_session.add_all([
             ModelInputArtifact(
-                id=1, schema_version="model-input-v3", content_hash="h",
+                id=1, schema_version="model-input-v4", content_hash="h",
                 document_json=_json.dumps(
                     {"engine": {"signature_hash": _current_engine_sig()}})),
             MarketSnapshot(id=1, fixture_id=3, captured_at=cap,
@@ -800,7 +800,7 @@ class TestSlateReport:
                     current_kickoff_utc=base + timedelta(minutes=5),
                     status="pre"),
             ModelInputArtifact(
-                id=1, schema_version="model-input-v3", content_hash="h",
+                id=1, schema_version="model-input-v4", content_hash="h",
                 document_json=_json.dumps(
                     {"engine": {"signature_hash": _current_engine_sig()}})),
             MarketSnapshot(id=2, fixture_id=7,
@@ -897,8 +897,8 @@ class TestModelLadderEval:
         live_session.commit()
         rep = model_eval.evaluate_ladder(n_boot=300)
         assert rep["n_scored"] > 10
-        assert set(rep["variants"]) == {"M0", "M1", "M2"}
-        for name in ("M0", "M1", "M2"):
+        assert set(rep["variants"]) == {"M0", "M1", "M2", "M2W"}
+        for name in ("M0", "M1", "M2", "M2W"):
             assert 0 < rep["variants"][name]["log_loss"] < 5
         edge = rep["edges"]["M2_vs_M0"]
         assert "ci95" in edge and len(edge["ci95"]) == 2
@@ -906,13 +906,16 @@ class TestModelLadderEval:
         # M2 (ratings+recency) should not lose to M0 (no team info) here
         assert rep["variants"]["M2"]["log_loss"] <= \
             rep["variants"]["M0"]["log_loss"] + 0.02
+        # the win% blend is scored with its own CI vs M2
+        assert "ci95" in rep["edges"]["M2W_vs_M2"]
 
     def test_approval_record_never_exceeds_shadow(self, live_session):
         from src.live import model_eval
+        dv = model_eval.deployed_variant()   # M2W when win-blend is on
         rec = model_eval.approval_record(
             {"eval_version": "x", "n_scored": 5,
-             "variants": {"M2": {"log_loss": 1.0, "brier": 0.6}},
-             "edges": {"M2_vs_M0": {"delta_log_loss": 0.01}}})
+             "variants": {dv: {"log_loss": 1.0, "brier": 0.6}},
+             "edges": {f"{dv}_vs_M0": {"delta_log_loss": 0.01}}})
         assert rec["approved_mode"] == "shadow"
         assert "NOT" in rec["approval_meaning"]
         assert any("prospective" in x for x in rec["limitations"])
@@ -922,11 +925,12 @@ class TestModelLadderEval:
         point estimate — significantly-worse is refused, a CI spanning
         zero is approvable for SHADOW, too-few-scored is refused."""
         from src.live import model_eval as me
-        worse = {"n_scored": 162, "edges": {"M2_vs_M0": {
+        dv = me.deployed_variant()
+        worse = {"n_scored": 162, "edges": {f"{dv}_vs_M0": {
             "delta_log_loss": -0.05, "ci95": [-0.09, -0.01],
             "significant": True}}}
         assert me.shadow_approval_policy(worse)[0] is False
-        spans_zero = {"n_scored": 162, "edges": {"M2_vs_M0": {
+        spans_zero = {"n_scored": 162, "edges": {f"{dv}_vs_M0": {
             "delta_log_loss": 0.008, "ci95": [-0.012, 0.029],
             "significant": False}}}
         assert me.shadow_approval_policy(spans_zero)[0] is True
@@ -939,13 +943,14 @@ class TestModelLadderEval:
         dedupes to one row — no bare point-estimate gate anywhere."""
         from src.live import model_eval as me
         from src.live.models import ModelApprovalDecision, ModelVersion
+        dv = me.deployed_variant()
         report = {
             "eval_version": "model-eval-v1", "n_scored": 162,
-            "variants": {"M2": {"log_loss": 1.07, "brier": 0.647,
-                                "rps": 0.232}},
-            "edges": {"M2_vs_M0": {"delta_log_loss": 0.008,
-                                   "ci95": [-0.012, 0.029],
-                                   "significant": False}},
+            "variants": {dv: {"log_loss": 1.07, "brier": 0.647,
+                              "rps": 0.232}},
+            "edges": {f"{dv}_vs_M0": {"delta_log_loss": 0.008,
+                                      "ci95": [-0.012, 0.029],
+                                      "significant": False}},
         }
         monkeypatch.setattr(me, "evaluate_ladder", lambda **kw: report)
         dec = me.ensure_approval_decision()
@@ -1401,7 +1406,7 @@ class TestPredictionRuns:
         assert art.content_hash == run.input_snapshot_hash
         import json
         doc = json.loads(art.document_json)
-        assert doc["schema_version"] == "model-input-v3"
+        assert doc["schema_version"] == "model-input-v4"
         assert doc["team_ratings"]["home"] and doc["team_ratings"]["away"]
         assert doc["simulation"]["seed"] == run.simulation_seed
         assert len(doc["source_fixtures"]) >= 5
@@ -1443,7 +1448,7 @@ class TestPredictionRuns:
         assert rep["max_delta"] < 1e-6
         # V9 pre-slate: the engine signature is surfaced and matches (same
         # process), and the artifact schema is v2
-        assert rep["artifact_schema"] == "model-input-v3"
+        assert rep["artifact_schema"] == "model-input-v4"
         assert rep["stored_engine_signature_hash"]
         assert (rep["stored_engine_signature_hash"]
                 == rep["current_engine_signature_hash"])

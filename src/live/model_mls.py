@@ -25,6 +25,7 @@ import math
 import os
 from datetime import timezone
 
+import config
 from src.live.db import get_session, plane_ready
 from src.live.models import Fixture, ModelVersion
 
@@ -38,6 +39,11 @@ MODEL_NAME = "mls-2026-v0"
 SHRINK_GAMES = 24.0         # Bayesian prior weight (games at league avg)
 HALF_LIFE_DAYS = 90.0       # recency half-life for rate weighting
 MIN_GAMES = 5               # a team needs history before it's rated
+# win% (results) signal: shrink w/d/l rates toward a flat prior so
+# small-sample teams aren't over-weighted, and BLEND the results-based
+# 3-way into the simulated 3-way by this weight. alpha is measured on the
+# walk-forward ladder (M2 vs M2W) — deploy the weight that actually helps.
+RESULT_SHRINK = 8.0
 
 
 def _weight(days_ago: float) -> float:
@@ -71,17 +77,31 @@ def fit(fixtures, as_of) -> dict | None:
     ga: dict[int, float] = {}
     w_sum: dict[int, float] = {}
     n_games: dict[int, int] = {}
+    # recency-weighted results (win/draw/loss) per team — the win% signal
+    # (captures teams whose RESULTS outperform their goal difference, which
+    # a pure goals-Poisson model under-rates)
+    wins: dict[int, float] = {}
+    draws: dict[int, float] = {}
+    losses: dict[int, float] = {}
     tot_home = tot_away = tot_w = 0.0
     for f in fixtures:
         days = (as_of - _utc(f.current_kickoff_utc)).total_seconds() / 86400
         w = _weight(days)
-        for team, scored, conceded in (
-                (f.home_team_id, f.home_goals, f.away_goals),
-                (f.away_team_id, f.away_goals, f.home_goals)):
+        if f.home_goals > f.away_goals:
+            h_res, a_res = "w", "l"
+        elif f.home_goals < f.away_goals:
+            h_res, a_res = "l", "w"
+        else:
+            h_res = a_res = "d"
+        for team, scored, conceded, res in (
+                (f.home_team_id, f.home_goals, f.away_goals, h_res),
+                (f.away_team_id, f.away_goals, f.home_goals, a_res)):
             gf[team] = gf.get(team, 0.0) + w * scored
             ga[team] = ga.get(team, 0.0) + w * conceded
             w_sum[team] = w_sum.get(team, 0.0) + w
             n_games[team] = n_games.get(team, 0) + 1
+            bucket = {"w": wins, "d": draws, "l": losses}[res]
+            bucket[team] = bucket.get(team, 0.0) + w
         tot_home += w * f.home_goals
         tot_away += w * f.away_goals
         tot_w += w
@@ -91,6 +111,7 @@ def fit(fixtures, as_of) -> dict | None:
     if league_gpg <= 0:
         return None
     ratings = {}
+    results = {}
     for team, w in w_sum.items():
         # shrink toward league average by prior weight (in games)
         k = SHRINK_GAMES
@@ -98,7 +119,17 @@ def fit(fixtures, as_of) -> dict | None:
         dfc = (ga[team] / league_gpg + k) / (w + k)
         ratings[team] = {"attack": atk, "defence": dfc,
                          "games": n_games[team]}
+        # win/draw/loss RATES, shrunk toward the league draw-ish prior so a
+        # team with few games isn't over-weighted (same discipline as the
+        # goals ratings — small samples get pulled to the mean)
+        kr = RESULT_SHRINK
+        results[team] = {
+            "w": (wins.get(team, 0.0) + kr / 3) / (w + kr),
+            "d": (draws.get(team, 0.0) + kr / 3) / (w + kr),
+            "l": (losses.get(team, 0.0) + kr / 3) / (w + kr),
+            "games": n_games[team]}
     return {
+        "results": results,
         "league_gpg": league_gpg,
         # fitted venue split: home teams score tot_home/tot_w per game
         "venue_home": (tot_home / tot_w) / league_gpg,
@@ -133,6 +164,40 @@ def _raw(team_id: int, model: dict, venue: str) -> dict | None:
     }
 
 
+def results_prior(model: dict, home_id: int, away_id: int) -> dict | None:
+    """A 3-way outcome prior from the two teams' recency-weighted win/draw/
+    loss RATES (the win% signal). The home team's own win-rate maps to a
+    home win; the away team's own win-rate maps to an away win; the two
+    teams' views are averaged and normalized. Blended into the simulated
+    3-way (never replacing it) so 'a team that wins a lot' nudges the
+    probabilities without discarding the goals model."""
+    res = model.get("results") or {}
+    h, a = res.get(home_id), res.get(away_id)
+    if not h or not a:
+        return None
+    p_home = (h["w"] + a["l"]) / 2      # H wins  /  A loses
+    p_draw = (h["d"] + a["d"]) / 2
+    p_away = (h["l"] + a["w"]) / 2      # H loses /  A wins
+    tot = p_home + p_draw + p_away
+    if tot <= 0:
+        return None
+    return {"home_win": p_home / tot, "draw": p_draw / tot,
+            "away_win": p_away / tot}
+
+
+def blend_with_results(outcomes: dict, prior: dict | None,
+                       alpha: float) -> dict:
+    """final = (1-alpha)*simulated + alpha*results_prior, renormalized. A
+    no-op when alpha<=0 or the prior is unavailable (a team without enough
+    history)."""
+    if not prior or alpha <= 0:
+        return outcomes
+    blended = {k: (1 - alpha) * outcomes.get(k, 0.0)
+               + alpha * prior.get(k, 0.0) for k in outcomes}
+    s = sum(blended.values())
+    return {k: v / s for k, v in blended.items()} if s > 0 else outcomes
+
+
 def seed_for(fixture, run_type: str) -> int:
     """Deterministic per-(fixture, run_type) seed from STABLE identity:
     the provider event id, never the auto-increment row id (V8
@@ -152,7 +217,7 @@ def seed_for(fixture, run_type: str) -> int:
 # python, numpy) — not just selected constants — so an implementation
 # change changes the signature. v2 froze constants+numpy only (a code
 # change could pass the guard); v1 froze no engine at all.
-INPUT_ARTIFACT_SCHEMA = "model-input-v3"
+INPUT_ARTIFACT_SCHEMA = "model-input-v4"
 _GIT_REV = os.getenv("RAILWAY_GIT_COMMIT_SHA", "")[:40]
 
 
@@ -254,6 +319,13 @@ def build_input_artifact(fixture, model: dict,
             "n_fixtures": model["n_fixtures"],
         },
         "team_ratings": {"home": home_r, "away": away_r},
+        # the win% (results) blend inputs, frozen so replay reproduces the
+        # BLENDED 3-way exactly, not just the pure-goals simulation
+        "win_blend": {
+            "alpha": config.MLS_WIN_BLEND_ALPHA,
+            "prior": results_prior(model, fixture.home_team_id,
+                                   fixture.away_team_id),
+        },
         "simulation": {
             "seed": seed_for(fixture, run_type),
             "draws": config.N_SIMULATIONS,
@@ -305,7 +377,11 @@ def replay_from_artifact(document: dict,
         seed=sim_cfg.get("seed"))
     out = sim.simulate(raw(tr["home"], "home"),
                        raw(tr["away"], "away"), stage="group")
-    return out["outcomes"]
+    # reproduce the BLENDED 3-way from the frozen win% inputs (v4+); a
+    # legacy artifact without them replays the pure simulation
+    wb = document.get("win_blend") or {}
+    return blend_with_results(out["outcomes"], wb.get("prior"),
+                              wb.get("alpha", 0.0))
 
 
 def predict_fixture(fixture, model: dict, run_type: str = "scheduled",
@@ -319,6 +395,12 @@ def predict_fixture(fixture, model: dict, run_type: str = "scheduled",
     sim = MatchSimulator(n_simulations=n_sims,
                          seed=seed_for(fixture, run_type))
     out = sim.simulate(home, away, stage="group")
+    # blend the WIN% (results) prior into the 3-way (never the props/
+    # scorelines, which stay pure-goals-model) — weight measured on the
+    # walk-forward ladder (M2 vs M2W)
+    prior = results_prior(model, fixture.home_team_id, fixture.away_team_id)
+    outcomes = blend_with_results(out["outcomes"], prior,
+                                  config.MLS_WIN_BLEND_ALPHA)
     # every probability a listed Kalshi family can consume: the totals
     # ladder, BTTS, margins (their "spread"), first team to score, and
     # team totals — ALL taken from the simulator's full-array marginals
@@ -335,7 +417,8 @@ def predict_fixture(fixture, model: dict, run_type: str = "scheduled",
     return {
         "model_version": MODEL_NAME,
         "seed": seed_for(fixture, run_type),
-        "outcomes": out["outcomes"],
+        "outcomes": outcomes,
+        "sim_outcomes": out["outcomes"],   # pre-blend, for transparency
         "props": props,
         "scorelines": out["scorelines"][:12],
         "xg": out["xg"],

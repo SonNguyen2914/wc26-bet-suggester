@@ -72,6 +72,12 @@ KNOCKOUT_DAMPING = float(os.getenv("KNOCKOUT_DAMPING", "0.85"))
 # actionable. Set to 0 to recover pure Poisson.
 GOAL_DISPERSION_CV = float(os.getenv("GOAL_DISPERSION_CV", "0.30"))
 
+# MLS win% (results) blend: fraction of the 3-way that comes from the
+# teams' recency-weighted win/draw/loss rates rather than the goals
+# simulation (0 = pure goals model). Tuned on the walk-forward ladder
+# (M2 vs M2W); deploy the weight that measurably helps.
+MLS_WIN_BLEND_ALPHA = float(os.getenv("MLS_WIN_BLEND_ALPHA", "0.30"))
+
 # --- Model humility (market anchoring) -----------------------------------
 # Final probability = MODEL_WEIGHT * model + (1-MODEL_WEIGHT) * market-implied.
 # Liquid markets are usually right; only large, genuine disagreements should
