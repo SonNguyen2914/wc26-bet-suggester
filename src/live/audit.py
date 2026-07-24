@@ -35,7 +35,7 @@ def _utc(dt):
     return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
-def _lock_checks(s, f, lock, n_locks) -> dict:
+def _lock_checks(s, f, lock, n_locks, current_engine=None) -> dict:
     """Every invariant from the evaluation's acceptance table, as a flat
     dict of booleans. all_pass is their AND."""
     ko = _utc(f.current_kickoff_utc)
@@ -64,6 +64,17 @@ def _lock_checks(s, f, lock, n_locks) -> dict:
                           .get("signature_hash"))
         except (ValueError, TypeError):
             engine_sig = None
+    # V9.1 eval F4: VALIDATE, don't just check presence. Recompute the
+    # approval-decision hash from its stored canonical bytes, and compare
+    # the lock's frozen engine signature against the CURRENT engine.
+    approval_hash_valid = bool(
+        approval and approval.decision_document and approval.content_hash
+        and hashlib.sha256(approval.decision_document.encode()).hexdigest()
+        == approval.content_hash)
+    if current_engine is None:
+        from src.live import model_mls
+        current_engine = model_mls.engine_signature()["signature_hash"]
+    engine_matches_current = bool(engine_sig and engine_sig == current_engine)
     # a later COMPLETE run must not exist for this fixture (F9)
     later = (s.query(PredictionRun)
              .filter_by(fixture_id=f.id, status="complete")
@@ -101,11 +112,14 @@ def _lock_checks(s, f, lock, n_locks) -> dict:
             and _utc(approval.created_at) <= _utc(lock.captured_at)),
         "approval_decision_hash_present": bool(
             approval and approval.content_hash),
+        # the approval hash must RECOMPUTE from its stored bytes (V9.1 F4)
+        "approval_decision_hash_valid": approval_hash_valid,
         "input_hash_present": bool(lock.input_snapshot_hash),
         "input_artifact_retained": lock.model_input_artifact_id is not None,
-        # the frozen engine signature must be present (V9 eval F4) so the
-        # reproducibility claim is engine-matched, not engine-blind
+        # the frozen engine signature must be present AND match the current
+        # engine (V9.1 eval F4) — presence alone is engine-blind
         "engine_signature_present": bool(engine_sig),
+        "engine_signature_matches_current": engine_matches_current,
         # a lineup snapshot must be REFERENCED (Phase 5) — whether or not
         # the lineup was confirmed. Its absence is a provenance gap; a
         # PENDING lineup inside it is honest data, not a failure.
@@ -127,7 +141,10 @@ def _lock_checks(s, f, lock, n_locks) -> dict:
         "market_snapshot_id": lock.market_snapshot_id,
         "approval_decision_id": lock.model_approval_decision_id,
         "approval_decision_hash": approval.content_hash if approval else None,
+        "approval_hash_recomputed_ok": approval_hash_valid,
         "engine_signature_hash": engine_sig,
+        "current_engine_signature_hash": current_engine,
+        "engine_matches_current": engine_matches_current,
         "contracts": len(contracts),
         "priced_contracts": len(priced),
         "input_quality": (json.loads(lock.input_quality_json)
@@ -219,6 +236,10 @@ def lock_audit() -> dict:
         return {"skipped": "dormant"}
     s = get_session()
     try:
+        # compute the current engine signature ONCE for the whole audit
+        # (V9.1 eval F4) rather than per-lock — it hashes source files
+        from src.live import model_mls
+        current_engine = model_mls.engine_signature()["signature_hash"]
         touched_ids = {r[0] for r in s.query(
             PredictionRun.fixture_id).distinct().all()}
         fixtures = [f for f in s.query(Fixture).filter_by(
@@ -245,7 +266,8 @@ def lock_audit() -> dict:
                     })
                 continue
             for lock in canon:
-                locks_out.append(_lock_checks(s, f, lock, len(canon)))
+                locks_out.append(_lock_checks(s, f, lock, len(canon),
+                                              current_engine))
         failed_snaps = [{
             "market_snapshot_id": sn.id,
             "fixture_id": sn.fixture_id,

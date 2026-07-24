@@ -297,26 +297,55 @@ def shadow_approval_policy(report: dict) -> tuple[bool, str]:
                   "prospective evidence, NOT an established edge")
 
 
-def _decision_content_hash(rec: dict) -> str:
-    """Content hash over the DECISION (excluding wall-clock fields) so an
-    unchanged evaluation dedupes to one immutable row."""
+def _decision_canonical(rec: dict) -> str:
+    """The canonical bytes a decision's content_hash covers (V9.1 eval F4).
+    Excludes wall-clock fields so an unchanged evaluation dedupes to one
+    immutable row. Stored verbatim as `decision_document` so the audit can
+    recompute and verify the hash independently."""
     from src.live.model_mls import _canonical
     core = {k: rec.get(k) for k in (
         "model_version", "eval_version", "policy_version", "corpus_version",
         "approved_mode", "approved", "metrics", "edge_vs_baseline",
         "decision_reason")}
-    return hashlib.sha256(_canonical(core).encode()).hexdigest()
+    return _canonical(core)
+
+
+def _decision_content_hash(rec: dict) -> str:
+    return hashlib.sha256(_decision_canonical(rec).encode()).hexdigest()
+
+
+def _active_decision():
+    """The newest APPROVED decision for this model, or None."""
+    from src.live.models import ModelApprovalDecision
+    s = get_session()
+    try:
+        return (s.query(ModelApprovalDecision)
+                .filter_by(model_version_name=MODEL_NAME, approved=True)
+                .order_by(ModelApprovalDecision.id.desc()).first())
+    finally:
+        s.close()
 
 
 def ensure_approval_decision(corpus_version: str | None = None,
-                             n_boot: int = 1000) -> dict:
-    """Run the CI evaluator, persist an IMMUTABLE approval decision, and
-    set approved_for_shadow FROM it (V9 eval F1/F10). Deduped by content
-    hash: an unchanged evaluation reuses the existing row, a changed one
-    writes a new, never-overwritten record. The boot gate calls THIS
-    instead of the legacy point-estimate backtest."""
+                             n_boot: int = 1000, force: bool = False) -> dict:
+    """LOAD the active approval decision, or (only when none exists, or
+    force=True) run the CI evaluator and persist a new IMMUTABLE one, then
+    set approved_for_shadow FROM it (V9 eval F1/F10; V9.1 eval F8). Boot
+    LOADS rather than recomputes, so the approving decision does not drift
+    as the mutable database accumulates data — a re-evaluation is an
+    explicit force=True operator action. Deduped by content hash."""
     if not plane_ready():
         return {"error": "dormant"}
+    if not force:
+        existing = _active_decision()
+        # load only a COMPLETE decision; one missing its canonical document
+        # (a pre-V9.1.2 row) falls through so the dedupe branch can heal it
+        if existing is not None and existing.decision_document:
+            return {"decision_id": existing.id, "approved": True,
+                    "loaded": True, "content_hash": existing.content_hash,
+                    "reason": "loaded active decision (not recomputed)",
+                    "policy_version": existing.policy_version,
+                    "n_scored": existing.n_scored}
     report = evaluate_ladder(n_boot=n_boot)
     if report.get("n_scored", 0) == 0:
         return {"error": report.get("note") or "no scorable fixtures"}
@@ -325,7 +354,8 @@ def ensure_approval_decision(corpus_version: str | None = None,
     rec["policy_version"] = APPROVAL_POLICY_VERSION
     rec["approved"] = approved
     rec["decision_reason"] = reason
-    chash = _decision_content_hash(rec)
+    canonical = _decision_canonical(rec)
+    chash = hashlib.sha256(canonical.encode()).hexdigest()
 
     from src.live import model_mls
     from src.live.models import ModelApprovalDecision, ModelVersion
@@ -350,12 +380,20 @@ def ensure_approval_decision(corpus_version: str | None = None,
                 edge_json=json.dumps(rec["edge_vs_baseline"]),
                 limitations_json=json.dumps(rec["limitations"]),
                 report_json=json.dumps(report)[:200_000],
+                decision_document=canonical,
                 approved_by="automated-eval", content_hash=chash,
                 created_at=datetime.now(timezone.utc))
             s.add(row)
             s.commit()
             decision_id = row.id
         else:
+            # heal a pre-V9.1.2 row that stored the hash but not the
+            # canonical document it covers — sha256(document) still equals
+            # the stored content_hash, so this only fills a NULL, it never
+            # alters the decision (V9.1 eval F4/F8)
+            if not existing.decision_document:
+                existing.decision_document = canonical
+                s.commit()
             decision_id = existing.id
     finally:
         s.close()

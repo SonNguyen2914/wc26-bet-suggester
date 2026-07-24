@@ -1,6 +1,13 @@
 # Release: mls-shadow-v1 (frozen baseline for the first MLS slate)
 
-> **The actual pre-slate baseline is `mls-shadow-v1.1`, not this tag.**
+> **The actual pre-slate baseline is now `mls-shadow-v1.2`** (a disclosed
+> execution-fidelity hotfix over v1.1 — a fourth evaluation found a
+> critical order-book defect that corrupted stored evidence; fixed while
+> zero locks existed. See
+> [`docs/V9/V1.2-REMEDIATIONS.md`](V1.2-REMEDIATIONS.md)). The note below
+> about v1.1 superseding this original `mls-shadow-v1` tag still stands.
+>
+> **(superseded) The pre-slate baseline was `mls-shadow-v1.1`, not this tag.**
 > Every value in the manifest below is the state *at the original
 > `mls-shadow-v1` tag* and is left unchanged as a historical record.
 > Since it, the V9 P0-remediation pass + a pre-slate observability patch

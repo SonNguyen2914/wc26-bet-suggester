@@ -25,8 +25,8 @@ extension.
 """
 from __future__ import annotations
 
-import math
 from datetime import datetime, timezone
+from decimal import ROUND_HALF_UP, ROUND_UP, Decimal
 
 import config
 from src.live.db import get_session, plane_ready
@@ -37,28 +37,33 @@ from src.live.runs import approved_model_version
 
 THREE_WAY = ("home_win", "draw", "away_win")
 
-# Kalshi's general trading fee, FROZEN so paper P&L ties to the exact
-# rule that produced it (V9 eval F8). The published general formula is
-# fee = ceil(0.07 * C * P * (1-P)) in dollars = ceil(7 * C * P * (1-P))
-# in cents, computed ONCE on the whole order and rounded UP — never
-# rounded per contract (the V8/V9 bug, which zeroed the fee at the
-# extremes and flipped sign by price). Series/event overrides and
-# maker/taker differences are NOT yet modeled, so paper P&L stays
-# explicitly approximate until they are.
-FEE_SCHEDULE = {
-    "version": "kalshi-general-2026-07",
-    "rate": 0.07,
-    "rounding": "ceil_per_order",
-    "modeled": "general taker fee only",
-    "not_modeled": "series/event overrides, maker/taker, per-fill "
-                   "accumulation — paper P&L is approximate",
+# Kalshi's trading fee as a VERSIONED, EXACT policy (V9.1 eval F3). The
+# general taker formula is ceil_to_centicent(0.07 * C * P * (1-P)) DOLLARS,
+# computed once on the whole order. It is evaluated in Decimal, not binary
+# float — the float ceil overcharged by 1c at some prices (e.g. 100@$0.10
+# gave 64c where the exact value is 63.00c). Series/event overrides and
+# maker fees are declared fields, NOT yet populated, so anything that would
+# use them stays explicitly approximate and general-taker-only.
+FEE_RATE = Decimal("0.07")
+CENTICENT = Decimal("0.0001")            # $ precision of Kalshi trade fees
+FEE_POLICY = {
+    "version": "kalshi-fee-2026-07-general",
+    "rate": "0.07",
+    "rounding": "ceil_centicent",
+    "taker": True,
+    "maker_modeled": False,
+    "series_overrides": {},              # none populated
+    "exit_fees_modeled": False,
+    "not_modeled": "series/event overrides, maker fees, exit fees, "
+                   "per-order rebate accumulator — general taker only",
 }
 
 # The execution policy is versioned so paper results can be tied to the
 # exact rules that produced them.
 EXEC_POLICY = {
-    "version": "paper-exec-v2",          # v2: order-level fee (V9 eval F8)
-    "fee_schedule": FEE_SCHEDULE["version"],
+    "version": "paper-exec-v3",          # v3: exact Decimal depth+fees (F1/F2/F3)
+    "fee_policy": FEE_POLICY["version"],
+    "depth_policy": "best_10_each_side",  # V9.1 eval F1
     "min_top_size": 10,       # contracts available at the ask to bother
     "max_spread_c": 8,        # widest yes ask-bid we'll cross
     "max_quote_age_s": 600,   # snapshot freshness ceiling
@@ -72,57 +77,124 @@ def _now():
     return datetime.now(timezone.utc)
 
 
-def order_fee_c(price_c: int | None, contracts: int) -> int:
-    """Kalshi general trading fee for a WHOLE order, integer cents,
-    rounded up once (V9 eval F8): ceil(7 * C * P * (1-P)). Computing it
-    per contract and multiplying (the old bug) is materially wrong — it
-    rounds to 0 at the extremes and over/under-charges by price."""
-    if not contracts or contracts <= 0 or price_c is None:
-        return 0
-    p = price_c / 100.0
-    return int(math.ceil(FEE_SCHEDULE["rate"] * 100.0 * contracts
-                         * p * (1.0 - p)))
+def order_fee_dollars(price, contracts) -> Decimal:
+    """Kalshi general taker fee for a WHOLE order, EXACT to the centicent
+    (V9.1 eval F3): ceil_centicent(0.07 * C * P * (1-P)) in DOLLARS.
+    Decimal throughout — the prior float ceil overcharged by 1c at some
+    prices. `price` is a probability in [0,1] (dollars per contract)."""
+    price = Decimal(str(price))
+    contracts = Decimal(str(contracts))
+    if contracts <= 0 or price <= 0 or price >= 1:
+        return Decimal("0")
+    raw = FEE_RATE * contracts * price * (Decimal(1) - price)
+    return raw.quantize(CENTICENT, rounding=ROUND_UP)
 
 
-def yes_buy_ladder(quote: MarketQuote, depth: list) -> list[tuple[int, int]]:
-    """The executable BUY-YES ladder as (yes_ask_c, size), best first.
-    Kalshi: a resting NO bid at price q IS a YES ask at 100-q. So we
-    walk the NO depth. When no depth was captured, fall back to the top
-    quote's ask + size as a single level."""
-    levels = []
+def _to_cents(dollars) -> int | None:
+    """Display helper: exact dollars → integer cents (half-up), for the
+    legacy *_c columns. The exact value is retained in the *_dollars
+    columns; cents are display only."""
+    if dollars is None:
+        return None
+    return int((Decimal(str(dollars)) * 100).quantize(
+        Decimal("1"), rounding=ROUND_HALF_UP))
+
+
+def _lvl_price_dollars(d) -> Decimal | None:
+    """Exact price of a depth level, preferring the provider dollar string
+    (V9.1 eval F2), falling back to derived cents."""
+    pd = getattr(d, "price_dollars", None)
+    if pd:
+        try:
+            return Decimal(pd)
+        except (ArithmeticError, TypeError, ValueError):
+            pass
+    return Decimal(d.price_c) / 100 if d.price_c is not None else None
+
+
+def _lvl_size(d) -> Decimal:
+    """Exact size of a depth level, preferring the provider *_fp string."""
+    sf = getattr(d, "size_fp", None)
+    if sf:
+        try:
+            return Decimal(sf)
+        except (ArithmeticError, TypeError, ValueError):
+            pass
+    return Decimal(d.size or 0)
+
+
+def yes_buy_ladder(quote: MarketQuote,
+                   depth: list) -> list[tuple[Decimal, Decimal]]:
+    """The executable BUY-YES ladder as (yes_ask_dollars, size), best
+    (lowest ask) first — in EXACT Decimal dollars/sizes (V9.1 eval F2),
+    not rounded cents. Kalshi: a resting NO bid at price q IS a YES ask at
+    1-q, so we walk the NO depth (now the BEST levels after the F1 fix).
+    When no depth was captured, fall back to the top quote's exact ask."""
+    levels: list[tuple[Decimal, Decimal]] = []
     for d in depth:
-        if d.side == "no" and 0 < d.price_c < 100 and d.size > 0:
-            levels.append((100 - d.price_c, d.size))
+        if d.side != "no":
+            continue
+        no_bid = _lvl_price_dollars(d)
+        size = _lvl_size(d)
+        if no_bid is not None and Decimal(0) < no_bid < Decimal(1) \
+                and size > 0:
+            levels.append((Decimal(1) - no_bid, size))
     if levels:
         levels.sort(key=lambda x: x[0])       # lowest ask first
         return levels
-    if quote.yes_ask_c is not None:
-        size = quote.yes_ask_size or EXEC_POLICY["min_top_size"]
-        return [(quote.yes_ask_c, size)]
+    ask = None
+    if getattr(quote, "yes_ask_dollars", None):
+        try:
+            ask = Decimal(quote.yes_ask_dollars)
+        except (ArithmeticError, TypeError, ValueError):
+            ask = None
+    if ask is None and quote.yes_ask_c is not None:
+        ask = Decimal(quote.yes_ask_c) / 100
+    if ask is not None:
+        size = (_lvl_size_from_fp(getattr(quote, "sizes_fp_json", None),
+                                  "yes_ask_size")
+                or Decimal(quote.yes_ask_size
+                           or EXEC_POLICY["min_top_size"]))
+        return [(ask, size)]
     return []
 
 
-def simulate_fill(ladder: list[tuple[int, int]], requested: int) -> dict:
-    """Deterministic depth-walk. Consumes size level by level up the
-    book; partial fill when depth is exhausted. Returns avg price,
-    filled qty, slippage vs best, levels consumed."""
-    filled = 0
-    cost = 0
+def _lvl_size_from_fp(sizes_fp_json, field) -> Decimal | None:
+    if not sizes_fp_json:
+        return None
+    try:
+        import json as _json
+        v = _json.loads(sizes_fp_json).get(field)
+        return Decimal(str(v)) if v is not None else None
+    except (ArithmeticError, TypeError, ValueError):
+        return None
+
+
+def simulate_fill(ladder: list[tuple[Decimal, Decimal]],
+                  requested) -> dict:
+    """Deterministic depth-walk in EXACT Decimal (V9.1 eval F2). Consumes
+    size level by level up the book; partial fill when depth is exhausted.
+    Returns exact filled qty, weighted-average price, slippage vs best,
+    and levels consumed."""
+    requested = Decimal(str(requested))
+    filled = Decimal(0)
+    cost = Decimal(0)
     used = 0
     best = ladder[0][0] if ladder else None
-    for price_c, size in ladder:
+    for price, size in ladder:
         if filled >= requested:
             break
         take = min(size, requested - filled)
         filled += take
-        cost += take * price_c
+        cost += take * price
         used += 1
     if filled == 0:
-        return {"filled": 0, "avg_price_c": None, "best_ask_c": best,
-                "slippage_c": None, "levels": 0}
-    avg = round(cost / filled)
-    return {"filled": filled, "avg_price_c": avg, "best_ask_c": best,
-            "slippage_c": avg - best, "levels": used}
+        return {"filled": Decimal(0), "avg_price": None, "best_ask": best,
+                "slippage": None, "levels": 0}
+    avg = cost / filled
+    return {"filled": filled, "avg_price": avg, "best_ask": best,
+            "slippage": (avg - best) if best is not None else None,
+            "levels": used, "notional": cost}
 
 
 def _market_gate(quote, snap, net_edge, model_approved) -> str | None:
@@ -165,10 +237,24 @@ def paper_trade_lock(run_id: str) -> dict:
             quote = s.get(MarketQuote, c.market_quote_id)
             if quote is None:
                 continue
-            ask = (quote.yes_ask_c or 0) / 100.0
-            fee = 0.07 * ask * (1 - ask)
-            net_edge = c.raw_probability - (ask + fee)
+            # EXACT ask (V9.1 eval F2): the provider dollar string first,
+            # cents only as a fallback — never the rounded cent as the
+            # economic input
+            ask_d = None
+            if quote.yes_ask_dollars:
+                try:
+                    ask_d = Decimal(quote.yes_ask_dollars)
+                except (ArithmeticError, TypeError, ValueError):
+                    ask_d = None
+            if ask_d is None:
+                ask_d = (Decimal(quote.yes_ask_c) / 100
+                         if quote.yes_ask_c is not None else Decimal(0))
+            # per-unit fee (exact rate, unquantized) for the net-edge gate
+            unit_fee = FEE_RATE * ask_d * (Decimal(1) - ask_d)
+            net_edge = float(Decimal(str(c.raw_probability))
+                             - (ask_d + unit_fee))
             reason = _market_gate(quote, snap, net_edge, model_approved)
+            target = EXEC_POLICY["target_contracts"]
             sig = PaperSignal(
                 prediction_run_id=run_id,
                 market_contract_id=c.market_contract_id,
@@ -176,10 +262,10 @@ def paper_trade_lock(run_id: str) -> dict:
                 fixture_id=run.fixture_id, outcome_key=c.outcome_key,
                 policy_version=EXEC_POLICY["version"],
                 model_probability=c.raw_probability,
-                ask_c=quote.yes_ask_c,
+                ask_c=quote.yes_ask_c, ask_dollars=str(ask_d),
                 # illustrative whole-order fee at the policy target size
-                fee_c=order_fee_c(quote.yes_ask_c,
-                                  EXEC_POLICY["target_contracts"]),
+                fee_c=_to_cents(order_fee_dollars(ask_d, target)),
+                fee_dollars=str(order_fee_dollars(ask_d, target)),
                 net_edge=net_edge,
                 decision="reject" if reason else "fill",
                 reject_reason=reason, created_at=_now())
@@ -191,35 +277,42 @@ def paper_trade_lock(run_id: str) -> dict:
             depth = s.query(MarketDepthLevel).filter_by(
                 market_quote_id=c.market_quote_id).all()
             ladder = yes_buy_ladder(quote, depth)
-            fill = simulate_fill(ladder, EXEC_POLICY["target_contracts"])
+            fill = simulate_fill(ladder, target)
             if fill["filled"] == 0:
                 sig.decision = "reject"
                 sig.reject_reason = "DEPTH_INSUFFICIENT"
                 continue
-            # whole-order fee on the ACTUAL filled quantity, rounded up
-            # once (V9 eval F8) — not a per-contract fee times count
-            fee_total = order_fee_c(fill["avg_price_c"], fill["filled"])
-            cost = fill["filled"] * fill["avg_price_c"] + fee_total
+            # EXACT economics (V9.1 eval F2/F3): whole-order fee on the
+            # actual filled quantity, exact notional, exact cost
+            avg = fill["avg_price"]
+            filled = fill["filled"]
+            fee_total = order_fee_dollars(avg, filled)
+            cost = fill["notional"] + fee_total
+            cost_c = _to_cents(cost)
+            slip = fill["slippage"]
             # EXPOSURE gates — the central risk authority, after the fill
             # cost is known (position size / correlation / bankroll / kill)
             from src.live import risk
             risk_reason = risk.exposure_gate(
-                s, fx, c.outcome_key, cost, fill["slippage_c"])
+                s, fx, c.outcome_key, cost_c, _to_cents(slip))
             if risk_reason:
                 sig.decision = "reject"
                 sig.reject_reason = risk_reason
                 continue
             s.add(PaperFill(
                 paper_signal_id=sig.id,
-                requested_contracts=EXEC_POLICY["target_contracts"],
-                filled_contracts=fill["filled"],
-                avg_fill_price_c=fill["avg_price_c"],
-                best_ask_c=fill["best_ask_c"],
-                slippage_c=fill["slippage_c"], fee_c=fee_total,
-                cost_c=cost, levels_consumed=fill["levels"],
+                requested_contracts=target,
+                filled_contracts=int(filled), filled_contracts_fp=str(filled),
+                avg_fill_price_c=_to_cents(avg),
+                avg_fill_price_dollars=str(avg),
+                best_ask_c=_to_cents(fill["best_ask"]),
+                slippage_c=_to_cents(slip),
+                fee_c=_to_cents(fee_total), fee_dollars=str(fee_total),
+                cost_c=cost_c, cost_dollars=str(cost),
+                levels_consumed=fill["levels"],
                 latency_ms=EXEC_POLICY["latency_ms"],
-                reason=("partial" if fill["filled"]
-                        < EXEC_POLICY["target_contracts"] else "filled"),
+                reason=("partial" if filled < Decimal(str(target))
+                        else "filled"),
                 created_at=_now(), status="open"))
             fills += 1
         s.commit()
@@ -254,10 +347,18 @@ def settle_paper(fixture_id: int | None = None) -> dict:
                       "away_win" if fx.away_goals > fx.home_goals
                       else "draw")
             hit = sig.outcome_key == result
-            payout = fill.filled_contracts * 100 if hit else 0
+            # EXACT settlement (V9.1 eval F2): a YES contract pays $1.00
+            # per EXACT filled contract if the outcome hit, else $0
+            filled = Decimal(fill.filled_contracts_fp
+                             or fill.filled_contracts or 0)
+            cost_d = Decimal(fill.cost_dollars) if fill.cost_dollars \
+                else (Decimal(fill.cost_c or 0) / 100)
+            payout_d = filled if hit else Decimal(0)
             fill.outcome_hit = hit
-            fill.payout_c = payout
-            fill.pnl_c = payout - fill.cost_c
+            fill.payout_dollars = str(payout_d)
+            fill.pnl_dollars = str(payout_d - cost_d)
+            fill.payout_c = _to_cents(payout_d)
+            fill.pnl_c = _to_cents(payout_d - cost_d)
             fill.status = "settled"
             fill.settled_at = _now()
             settled += 1
@@ -285,12 +386,20 @@ def paper_summary() -> dict:
         for r in (s.query(PaperSignal.reject_reason)
                   .filter_by(decision="reject").all()):
             reasons[r[0]] = reasons.get(r[0], 0) + 1
+        # exact P&L in dollars (V9.1 eval F2/F3), summed as Decimal
+        pnl_d = sum((Decimal(f.pnl_dollars) for f in settled
+                     if f.pnl_dollars), Decimal(0))
+        cost_d = sum((Decimal(f.cost_dollars) for f in settled
+                      if f.cost_dollars), Decimal(0))
         pnl = sum(f.pnl_c or 0 for f in settled)
         cost = sum(f.cost_c or 0 for f in settled)
         return {
             "paper": True, "policy_version": EXEC_POLICY["version"],
-            "fee_schedule": FEE_SCHEDULE["version"],
-            "fee_basis": FEE_SCHEDULE["not_modeled"],
+            "fee_policy": FEE_POLICY["version"],
+            "depth_policy": EXEC_POLICY["depth_policy"],
+            "fee_basis": FEE_POLICY["not_modeled"],
+            "settled_pnl_dollars": str(pnl_d),
+            "settled_cost_dollars": str(cost_d),
             "signals": s.query(PaperSignal).count(),
             "fills": len(fills),
             "rejected": rejects, "reject_reasons": reasons,

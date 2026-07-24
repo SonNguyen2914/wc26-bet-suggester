@@ -35,6 +35,41 @@ def live_session(tmp_path, monkeypatch):
     monkeypatch.setattr(live_db, "_Session", None)
 
 
+def _valid_approval(mv_id, created_at, decision_id=None):
+    """A ModelApprovalDecision whose content_hash actually recomputes from
+    its decision_document (V9.1 eval F4), for audit fixtures."""
+    import hashlib as _h
+
+    from src.live.model_mls import _canonical
+    from src.live.models import ModelApprovalDecision
+    core = {"model_version": model_mls.MODEL_NAME,
+            "eval_version": "model-eval-v1",
+            "policy_version": "shadow-approval-v1", "corpus_version": None,
+            "approved_mode": "shadow", "approved": True,
+            "metrics": {"log_loss": 1.07},
+            "edge_vs_baseline": {"delta_log_loss": 0.008,
+                                 "ci95": [-0.012, 0.029],
+                                 "significant": False},
+            "decision_reason": "test"}
+    doc = _canonical(core)
+    kw = {} if decision_id is None else {"id": decision_id}
+    return ModelApprovalDecision(
+        model_version_id=mv_id, model_version_name=model_mls.MODEL_NAME,
+        eval_version="model-eval-v1", policy_version="shadow-approval-v1",
+        approved_mode="shadow", approved=True, n_scored=162,
+        edge_json=('{"delta_log_loss": 0.008, "ci95": [-0.012, 0.029], '
+                   '"significant": false}'),
+        decision_document=doc,
+        content_hash=_h.sha256(doc.encode()).hexdigest(),
+        created_at=created_at, **kw)
+
+
+def _current_engine_sig():
+    """The current engine signature hash — used in audit fixtures so a
+    constructed lock's frozen signature matches (V9.1 eval F4/F5)."""
+    return model_mls.engine_signature()["signature_hash"]
+
+
 CANNED_ESPN = [
     {"id": 183, "displayName": "Columbus Crew",
      "shortDisplayName": "Columbus", "abbreviation": "CLB"},
@@ -310,6 +345,23 @@ class TestCurrentProviderSchema:
             ("yes", 54, 2642, None, None), ("no", 45, 9, None, None)]
         assert markets._depth_levels({}) == []
 
+    def test_depth_keeps_best_levels(self):
+        """V9.1 eval F1: Kalshi returns bids ASCENDING (best/highest last).
+        Keeping the first N would retain the WORST levels. We keep the
+        best (highest-priced) N per side, robust to array order — so the
+        highest NO bid (= the best/lowest YES ask) always survives."""
+        # 12 ascending NO bids 0.01..0.12 — the evaluator's exact case
+        ascending = [[f"{i/100:.4f}", "10.00"] for i in range(1, 13)]
+        rows = markets._depth_levels({"orderbook_fp": {"no_dollars": ascending}})
+        no_prices = sorted(r[1] for r in rows if r[0] == "no")
+        assert len(no_prices) == 10               # bounded to best 10
+        assert 12 in no_prices and 11 in no_prices  # the BEST bids kept
+        assert 1 not in no_prices and 2 not in no_prices  # worst dropped
+        # the best NO bid (0.12) implies the best YES ask 0.88 = 88c
+        best_no = max(r for r in rows if r[0] == "no")
+        assert best_no[1] == 12
+        assert min(100 - r[1] for r in rows if r[0] == "no") == 88
+
     def test_quote_row_retains_exact_fixed_point(self):
         """V9 eval F7: subpenny prices and fractional sizes are kept
         beside the derived integer cents, never rounded away at ingest."""
@@ -412,34 +464,58 @@ class TestLineupPlane:
 
 class TestPaperFillModel:
     def test_book_walk_partial_and_slippage(self):
+        from decimal import Decimal as D
+
         from src.live import paper
-        # ladder: 20 @ 55c, 30 @ 56c, 40 @ 58c (best first)
-        ladder = [(55, 20), (56, 30), (58, 40)]
-        # request 100 but only 90 available -> partial
-        r = paper.simulate_fill(ladder, 100)
-        assert r["filled"] == 90
-        assert r["best_ask_c"] == 55
+        # EXACT ladder (V9.1 F2): 20 @ $0.55, 30 @ $0.56, 40 @ $0.58
+        ladder = [(D("0.55"), D(20)), (D("0.56"), D(30)), (D("0.58"), D(40))]
+        r = paper.simulate_fill(ladder, 100)      # only 90 available -> partial
+        assert r["filled"] == D(90)
+        assert r["best_ask"] == D("0.55")
         assert r["levels"] == 3
-        # weighted avg = (20*55 + 30*56 + 40*58)/90
-        assert r["avg_price_c"] == round((20*55 + 30*56 + 40*58) / 90)
-        assert r["slippage_c"] == r["avg_price_c"] - 55
-        # deep enough book -> full fill, no book exhaustion
+        avg = (D(20)*D("0.55") + D(30)*D("0.56") + D(40)*D("0.58")) / D(90)
+        assert r["avg_price"] == avg              # exact, not rounded
+        assert r["slippage"] == avg - D("0.55")
+        assert r["notional"] == D(20)*D("0.55")+D(30)*D("0.56")+D(40)*D("0.58")
         r2 = paper.simulate_fill(ladder, 20)
-        assert r2["filled"] == 20 and r2["avg_price_c"] == 55
-        assert r2["slippage_c"] == 0
+        assert r2["filled"] == D(20) and r2["avg_price"] == D("0.55")
+        assert r2["slippage"] == D(0)
+
+    def test_order_fee_is_exact_centicent_not_float(self):
+        """V9.1 eval F3: the fee is exact to the centicent in Decimal, not
+        a binary-float ceil (which overcharged 100@$0.10 to 64c vs 63.00)."""
+        from decimal import Decimal as D
+
+        from src.live import paper
+        # 100 @ 0.10 -> 0.07*100*0.10*0.90 = 0.63 exactly, NOT 0.64
+        assert paper.order_fee_dollars(D("0.10"), 100) == D("0.6300")
+        assert paper.order_fee_dollars(D("0.50"), 100) == D("1.7500")
+        assert paper.order_fee_dollars(D("0.05"), 100) == D("0.3325")
+        # single-contract centicent fees are representable now
+        assert paper.order_fee_dollars(D("0.10"), 1) == D("0.0063")
+        # degenerate prices -> no fee
+        assert paper.order_fee_dollars(D("0"), 100) == D("0")
+        assert paper.order_fee_dollars(D("1"), 100) == D("0")
 
     def test_yes_buy_ladder_from_no_depth(self):
-        from src.live import paper
+        from decimal import Decimal as D
         from types import SimpleNamespace as NS
-        # NO bids at 44,45 -> YES asks at 56,55 (best = 55)
-        depth = [NS(side="no", price_c=44, size=30),
-                 NS(side="no", price_c=45, size=20),
-                 NS(side="yes", price_c=54, size=99)]  # ignored for buys
-        quote = NS(yes_ask_c=55, yes_ask_size=10)
+
+        from src.live import paper
+        # exact provider strings preferred: NO bids 0.44/0.45 -> YES asks
+        # 0.56/0.55 (best = 0.55); fractional size retained
+        depth = [NS(side="no", price_c=44, size=30,
+                    price_dollars="0.4400", size_fp="30.00"),
+                 NS(side="no", price_c=45, size=20,
+                    price_dollars="0.4500", size_fp="20.50"),
+                 NS(side="yes", price_c=54, size=99,
+                    price_dollars="0.5400", size_fp="99")]  # ignored for buys
+        quote = NS(yes_ask_c=55, yes_ask_size=10,
+                   yes_ask_dollars=None, sizes_fp_json=None)
         ladder = paper.yes_buy_ladder(quote, depth)
-        assert ladder == [(55, 20), (56, 30)]     # best (lowest ask) first
-        # no depth -> fall back to the top quote
-        assert paper.yes_buy_ladder(quote, []) == [(55, 10)]
+        assert ladder == [(D("0.55"), D("20.50")), (D("0.56"), D("30.00"))]
+        # no depth -> fall back to the exact top quote
+        assert paper.yes_buy_ladder(quote, []) == [(D("0.55"), D(10))]
 
 
 class TestPaperTrading:
@@ -626,8 +702,7 @@ class TestSlateReport:
         only when clean."""
         from src.live import slate
         from src.live.models import (Fixture, LineupSnapshot,
-                                     MarketSnapshot, ModelApprovalDecision,
-                                     ModelInputArtifact,
+                                     MarketSnapshot, ModelInputArtifact,
                                      ModelVersion, PredictionContract,
                                      PredictionRun)
         from zoneinfo import ZoneInfo
@@ -638,10 +713,8 @@ class TestSlateReport:
         et = past.astimezone(ZoneInfo("America/New_York")).strftime("%Y%m%d")
         live_session.add(ModelVersion(id=1, name=model_mls.MODEL_NAME,
                                       approved_for_shadow=True))
-        live_session.add(ModelApprovalDecision(
-            id=1, model_version_id=1, model_version_name=model_mls.MODEL_NAME,
-            approved_mode="shadow", approved=True, content_hash="dh1",
-            created_at=past - timedelta(days=1)))
+        live_session.add(_valid_approval(1, past - timedelta(days=1),
+                                         decision_id=1))
 
         def fx(fid, eid, ko, status="post"):
             live_session.add(Fixture(id=fid, competition_slug="mls-2026",
@@ -660,8 +733,9 @@ class TestSlateReport:
         cap = past - timedelta(minutes=8)
         live_session.add_all([
             ModelInputArtifact(
-                id=1, schema_version="model-input-v2", content_hash="h",
-                document_json='{"engine": {"signature_hash": "sig-test"}}'),
+                id=1, schema_version="model-input-v3", content_hash="h",
+                document_json=_json.dumps(
+                    {"engine": {"signature_hash": _current_engine_sig()}})),
             MarketSnapshot(id=1, fixture_id=3, captured_at=cap,
                            status="complete", execution_ready=True,
                            policy_version="mls-lock-v1",
@@ -713,8 +787,7 @@ class TestSlateReport:
         EXECUTION_NOT_READY — valid evidence, flagged, not a failure."""
         from src.live import slate
         from src.live.models import (Fixture, LineupSnapshot,
-                                     MarketSnapshot, ModelApprovalDecision,
-                                     ModelInputArtifact,
+                                     MarketSnapshot, ModelInputArtifact,
                                      ModelVersion, PredictionContract,
                                      PredictionRun)
         import json as _json
@@ -722,17 +795,14 @@ class TestSlateReport:
         live_session.add_all([
             ModelVersion(id=1, name=model_mls.MODEL_NAME,
                          approved_for_shadow=True),
-            ModelApprovalDecision(
-                id=1, model_version_id=1,
-                model_version_name=model_mls.MODEL_NAME,
-                approved_mode="shadow", approved=True, content_hash="dh1",
-                created_at=base - timedelta(days=1)),
+            _valid_approval(1, base - timedelta(days=1), decision_id=1),
             Fixture(id=7, competition_slug="mls-2026", espn_event_id="enr",
                     current_kickoff_utc=base + timedelta(minutes=5),
                     status="pre"),
             ModelInputArtifact(
-                id=1, schema_version="model-input-v2", content_hash="h",
-                document_json='{"engine": {"signature_hash": "sig-test"}}'),
+                id=1, schema_version="model-input-v3", content_hash="h",
+                document_json=_json.dumps(
+                    {"engine": {"signature_hash": _current_engine_sig()}})),
             MarketSnapshot(id=2, fixture_id=7,
                            captured_at=base - timedelta(minutes=1),
                            status="complete", execution_ready=False,
@@ -964,7 +1034,7 @@ class TestContractRepair:
 
 class TestPredictionRuns:
     def _seed_playable(self, s, n_completed=12):
-        from src.live.models import ModelApprovalDecision, ModelVersion
+        from src.live.models import ModelVersion
         # run paths enforce the shadow-approval gate (V8 eval F3). Commit
         # before identity.seed_teams (which uses a SEPARATE session): an
         # uncommitted write here would hold the SQLite write lock and the
@@ -973,16 +1043,9 @@ class TestPredictionRuns:
         s.add(mv)
         s.commit()
         # the immutable approval decision every canonical lock must
-        # reference (V9 eval F1/F10) — created before any run so it
-        # precedes captured_at
-        s.add(ModelApprovalDecision(
-            model_version_id=mv.id, model_version_name=model_mls.MODEL_NAME,
-            eval_version="model-eval-v1", policy_version="shadow-approval-v1",
-            approved_mode="shadow", approved=True, n_scored=162,
-            edge_json=('{"delta_log_loss": 0.008, '
-                       '"ci95": [-0.012, 0.029], "significant": false}'),
-            content_hash="test-decision-hash-0001",
-            created_at=datetime.now(UTC) - timedelta(days=1)))
+        # reference (V9 eval F1/F10; V9.1 F4: hash must recompute) —
+        # created before any run so it precedes captured_at
+        s.add(_valid_approval(mv.id, datetime.now(UTC) - timedelta(days=1)))
         s.commit()
         identity.seed_teams(CANNED_ESPN)
         teams = {t.canonical_name: t.id for t in
@@ -1183,9 +1246,13 @@ class TestPredictionRuns:
         assert lock["checks"]["approval_decision_is_shadow"]
         assert lock["checks"]["approval_decision_precedes_run"]
         assert lock["checks"]["engine_signature_present"]
+        # V9.1 eval F4: validity + match, not mere presence
+        assert lock["checks"]["approval_decision_hash_valid"]
+        assert lock["checks"]["engine_signature_matches_current"]
         assert lock["approval_decision_id"] is not None
-        assert lock["approval_decision_hash"] == "test-decision-hash-0001"
+        assert lock["approval_decision_hash"]
         assert lock["engine_signature_hash"]
+        assert lock["engine_matches_current"] is True
         # the report is content-hashed and stable for one DB state
         assert rep["content_hash"] == audit.lock_audit()["content_hash"]
 
@@ -1224,6 +1291,47 @@ class TestPredictionRuns:
         lock = audit.lock_audit()["locks"][0]
         assert not lock["all_pass"]
         assert lock["checks"]["approval_decision_referenced"] is False
+
+    def test_lock_audit_rejects_invalid_hash_and_engine(self, live_session,
+                                                        monkeypatch):
+        """V9.1 eval F4: a bogus approval content hash and a mismatched
+        engine signature must FAIL the audit — presence is not enough."""
+        from src.live import audit
+        from src.live.models import (MarketSnapshot, ModelApprovalDecision,
+                                     ModelInputArtifact, PredictionRun)
+        monkeypatch.setattr(config, "N_SIMULATIONS", 400)
+        up = self._seed_playable(live_session)
+        up.current_kickoff_utc = datetime.now(UTC) + timedelta(minutes=9)
+        live_session.commit()
+        snap = self._fake_snapshot(live_session, up.id)
+        row = live_session.get(MarketSnapshot, snap["snapshot_id"])
+        row.policy_version = "mls-lock-v1"
+        row.required_families_complete = True
+        live_session.commit()
+        monkeypatch.setattr(markets, "capture_lock_snapshot",
+                            lambda fixture_id: snap)
+        import src.live.lineups as lineups_mod
+        monkeypatch.setattr(lineups_mod, "capture_lineup",
+                            lambda fixture_id, **kw: {"snapshot_id": 77,
+                                                      "status": "pending",
+                                                      "quality": {}})
+        import src.alerts as alerts
+        monkeypatch.setattr(alerts, "send_alert", lambda *a, **kw: None)
+        assert runs.t10_locks()["locked"] == 1
+        lock_run = live_session.query(PredictionRun).filter_by(
+            run_type="t10", canonical=True).one()
+        dec = live_session.get(ModelApprovalDecision,
+                               lock_run.model_approval_decision_id)
+        dec.content_hash = "not-a-real-content-hash"     # corrupt the hash
+        art = live_session.get(ModelInputArtifact,
+                               lock_run.model_input_artifact_id)
+        art.document_json = ('{"engine": {"signature_hash": '
+                             '"bogus-engine-signature"}}')  # mismatch engine
+        live_session.commit()
+        lock = audit.lock_audit()["locks"][0]
+        assert not lock["all_pass"]
+        assert lock["checks"]["approval_decision_hash_valid"] is False
+        assert lock["checks"]["engine_signature_matches_current"] is False
 
     def test_lock_audit_retains_missed_locks(self, live_session,
                                              monkeypatch):
@@ -1293,7 +1401,7 @@ class TestPredictionRuns:
         assert art.content_hash == run.input_snapshot_hash
         import json
         doc = json.loads(art.document_json)
-        assert doc["schema_version"] == "model-input-v2"
+        assert doc["schema_version"] == "model-input-v3"
         assert doc["team_ratings"]["home"] and doc["team_ratings"]["away"]
         assert doc["simulation"]["seed"] == run.simulation_seed
         assert len(doc["source_fixtures"]) >= 5
@@ -1335,7 +1443,7 @@ class TestPredictionRuns:
         assert rep["max_delta"] < 1e-6
         # V9 pre-slate: the engine signature is surfaced and matches (same
         # process), and the artifact schema is v2
-        assert rep["artifact_schema"] == "model-input-v2"
+        assert rep["artifact_schema"] == "model-input-v3"
         assert rep["stored_engine_signature_hash"]
         assert (rep["stored_engine_signature_hash"]
                 == rep["current_engine_signature_hash"])

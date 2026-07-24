@@ -443,14 +443,36 @@ def ready():
         config.MLS_SHADOW_ENABLED and live.get("connected")
         and live.get("migrations_current") and live.get("competition_seeded")
         and shadow.get("shadow_ready"))
-    paper_execution_ready = bool(
+    # the paper ENGINE can be operational while NEW ENTRIES are halted by a
+    # data-driven kill switch (V9.1 eval F7): settlement/reconciliation must
+    # continue even when the daily-loss limit or a stale-data switch trips,
+    # so the two states are distinct and new-entry readiness incorporates
+    # active_kill_switches — which paper readiness previously ignored.
+    paper_engine_operational = bool(
         shadow_collection_ready and config.PAPER_TRADING_ENABLED
         and not config.GLOBAL_TRADING_DISABLED
         and not config.COMPETITION_TRADING_DISABLED)
+    paper_kill_switches: list = []
+    if config.MLS_SHADOW_ENABLED and live.get("connected"):
+        try:
+            from src.live import db as _live_db
+            from src.live import risk
+            _s = _live_db.get_session()
+            try:
+                paper_kill_switches = risk.active_kill_switches(_s)
+            finally:
+                _s.close()
+        except Exception as exc:
+            paper_kill_switches = [f"error:{str(exc)[:40]}"]
+    paper_execution_ready = bool(paper_engine_operational
+                                 and not paper_kill_switches)
     readiness = {
         "archive_ready": bool(archive_ok),
         "shadow_collection_ready": shadow_collection_ready,
-        "paper_execution_ready": paper_execution_ready,
+        "paper_engine_operational": paper_engine_operational,
+        "paper_new_entries_allowed": paper_execution_ready,
+        "paper_execution_ready": paper_execution_ready,      # back-compat
+        "paper_kill_switches": paper_kill_switches,
     }
     top_ready = (archive_ok and live_ok
                  and (shadow_collection_ready if mode == "mls_shadow"
