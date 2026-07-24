@@ -59,10 +59,15 @@ def _parse_dt(iso: str | None):
         return None
 
 
-def _get(path: str, params: dict | None = None) -> dict | None:
+def _get(path: str, params: dict | None = None,
+         quiet_404: bool = False) -> dict | None:
     try:
         r = requests.get(f"{BASE}/{path}", params=params or {},
                          headers=_HEADERS, timeout=20)
+        # the match-list endpoint 404s on a window with NO matches (a
+        # fixture gap / international break) — benign, not a failure
+        if quiet_404 and r.status_code == 404:
+            return None
         r.raise_for_status()
         return r.json()
     except (requests.RequestException, ValueError) as exc:
@@ -100,7 +105,8 @@ def season_matches(gte: str, lte: str,
                   "match_date[gte]": gte, "match_date[lte]": lte}
         if token:
             params["page_token"] = token
-        payload = _get(f"matches/seasons/{SEASON_ID}", params)
+        payload = _get(f"matches/seasons/{SEASON_ID}", params,
+                       quiet_404=True)
         if not payload:
             break
         for m in payload.get("schedule") or []:
@@ -284,9 +290,15 @@ def _ingest_one(s, m: dict, with_players: bool,
     fixture = _find_fixture(s, ta.id, tb.id, m["kickoff"])
     if fixture is None:
         return {"status": "no_fixture", "match": m["match_id"]}
-    if skip_existing and s.query(MlsTeamMatchStat).filter_by(
-            fixture_id=fixture.id).count() >= 2:
-        return {"status": "skipped_existing", "match": m["match_id"]}
+    if skip_existing:
+        have_team = s.query(MlsTeamMatchStat).filter_by(
+            fixture_id=fixture.id).count() >= 2
+        # player-aware: a match with team stats but no players is NOT done
+        # when players are wanted — so a player backfill still fetches them
+        have_players = (not with_players) or s.query(
+            MlsPlayerMatchStat).filter_by(fixture_id=fixture.id).count() > 0
+        if have_team and have_players:
+            return {"status": "skipped_existing", "match": m["match_id"]}
 
     payload = _get(f"statistics/clubs/matches/{m['match_id']}")
     if not payload:
