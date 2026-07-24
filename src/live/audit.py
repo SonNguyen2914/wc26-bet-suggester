@@ -135,6 +135,23 @@ def verify_replay(run_id: str, tol: float = 1e-6) -> dict:
                     "reason": "no input artifact"}
         art = s.get(ModelInputArtifact, run.model_input_artifact_id)
         doc = _json.loads(art.document_json)
+        # engine-drift guard (V9 eval F4): if the artifact froze an engine
+        # signature (v2+), it must match the current engine or we REFUSE
+        # to replay — a mismatch means the constants/runtime moved and the
+        # numbers would silently diverge. "Replayable under the matching
+        # engine", never "bit-identical from the bytes alone across
+        # versions" (the narrowed, honest claim).
+        frozen_sig = (doc.get("engine") or {}).get("signature_hash")
+        if frozen_sig is not None:
+            current_sig = model_mls.engine_signature()["signature_hash"]
+            if frozen_sig != current_sig:
+                return {"run_id": run_id, "replayable": False,
+                        "reason": "engine signature mismatch — refusing to "
+                                  "replay under a different engine",
+                        "frozen_engine": frozen_sig[:16],
+                        "current_engine": current_sig[:16],
+                        "artifact_hash": art.content_hash,
+                        "schema_version": art.schema_version}
         replayed = model_mls.replay_from_artifact(doc)
         if replayed is None:
             return {"run_id": run_id, "replayable": False,

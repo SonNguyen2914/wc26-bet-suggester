@@ -80,6 +80,14 @@ def _write_run(s, fixture, run_type: str, model: dict, mv: ModelVersion,
             document_json=canon, created_at=_now())
         s.add(artifact)
         s.flush()
+    # the immutable approval decision authorizing this run (V9 eval F10):
+    # not just the boolean below, but the exact CI-based record. Queried
+    # on the SAME session so no second connection is opened mid-write.
+    from src.live.models import ModelApprovalDecision
+    _dec = (s.query(ModelApprovalDecision)
+            .filter_by(model_version_name=model_mls.MODEL_NAME,
+                       approved=True)
+            .order_by(ModelApprovalDecision.id.desc()).first())
     ko = _utc(fixture.current_kickoff_utc)
     run = PredictionRun(
         fixture_id=fixture.id, run_type=run_type,
@@ -88,11 +96,14 @@ def _write_run(s, fixture, run_type: str, model: dict, mv: ModelVersion,
         status="writing", canonical=False,
         git_revision=GIT_REV,
         model_version_id=mv.id,
+        model_approval_decision_id=(_dec.id if _dec else None),
         model_approved_at_run=bool(mv.approved_for_shadow),
         input_snapshot_hash=ihash,
         model_input_artifact_id=artifact.id,
         lineup_snapshot_id=(lineup or {}).get("snapshot_id"),
-        availability_snapshot_id=(lineup or {}).get("snapshot_id"),
+        # availability_snapshot_id stays NULL: there is no availability
+        # feed, and writing the lineup id here was a dishonest conflation
+        # (V9 eval F14). AVAILABILITY_COMPLETE below is the honest proxy.
         input_quality_json=json.dumps(_input_quality(model, lineup)),
         market_snapshot_id=(snapshot or {}).get("snapshot_id"),
         simulation_seed=pred["seed"],
@@ -402,6 +413,11 @@ def shadow_counts() -> dict:
         runs_n = s.query(PredictionRun).filter_by(
             status="complete").count()
         mv = approved_model_version(s)
+        from src.live.models import ModelApprovalDecision
+        approval_decision = (s.query(ModelApprovalDecision)
+                             .filter_by(approved=True)
+                             .order_by(ModelApprovalDecision.id.desc())
+                             .first())
         # upcoming fixtures (48h) whose teams lack an approved mapped
         # market event — the invariant the decision doc asked for
         horizon = _now() + timedelta(hours=48)
@@ -419,6 +435,10 @@ def shadow_counts() -> dict:
             blockers.append(f"teams {teams}/30")
         if mv is None:
             blockers.append("model not approved for shadow")
+        if approval_decision is None:
+            # V9 eval F1/F17: shadow readiness now requires the immutable
+            # CI-based approval decision, not just the ModelVersion flag
+            blockers.append("no approved model-approval decision")
         if runs_n == 0:
             blockers.append("no complete runs")
         if unmapped_upcoming:
@@ -436,6 +456,7 @@ def shadow_counts() -> dict:
                 status="complete").count(),
             "mapped_events": mapped,
             "model_approved_for_shadow": mv is not None,
+            "approval_decision_present": approval_decision is not None,
             "upcoming_48h": len(upcoming),
             "unmapped_upcoming": len(unmapped_upcoming),
             "shadow_ready": not blockers,

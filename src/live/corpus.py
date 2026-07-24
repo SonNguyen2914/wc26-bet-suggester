@@ -24,8 +24,8 @@ from datetime import datetime, timezone
 
 from src.live import audit as live_audit
 from src.live.db import get_session, plane_ready
-from src.live.models import (Competition, Fixture, LineupEntry,
-                             LineupSnapshot, MarketContract,
+from src.live.models import (Competition, CorpusExport, Fixture,
+                             LineupEntry, LineupSnapshot, MarketContract,
                              MarketDepthLevel, MarketEvent, MarketQuote,
                              MarketSnapshot, ModelInputArtifact,
                              ModelVersion, PaperFill, PaperSignal, Player,
@@ -174,6 +174,82 @@ def build_corpus(version: str = "mls-shadow-2026-v1") -> dict:
         manifest["manifest_hash"] = hashlib.sha256(
             core.encode()).hexdigest()
         return {"manifest": manifest, "sections": sections}
+    finally:
+        s.close()
+
+
+def publish_corpus(version: str, overwrite: bool = False) -> dict:
+    """Freeze the current corpus as an IMMUTABLE published version (V9
+    eval F3). build_corpus reads live state, so its bytes drift as the
+    database grows — meaning the same version LABEL rebuilt on each call
+    is NOT immutable. Publishing stores one version's bytes + manifest in
+    corpus_export; get_published then serves FROM that row, never a
+    rebuild. Re-publishing an existing version is refused (immutability);
+    overwrite is reserved for an operator correcting a mistaken publish."""
+    if not plane_ready():
+        return {"skipped": "dormant"}
+    bundle = build_corpus(version)
+    if "manifest" not in bundle:
+        return bundle
+    manifest = bundle["manifest"]
+    body = json.dumps(bundle, sort_keys=True, ensure_ascii=False)
+    s = get_session()
+    try:
+        existing = s.query(CorpusExport).filter_by(version=version).first()
+        if existing is not None and not overwrite:
+            return {"error": "version already published — corpus versions "
+                             "are immutable; bump the version",
+                    "version": version,
+                    "manifest_hash": existing.manifest_hash}
+        if existing is not None:
+            s.delete(existing)
+            s.flush()
+        row = CorpusExport(
+            version=version,
+            schema_version=manifest.get("schema_version"),
+            manifest_hash=manifest["manifest_hash"],
+            manifest_json=json.dumps(manifest, sort_keys=True,
+                                     ensure_ascii=False),
+            bundle_json=body, backend_revision=_GIT_REV,
+            size_bytes=len(body.encode()), published_at=_now())
+        s.add(row)
+        s.commit()
+        return {"published": version,
+                "manifest_hash": manifest["manifest_hash"],
+                "size_bytes": row.size_bytes}
+    finally:
+        s.close()
+
+
+def list_published() -> list[dict]:
+    """The published (immutable) corpus versions, newest first."""
+    if not plane_ready():
+        return []
+    s = get_session()
+    try:
+        return [{"version": r.version, "manifest_hash": r.manifest_hash,
+                 "schema_version": r.schema_version,
+                 "size_bytes": r.size_bytes,
+                 "published_at": (r.published_at.isoformat()
+                                  if r.published_at else None)}
+                for r in s.query(CorpusExport)
+                .order_by(CorpusExport.id.desc()).all()]
+    finally:
+        s.close()
+
+
+def get_published(version: str, full: bool = False) -> dict | None:
+    """Serve a PUBLISHED version FROM its stored immutable bytes (V9 eval
+    F3) — never a rebuild from current state. Manifest by default, the
+    whole self-contained bundle when full=True."""
+    if not plane_ready():
+        return None
+    s = get_session()
+    try:
+        row = s.query(CorpusExport).filter_by(version=version).first()
+        if row is None:
+            return None
+        return json.loads(row.bundle_json if full else row.manifest_json)
     finally:
         s.close()
 

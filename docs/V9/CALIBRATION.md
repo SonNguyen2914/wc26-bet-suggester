@@ -82,8 +82,9 @@ shadow approval means "safe to collect prospective evidence," never
 
 ## The prospective plan (begins Saturday July 25)
 
-Every fixture gets an atomic T-10 lock: ~35 contract probabilities frozen
-beside the full integer-cent book. As results settle:
+Every fixture gets a two-phase, completeness-gated T-10 lock: ~35
+contract probabilities frozen beside the top-10-depth integer-cent book
+(exact fixed-point values retained alongside). As results settle:
 - the 3-way ladder re-run on POST-LAUNCH fixtures only (no selection
   effect) — the real out-of-sample test;
 - per-family Brier: locked model vs the frozen executable ask;

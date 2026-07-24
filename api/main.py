@@ -298,23 +298,54 @@ def mls_model_eval():
 
 
 @app.get("/api/mls/corpus")
-def mls_corpus(full: bool = Query(False)):
-    """The prospective research corpus. Default returns the MANIFEST
-    (version, counts, per-file hashes, manifest hash); ?full=1 returns
-    the entire self-contained bundle for offline analysis. Public
-    read-only — this is the downloadable evidence base. 60s cache on
-    the manifest."""
-    from src.mls import _cached
+def mls_corpus(version: str | None = Query(None), full: bool = Query(False),
+               preview: bool = Query(False)):
+    """The prospective research corpus. Published versions are IMMUTABLE
+    and served from STORED bytes (V9 eval F3), never rebuilt from current
+    state: pass ?version=... for a published manifest, add &full=1 for the
+    whole self-contained bundle. With no version this lists the published
+    versions plus the latest manifest. ?preview=1 builds the CURRENT
+    (unpublished) state, explicitly labeled as a non-immutable preview.
+    Public read-only — the downloadable evidence base."""
     try:
         from src.live import corpus as live_corpus
-        if full:
-            return live_corpus.build_corpus()
-        bundle = _cached("mls_corpus_manifest", 60,
-                         lambda: live_corpus.build_corpus())
-        return bundle.get("manifest", bundle)
+        if preview:
+            bundle = live_corpus.build_corpus()
+            if full:
+                return bundle
+            man = bundle.get("manifest", bundle)
+            if isinstance(man, dict):
+                man = {**man, "published": False,
+                       "note": ("UNPUBLISHED preview of current DB state — "
+                                "NOT immutable; publish to freeze a "
+                                "version")}
+            return man
+        if version:
+            served = live_corpus.get_published(version, full=full)
+            if served is None:
+                raise HTTPException(404, "no such published corpus version")
+            return served
+        published = live_corpus.list_published()
+        latest = (live_corpus.get_published(published[0]["version"])
+                  if published else None)
+        return {"published_versions": published, "latest": latest}
+    except HTTPException:
+        raise
     except Exception as exc:
         print(f"[mls] corpus failed: {exc}")
         raise HTTPException(503, "corpus unavailable")
+
+
+@app.post("/api/admin/mls/corpus/publish")
+def mls_admin_publish_corpus(request: Request, version: str = Query(...)):
+    """Operator-only: freeze the CURRENT corpus as an immutable published
+    version (V9 eval F3). Re-publishing an existing version is refused —
+    bump the version. Read-only mode already enforces the token; the
+    explicit check keeps this locked even if that mode is ever off."""
+    if not _admin_ok(request):
+        raise HTTPException(403, "operator credentials required")
+    from src.live import corpus as live_corpus
+    return live_corpus.publish_corpus(version)
 
 
 @app.get("/api/mls/replay/{run_id}")
@@ -383,9 +414,34 @@ def ready():
     live_ok = (not live["enabled"]) or (
         live.get("connected") and live.get("migrations_current")
         and live.get("competition_seeded"))
-    return {"ready": bool(archive_ok and live_ok),
-            "mode": ("mls_shadow" if config.MLS_SHADOW_ENABLED
-                     else "archive"),
+    # Mode-specific readiness (V9 eval F17): a single boolean hid whether
+    # the mode actually being served is ready. shadow collection requires
+    # the live plane AND the shadow pipeline's own blockers to clear
+    # (approved model, valid approval decision, mapped upcoming markets…);
+    # paper execution additionally requires the paper switch on and no
+    # trading kill switch. Top-level `ready` reflects the served mode.
+    shadow = live.get("shadow") or {}
+    mode = "mls_shadow" if config.MLS_SHADOW_ENABLED else "archive"
+    shadow_collection_ready = bool(
+        config.MLS_SHADOW_ENABLED and live.get("connected")
+        and live.get("migrations_current") and live.get("competition_seeded")
+        and shadow.get("shadow_ready"))
+    paper_execution_ready = bool(
+        shadow_collection_ready and config.PAPER_TRADING_ENABLED
+        and not config.GLOBAL_TRADING_DISABLED
+        and not config.COMPETITION_TRADING_DISABLED)
+    readiness = {
+        "archive_ready": bool(archive_ok),
+        "shadow_collection_ready": shadow_collection_ready,
+        "paper_execution_ready": paper_execution_ready,
+    }
+    top_ready = (archive_ok and live_ok
+                 and (shadow_collection_ready if mode == "mls_shadow"
+                      else True))
+    return {"ready": bool(top_ready),
+            "mode": mode,
+            "readiness": readiness,
+            "shadow_blockers": shadow.get("blockers", []),
             "results": results, "expected_results": expected_results,
             "ledger_positions": ledger, "expected_ledger": 84,
             "lock_bundles": bundles, "expected_lock_bundles": 6,

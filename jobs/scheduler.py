@@ -235,17 +235,16 @@ def mls_boot() -> None:
         except Exception as exc:
             print(f"[mls-boot] {name} FAILED: {exc}")
     # approval BEFORE any run: scheduled_runs/t10_locks enforce the
-    # approved_for_shadow gate (V8 evaluation F3), so the backtest must
-    # earn (or re-earn) it first — runs then follow
+    # approved_for_shadow gate, so approval must be (re-)earned first.
+    # V9 eval F1: this is the CONFIDENCE-INTERVAL evaluator + an IMMUTABLE
+    # persisted decision record — no longer a bare Monte-Carlo point
+    # estimate. approved_for_shadow is set FROM that decision.
     try:
-        from src.live import model_mls
-        bt = model_mls.backtest(n_sims=2000)
-        print(f"[mls-boot] backtest: {bt}")
-        if "error" not in bt and bt.get("n", 0) >= 30:
-            model_mls.ensure_model_version(
-                approved_for_shadow=bool(bt.get("beats_baseline")))
+        from src.live import model_eval
+        dec = model_eval.ensure_approval_decision()
+        print(f"[mls-boot] approval decision: {dec}")
     except Exception as exc:
-        print(f"[mls-boot] backtest FAILED: {exc}")
+        print(f"[mls-boot] approval FAILED: {exc}")
     try:
         from src.live import runs as live_runs
         print(f"[mls-boot] shadow_runs: {live_runs.scheduled_runs()}")

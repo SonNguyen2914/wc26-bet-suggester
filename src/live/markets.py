@@ -93,21 +93,32 @@ def _kalshi_get(url: str, **kw):
 
 
 def _kalshi_paged(url: str, params: dict, key: str,
-                  page_limit: int = 200, max_pages: int = 30) -> list:
-    """Cursor-complete list retrieval (V8 evaluation F6: single-page
-    calls silently truncated events and markets). Pages until the
-    provider's cursor is exhausted or the sanity cap trips."""
+                  page_limit: int = 200, max_pages: int = 30,
+                  meta: dict | None = None) -> list:
+    """Cursor-complete list retrieval (V8 eval F6: single-page calls
+    silently truncated events and markets). Pages until the provider's
+    cursor is exhausted or the sanity cap trips. When `meta` is supplied
+    it is filled with {'pages', 'complete', 'cap_reached'} so a caller can
+    record — and refuse to trust as complete — a registry that hit the cap
+    rather than exhausting the cursor (V9 eval F6): a cap must produce an
+    explicit incomplete state, never a silent truncation."""
     out: list = []
     cursor = None
+    pages = 0
     for _ in range(max_pages):
         p = dict(params, limit=page_limit)
         if cursor:
             p["cursor"] = cursor
         d = _kalshi_get(url, params=p)
         out.extend(d.get(key) or [])
+        pages += 1
         cursor = d.get("cursor")
         if not cursor:
             break
+    cap_reached = bool(cursor)      # cursor still set == stopped at the cap
+    if meta is not None:
+        meta.update({"pages": pages, "complete": not cap_reached,
+                     "cap_reached": cap_reached})
     return out
 
 
@@ -136,6 +147,36 @@ def _fp_int(m: dict, field: str) -> int | None:
     return v if isinstance(v, int) else None
 
 
+def _dollars_str(m: dict, field: str) -> str | None:
+    """The EXACT provider price string for a field (V9 eval F7): the
+    '{field}_dollars' subpenny string when present, else the integer-cent
+    value rendered as a dollar string. Retained beside the derived cents
+    so subpenny prices are never rounded away at ingest."""
+    v = m.get(f"{field}_dollars")
+    if v is not None:
+        return str(v)
+    c = m.get(field)
+    if isinstance(c, int):
+        return f"{c / 100.0:.4f}"
+    return None
+
+
+def _sizes_fp(m: dict) -> str | None:
+    """The EXACT provider size strings, by field, as one JSON blob (V9
+    eval F7): fractional '{field}_fp' contract counts preserved beside the
+    truncated integers."""
+    fields = ("yes_bid_size", "yes_ask_size", "no_bid_size", "no_ask_size",
+              "volume", "open_interest")
+    out: dict[str, str] = {}
+    for f in fields:
+        v = m.get(f"{f}_fp")
+        if v is None:
+            v = m.get(f)
+        if v is not None:
+            out[f] = str(v)
+    return json.dumps(out, sort_keys=True) if out else None
+
+
 def _parse_ts(v) -> datetime | None:
     if not v:
         return None
@@ -150,19 +191,26 @@ def _rules_hash(m: dict) -> str | None:
     return hashlib.sha256(raw.encode()).hexdigest() if raw else None
 
 
-def _depth_levels(ob_payload: dict) -> list[tuple[str, int, int]]:
-    """(side, price_c, size) rows from the CURRENT 'orderbook_fp' shape
-    (dollar-string pairs), with the legacy integer-cent 'orderbook'
-    shape as fallback. The V8 evaluation proved the old parser stored
-    ZERO depth rows against live responses."""
-    rows: list[tuple[str, int, int]] = []
+def _depth_levels(ob_payload: dict
+                  ) -> list[tuple[str, int, int, str | None, str | None]]:
+    """(side, price_c, size, price_dollars, size_fp) rows from the CURRENT
+    'orderbook_fp' shape (dollar-string pairs), with the legacy
+    integer-cent 'orderbook' shape as fallback. The derived cent/size
+    ints stay the executable comparator; the EXACT provider strings are
+    retained beside them (V9 eval F7) — a large paper order walks depth,
+    so subpenny prices and fractional sizes at each level are material.
+    Bounded to the top 10 levels/side (policy top_10_depth). The V8
+    evaluation proved the old parser stored ZERO depth rows against live
+    responses."""
+    rows: list[tuple[str, int, int, str | None, str | None]] = []
     fp = ob_payload.get("orderbook_fp")
     if isinstance(fp, dict):
         for side, key in (("yes", "yes_dollars"), ("no", "no_dollars")):
             for lvl in (fp.get(key) or [])[:10]:
                 try:
                     rows.append((side, int(round(float(lvl[0]) * 100)),
-                                 int(float(lvl[1]))))
+                                 int(float(lvl[1])),
+                                 str(lvl[0]), str(lvl[1])))
                 except (TypeError, ValueError, IndexError):
                     continue
         return rows
@@ -171,7 +219,8 @@ def _depth_levels(ob_payload: dict) -> list[tuple[str, int, int]]:
         for side in ("yes", "no"):
             for lvl in (legacy.get(side) or [])[:10]:
                 try:
-                    rows.append((side, int(lvl[0]), int(lvl[1])))
+                    rows.append((side, int(lvl[0]), int(lvl[1]),
+                                 None, None))
                 except (TypeError, ValueError, IndexError):
                     continue
     return rows
@@ -223,14 +272,17 @@ def _ensure_contracts(s, row: MarketEvent) -> None:
     machine-readable ticker tail (src.mls.model_key_for) — no label
     guessing anywhere. Throttled; failures retry next sweep."""
     from src.mls import model_key_for
-    payload = _kalshi_get(f"{KALSHI}/markets",
-                          params={"event_ticker": row.kalshi_event_ticker,
-                                  "limit": 50})
+    # cursor-complete: a single limited page silently dropped contracts
+    # from the registry, understating a lock snapshot's expected count
+    # against an already-truncated universe (V9 eval F6)
+    markets_list = _kalshi_paged(
+        f"{KALSHI}/markets",
+        {"event_ticker": row.kalshi_event_ticker}, "markets")
     fx = s.get(Fixture, row.fixture_id) if row.fixture_id else None
     suffix_codes = ""
     if "-" in (row.kalshi_event_ticker or ""):
         suffix_codes = row.kalshi_event_ticker.split("-", 1)[1][7:]
-    for m in payload.get("markets") or []:
+    for m in markets_list:
         label = (m.get("yes_sub_title") or m.get("title") or "").strip()
         okey = None
         if row.series == SERIES:
@@ -272,14 +324,23 @@ def discover_and_map() -> dict:
         return {"skipped": "dormant"}
     s = get_session()
     seen = mapped = unmapped = contracts_filled = 0
+    truncated_series: list[str] = []
     horizon_floor = (_now() - timedelta(days=1)).date()
     try:
         for series in FAMILY_SERIES:
             try:
-                events = _kalshi_get(
-                    f"{KALSHI}/events",
-                    params={"series_ticker": series,
-                            "limit": 100}).get("events") or []
+                # cursor-complete event discovery: a single 100-row page
+                # truncated the registry once a series had >100 open
+                # events, and the shortfall was silent (V9 eval F6)
+                meta: dict = {}
+                events = _kalshi_paged(
+                    f"{KALSHI}/events", {"series_ticker": series},
+                    "events", meta=meta)
+                if not meta.get("complete", True):
+                    truncated_series.append(series)
+                    print(f"[markets] discovery {series} TRUNCATED at cap "
+                          f"({meta.get('pages')} pages) — registry "
+                          f"INCOMPLETE, not a clean full sweep")
             except requests.RequestException as exc:
                 print(f"[markets] discovery {series} failed: {exc}")
                 continue
@@ -335,7 +396,9 @@ def discover_and_map() -> dict:
         s.commit()
         return {"events_seen": seen, "newly_mapped": mapped,
                 "unmapped": unmapped,
-                "contracts_filled": contracts_filled}
+                "contracts_filled": contracts_filled,
+                "discovery_complete": not truncated_series,
+                "truncated_series": truncated_series}
     except Exception as exc:
         s.rollback()
         print(f"[markets] mapping failed: {exc}")
@@ -385,7 +448,14 @@ def _quote_row(m: dict, mc_id: int, obs_id: int,
         volume=_fp_int(m, "volume"),
         open_interest=_fp_int(m, "open_interest"),
         status=m.get("status"), rules_hash=_rules_hash(m),
-        fee_schedule_version=m.get("fee_type"))
+        fee_schedule_version=m.get("fee_type"),
+        # exact provider values retained beside the derived cents (F7)
+        yes_bid_dollars=_dollars_str(m, "yes_bid"),
+        yes_ask_dollars=_dollars_str(m, "yes_ask"),
+        no_bid_dollars=_dollars_str(m, "no_bid"),
+        no_ask_dollars=_dollars_str(m, "no_ask"),
+        sizes_fp_json=_sizes_fp(m),
+        provider_precision=PROVIDER_SCHEMA_VERSION)
 
 
 def _fetch_event_books(events) -> tuple[dict, dict, list[str]]:
@@ -446,11 +516,12 @@ def capture_quotes(fixture_id: int | None = None,
                 quote.source_observation_id = obs.id
                 s.add(quote)
                 s.flush()
-                for side, price_c, size in _depth_levels(
+                for side, price_c, size, price_d, size_fp in _depth_levels(
                         books.get(m.get("ticker")) or {}):
                     s.add(MarketDepthLevel(
                         market_quote_id=quote.id, side=side,
-                        price_c=price_c, size=size))
+                        price_c=price_c, size=size,
+                        price_dollars=price_d, size_fp=size_fp))
                 quotes += 1
         s.commit()
         return {"events": len(events), "quotes": quotes}
@@ -496,7 +567,9 @@ def capture_lock_snapshot(fixture_id: int) -> dict | None:
         depth_rows = with_prices = without_prices = 0
         game_two_sided = 0                   # bid AND ask (execution)
         game_quotes = 0                      # ask present (capture)
-        oldest_age = 0
+        oldest_age = 0                        # over ALL quotes (context)
+        game_ages: list[int] = []            # provider ages of PRICED game quotes
+        game_priced_no_ts = 0                # priced game quotes w/o a ts
         now = _now()
         for me in events:
             ms = markets_by_event.get(me.kalshi_event_ticker) or []
@@ -529,28 +602,61 @@ def capture_lock_snapshot(fixture_id: int) -> dict | None:
                 if me.series == SERIES:
                     if quote.yes_ask_c is not None:
                         game_quotes += 1
+                        # freshness is measured on the REQUIRED game quotes
+                        # specifically (V9 eval F9) — not accidentally
+                        # dominated by unrelated optional-family quotes
+                        if quote.provider_timestamp is not None:
+                            game_ages.append(int(
+                                (now - quote.provider_timestamp)
+                                .total_seconds()))
+                        else:
+                            game_priced_no_ts += 1
                     if (quote.yes_ask_c is not None
                             and quote.yes_bid_c is not None):
                         game_two_sided += 1
-                for side, price_c, size in _depth_levels(
+                for side, price_c, size, price_d, size_fp in _depth_levels(
                         books.get(m.get("ticker")) or {}):
                     s.add(MarketDepthLevel(
                         market_quote_id=quote.id, side=side,
-                        price_c=price_c, size=size))
+                        price_c=price_c, size=size,
+                        price_dollars=price_d, size_fp=size_fp))
                     depth_rows += 1
         # required families for policy v1 = the GAME 3-way (the
         # executable comparator); everything else is captured-when-present
         required_ok = (not failed) and game_quotes >= 3
+        # freshness over the REQUIRED game quotes, with an EXPLICIT basis
+        # (V9 eval F9): a missing provider timestamp must never read as
+        # age zero / "fresh". 'provider' = every priced game quote carried
+        # a provider timestamp; 'capture_time' = at least one didn't, so we
+        # fall back to our own capture clock (~0s old, but LABELLED as such,
+        # never dressed up as a provider-confirmed fresh reading); 'none' =
+        # no priced game quote at all.
+        if game_quotes == 0:
+            game_oldest_age = None
+            freshness_basis = "none"
+        elif game_priced_no_ts == 0:
+            game_oldest_age = max(game_ages) if game_ages else 0
+            freshness_basis = "provider"
+        else:
+            game_oldest_age = max(game_ages) if game_ages else 0
+            freshness_basis = "capture_time"
         snap.quotes_written = len(quote_by_ticker)
         snap.quotes_with_prices = with_prices
         snap.quotes_without_prices = without_prices
         snap.depth_rows_written = depth_rows
         snap.oldest_quote_age_seconds = oldest_age or None
+        snap.game_oldest_quote_age_seconds = game_oldest_age
+        snap.freshness_basis = freshness_basis
         snap.required_families_complete = required_ok
         # execution-ready is DISTINCT from capture-complete: the game
-        # comparator must be two-sided (bid AND ask) and reasonably fresh
-        snap.execution_ready = (game_two_sided >= 3
-                                and (oldest_age <= 600 or oldest_age == 0))
+        # comparator must be two-sided (bid AND ask) AND fresh on a KNOWN
+        # basis within the age ceiling — the old `oldest_age == 0` escape
+        # (which passed timestamp-less quotes as fresh) is gone (F9)
+        snap.execution_ready = (
+            game_two_sided >= 3
+            and freshness_basis in ("provider", "capture_time")
+            and game_oldest_age is not None
+            and game_oldest_age <= 600)
         # CAPTURE-completeness gate (not tradeability): every event
         # fetched AND the executable 3-way comparator present
         if not required_ok or len(quote_by_ticker) == 0:

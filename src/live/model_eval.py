@@ -27,6 +27,8 @@ that kicked off before it — no leakage by construction.
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import math
 from datetime import datetime, timezone
 
@@ -36,6 +38,8 @@ from src.live.db import get_session, plane_ready
 from src.live.model_mls import HALF_LIFE_DAYS, MIN_GAMES, MODEL_NAME
 
 EVAL_VERSION = "model-eval-v1"
+APPROVAL_POLICY_VERSION = "shadow-approval-v1"
+MIN_SCORED_FOR_APPROVAL = 30
 GOAL_GRID = 15
 THREE = ("home_win", "draw", "away_win")
 
@@ -267,3 +271,114 @@ def approval_record(report: dict, corpus_version: str | None = None) -> dict:
         "approved_by": "automated-eval",
         "approved_at": datetime.now(timezone.utc).isoformat(),
     }
+
+
+def shadow_approval_policy(report: dict) -> tuple[bool, str]:
+    """The shadow-approval decision from the CONFIDENCE-INTERVAL evaluator
+    (V9 eval F1) — never a bare Monte-Carlo point estimate. Shadow means
+    'safe to collect prospective evidence', so it does NOT require a
+    positive edge; but it REFUSES a model the evaluation shows is
+    SIGNIFICANTLY worse than the league/venue baseline, and requires a
+    minimum scored sample. A CI that spans zero is approvable for shadow
+    (evidence collection), and the record says so — it is never 'edge
+    established'."""
+    n = report.get("n_scored", 0)
+    if n < MIN_SCORED_FOR_APPROVAL:
+        return False, f"insufficient scored sample (n={n} < " \
+                      f"{MIN_SCORED_FOR_APPROVAL})"
+    e = (report.get("edges") or {}).get("M2_vs_M0") or {}
+    point = e.get("delta_log_loss")
+    if point is None:
+        return False, "no M2-vs-baseline edge computed"
+    if e.get("significant") and point < 0:
+        return False, (f"model is SIGNIFICANTLY worse than baseline "
+                       f"(edge {point}, CI {e.get('ci95')})")
+    return True, ("edge within/above noise vs baseline — safe to collect "
+                  "prospective evidence, NOT an established edge")
+
+
+def _decision_content_hash(rec: dict) -> str:
+    """Content hash over the DECISION (excluding wall-clock fields) so an
+    unchanged evaluation dedupes to one immutable row."""
+    from src.live.model_mls import _canonical
+    core = {k: rec.get(k) for k in (
+        "model_version", "eval_version", "policy_version", "corpus_version",
+        "approved_mode", "approved", "metrics", "edge_vs_baseline",
+        "decision_reason")}
+    return hashlib.sha256(_canonical(core).encode()).hexdigest()
+
+
+def ensure_approval_decision(corpus_version: str | None = None,
+                             n_boot: int = 1000) -> dict:
+    """Run the CI evaluator, persist an IMMUTABLE approval decision, and
+    set approved_for_shadow FROM it (V9 eval F1/F10). Deduped by content
+    hash: an unchanged evaluation reuses the existing row, a changed one
+    writes a new, never-overwritten record. The boot gate calls THIS
+    instead of the legacy point-estimate backtest."""
+    if not plane_ready():
+        return {"error": "dormant"}
+    report = evaluate_ladder(n_boot=n_boot)
+    if report.get("n_scored", 0) == 0:
+        return {"error": report.get("note") or "no scorable fixtures"}
+    approved, reason = shadow_approval_policy(report)
+    rec = approval_record(report, corpus_version=corpus_version)
+    rec["policy_version"] = APPROVAL_POLICY_VERSION
+    rec["approved"] = approved
+    rec["decision_reason"] = reason
+    chash = _decision_content_hash(rec)
+
+    from src.live import model_mls
+    from src.live.models import ModelApprovalDecision, ModelVersion
+    s = get_session()
+    try:
+        mv = s.query(ModelVersion).filter_by(name=MODEL_NAME).first()
+        if mv is None:
+            # create the row (unapproved) so the decision can reference it
+            model_mls.ensure_model_version(approved_for_shadow=False)
+            mv = s.query(ModelVersion).filter_by(name=MODEL_NAME).first()
+        existing = (s.query(ModelApprovalDecision)
+                    .filter_by(content_hash=chash).first())
+        if existing is None:
+            row = ModelApprovalDecision(
+                model_version_id=mv.id, model_version_name=MODEL_NAME,
+                eval_version=report.get("eval_version"),
+                policy_version=APPROVAL_POLICY_VERSION,
+                corpus_version=corpus_version,
+                approved_mode="shadow", approved=approved,
+                n_scored=report.get("n_scored"),
+                metrics_json=json.dumps(rec["metrics"]),
+                edge_json=json.dumps(rec["edge_vs_baseline"]),
+                limitations_json=json.dumps(rec["limitations"]),
+                report_json=json.dumps(report)[:200_000],
+                approved_by="automated-eval", content_hash=chash,
+                created_at=datetime.now(timezone.utc))
+            s.add(row)
+            s.commit()
+            decision_id = row.id
+        else:
+            decision_id = existing.id
+    finally:
+        s.close()
+    # flip the model_version flag FROM the persisted decision
+    model_mls.ensure_model_version(approved_for_shadow=approved)
+    return {"decision_id": decision_id, "approved": approved,
+            "reason": reason, "content_hash": chash,
+            "policy_version": APPROVAL_POLICY_VERSION,
+            "n_scored": report.get("n_scored"),
+            "edge_vs_baseline": rec["edge_vs_baseline"]}
+
+
+def latest_approved_decision_id() -> int | None:
+    """The newest APPROVED shadow decision id, stamped on each run so a
+    run points at the exact record that authorized it (V9 eval F10)."""
+    if not plane_ready():
+        return None
+    from src.live.models import ModelApprovalDecision
+    s = get_session()
+    try:
+        row = (s.query(ModelApprovalDecision)
+               .filter_by(model_version_name=MODEL_NAME, approved=True)
+               .order_by(ModelApprovalDecision.id.desc()).first())
+        return row.id if row else None
+    finally:
+        s.close()

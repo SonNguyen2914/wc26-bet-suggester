@@ -302,11 +302,29 @@ class TestCurrentProviderSchema:
             "yes_dollars": [["0.5400", "2642.00"], ["0.5300", "100"]],
             "no_dollars": [["0.4500", "9.00"]]}}
         rows = markets._depth_levels(fp)
-        assert ("yes", 54, 2642) in rows and ("no", 45, 9) in rows
+        # derived cents/size AND the exact provider strings retained (F7)
+        assert ("yes", 54, 2642, "0.5400", "2642.00") in rows
+        assert ("no", 45, 9, "0.4500", "9.00") in rows
         legacy = {"orderbook": {"yes": [[54, 2642]], "no": [[45, 9]]}}
-        assert markets._depth_levels(legacy) == [("yes", 54, 2642),
-                                                 ("no", 45, 9)]
+        assert markets._depth_levels(legacy) == [
+            ("yes", 54, 2642, None, None), ("no", 45, 9, None, None)]
         assert markets._depth_levels({}) == []
+
+    def test_quote_row_retains_exact_fixed_point(self):
+        """V9 eval F7: subpenny prices and fractional sizes are kept
+        beside the derived integer cents, never rounded away at ingest."""
+        m = {"yes_bid": 2, "yes_bid_dollars": "0.0150",
+             "yes_ask_dollars": "0.0175", "yes_bid_size_fp": "13.50",
+             "volume_fp": "42.00"}
+        q = markets._quote_row(m, mc_id=1, obs_id=1)
+        assert q.yes_bid_c == 2                     # derived (rounded)
+        assert q.yes_bid_dollars == "0.0150"        # exact subpenny
+        assert q.yes_ask_dollars == "0.0175"
+        import json as _json
+        sizes = _json.loads(q.sizes_fp_json)
+        assert sizes["yes_bid_size"] == "13.50"     # exact fractional
+        assert sizes["volume"] == "42.00"
+        assert q.provider_precision
 
 
 def _roster_summary(home_confirmed=True, away_confirmed=True,
@@ -365,6 +383,31 @@ class TestLineupPlane:
         assert snap.home_gk_player_id is not None
         assert live_session.query(LineupEntry).count() == 22
         assert live_session.query(Player).count() == 22
+
+    def test_fetch_failure_still_records_a_referenced_snapshot(
+            self, live_session, monkeypatch):
+        """V9 eval F2: a lineup fetch failure must not return None (which
+        left the T-10 lock referencing a null lineup and failing its own
+        audit). It records an explicit 'fetch_failed' snapshot instead."""
+        import requests as _requests
+
+        from src.live import lineups
+        from src.live.models import Fixture, LineupSnapshot
+        fx = Fixture(competition_slug="mls-2026", espn_event_id="5001",
+                     current_kickoff_utc=datetime.now(UTC), status="pre")
+        live_session.add(fx)
+        live_session.commit()
+
+        def _boom(*a, **kw):
+            raise _requests.RequestException("dns")
+        monkeypatch.setattr(lineups.requests, "get", _boom)
+        res = lineups.capture_lineup(fx.id)          # summary=None -> fetch
+        assert res is not None and res["status"] == "fetch_failed"
+        snap = live_session.query(LineupSnapshot).one()
+        assert snap.status == "fetch_failed"
+        assert snap.source_observation_id is None    # no observation to link
+        assert res["snapshot_id"] == snap.id         # lock can reference it
+        assert res["quality"]["LINEUP_CONFIRMED"] is False
 
 
 class TestPaperFillModel:
@@ -789,6 +832,52 @@ class TestModelLadderEval:
         assert "NOT" in rec["approval_meaning"]
         assert any("prospective" in x for x in rec["limitations"])
 
+    def test_shadow_approval_policy_reads_the_ci(self):
+        """V9 eval F1: the gate is the confidence interval, not a bare
+        point estimate — significantly-worse is refused, a CI spanning
+        zero is approvable for SHADOW, too-few-scored is refused."""
+        from src.live import model_eval as me
+        worse = {"n_scored": 162, "edges": {"M2_vs_M0": {
+            "delta_log_loss": -0.05, "ci95": [-0.09, -0.01],
+            "significant": True}}}
+        assert me.shadow_approval_policy(worse)[0] is False
+        spans_zero = {"n_scored": 162, "edges": {"M2_vs_M0": {
+            "delta_log_loss": 0.008, "ci95": [-0.012, 0.029],
+            "significant": False}}}
+        assert me.shadow_approval_policy(spans_zero)[0] is True
+        assert me.shadow_approval_policy({"n_scored": 5})[0] is False
+
+    def test_approval_decision_persisted_and_deduped(self, live_session,
+                                                     monkeypatch):
+        """V9 eval F1/F10: boot persists an IMMUTABLE CI-based decision,
+        sets approved_for_shadow FROM it, and an unchanged evaluation
+        dedupes to one row — no bare point-estimate gate anywhere."""
+        from src.live import model_eval as me
+        from src.live.models import ModelApprovalDecision, ModelVersion
+        report = {
+            "eval_version": "model-eval-v1", "n_scored": 162,
+            "variants": {"M2": {"log_loss": 1.07, "brier": 0.647,
+                                "rps": 0.232}},
+            "edges": {"M2_vs_M0": {"delta_log_loss": 0.008,
+                                   "ci95": [-0.012, 0.029],
+                                   "significant": False}},
+        }
+        monkeypatch.setattr(me, "evaluate_ladder", lambda **kw: report)
+        dec = me.ensure_approval_decision()
+        assert dec["approved"] is True and dec["decision_id"]
+        row = live_session.get(ModelApprovalDecision, dec["decision_id"])
+        assert row.approved_mode == "shadow" and row.content_hash
+        assert row.edge_json and row.policy_version
+        live_session.expire_all()
+        mv = live_session.query(ModelVersion).filter_by(
+            name=model_mls.MODEL_NAME).one()
+        assert mv.approved_for_shadow is True         # set FROM the decision
+        assert mv.approved_for_real_money is False     # never here
+        # unchanged evaluation -> same content hash -> ONE immutable row
+        assert (me.ensure_approval_decision()["decision_id"]
+                == dec["decision_id"])
+        assert live_session.query(ModelApprovalDecision).count() == 1
+
 
 class TestMarketHelpers:
     def test_cents_prefers_native_integer(self):
@@ -1033,6 +1122,17 @@ class TestPredictionRuns:
         live_session.commit()
         monkeypatch.setattr(markets, "capture_lock_snapshot",
                             lambda fixture_id: snap)
+        # hermetic: never touch live ESPN (the real capture_lineup makes a
+        # network call; DNS-less CI otherwise produced a lineup-less lock)
+        import src.live.lineups as lineups_mod
+        monkeypatch.setattr(
+            lineups_mod, "capture_lineup",
+            lambda fixture_id, **kw: {
+                "snapshot_id": 77, "status": "pending",
+                "quality": {"LINEUP_CONFIRMED": False,
+                            "GOALKEEPER_CONFIRMED": False,
+                            "AVAILABILITY_COMPLETE": False,
+                            "PLAYER_DATA_FRESH": False}})
         import src.alerts as alerts
         monkeypatch.setattr(alerts, "send_alert", lambda *a, **kw: None)
         assert runs.t10_locks()["locked"] == 1
@@ -1115,10 +1215,14 @@ class TestPredictionRuns:
         assert art.content_hash == run.input_snapshot_hash
         import json
         doc = json.loads(art.document_json)
-        assert doc["schema_version"] == "model-input-v1"
+        assert doc["schema_version"] == "model-input-v2"
         assert doc["team_ratings"]["home"] and doc["team_ratings"]["away"]
         assert doc["simulation"]["seed"] == run.simulation_seed
         assert len(doc["source_fixtures"]) >= 5
+        # V9 eval F4: the engine signature is frozen INTO the artifact
+        eng = doc["engine"]
+        assert eng["signature_hash"] and "goal_dispersion_cv" in \
+            eng["constants"]
 
     def test_artifact_hash_is_deterministic(self, live_session):
         """The hash (hence dedup) depends only on the inputs: same
@@ -1192,6 +1296,37 @@ class TestPredictionRuns:
         corpus.export_corpus(out, "mls-shadow-2026-test")
         with pytest.raises(FileExistsError):
             corpus.export_corpus(out, "mls-shadow-2026-test")
+
+    def test_published_corpus_is_frozen_and_reserved(self, live_session):
+        """V9 eval F3: a PUBLISHED version is served from stored bytes,
+        unchanged as the database grows, and re-publishing is refused."""
+        from datetime import datetime, timedelta, timezone
+
+        from src.live import corpus
+        from src.live.models import Fixture
+        self._seed_playable(live_session)
+        runs.scheduled_runs()
+        pub = corpus.publish_corpus("mls-shadow-2026-frozen")
+        assert pub["published"] == "mls-shadow-2026-frozen"
+        frozen_hash = pub["manifest_hash"]
+        served = corpus.get_published("mls-shadow-2026-frozen")
+        assert served["manifest_hash"] == frozen_hash
+
+        # mutate the DB — a rebuild WOULD change the hash...
+        live_session.add(Fixture(
+            competition_slug="mls-2026", espn_event_id="zzz9",
+            current_kickoff_utc=datetime.now(timezone.utc)
+            + timedelta(days=1), status="pre"))
+        live_session.commit()
+        assert corpus.build_corpus(
+            "mls-shadow-2026-frozen")["manifest"]["manifest_hash"] \
+            != frozen_hash
+        # ...but the PUBLISHED bytes are unchanged (served from storage)
+        assert corpus.get_published(
+            "mls-shadow-2026-frozen")["manifest_hash"] == frozen_hash
+        # re-publishing the same label is refused (immutable)
+        again = corpus.publish_corpus("mls-shadow-2026-frozen")
+        assert "error" in again and "immutable" in again["error"]
 
     def test_shadow_counts_shape(self, live_session):
         self._seed_playable(live_session)
