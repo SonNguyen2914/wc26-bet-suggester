@@ -382,3 +382,44 @@ def latest_approved_decision_id() -> int | None:
         return row.id if row else None
     finally:
         s.close()
+
+
+def current_approval_decision() -> dict:
+    """The persisted approval decision the runtime operates under, read as
+    STORED — never a recomputation (pre-slate evidence contract). Returns
+    the immutable row's fields (incl. its own content hash) or
+    `{approval_decision_missing: True}` when none exists; it must never
+    invent a decision. corpus_manifest_hash is null until an approval is
+    linked to a *published* corpus (none yet)."""
+    if not plane_ready():
+        return {"approval_decision_missing": True, "reason": "dormant"}
+    from src.live.models import ModelApprovalDecision
+    s = get_session()
+    try:
+        row = (s.query(ModelApprovalDecision)
+               .filter_by(approved=True)
+               .order_by(ModelApprovalDecision.id.desc()).first())
+        if row is None:
+            return {"approval_decision_missing": True}
+        edge = json.loads(row.edge_json) if row.edge_json else {}
+        ci = edge.get("ci95") or [None, None]
+        return {
+            "decision_id": row.id,
+            "content_hash": row.content_hash,
+            "model_version": row.model_version_name,
+            "corpus_version": row.corpus_version,
+            "corpus_manifest_hash": None,
+            "evaluation_version": row.eval_version,
+            "approval_policy_version": row.policy_version,
+            "approved_mode": row.approved_mode,
+            "approved": row.approved,
+            "n_scored": row.n_scored,
+            "edge_vs_baseline": edge.get("delta_log_loss"),
+            "ci_low": ci[0] if len(ci) == 2 else None,
+            "ci_high": ci[1] if len(ci) == 2 else None,
+            "edge_significant": edge.get("significant"),
+            "approved_at": (row.created_at.isoformat()
+                            if row.created_at else None),
+        }
+    finally:
+        s.close()

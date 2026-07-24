@@ -297,6 +297,23 @@ def mls_model_eval():
         raise HTTPException(503, "model-eval unavailable")
 
 
+@app.get("/api/mls/approval")
+def mls_approval():
+    """The persisted model-approval DECISION the runtime is operating
+    under (V9 eval F1/F10 — pre-slate evidence). Reads the STORED immutable
+    row ONLY and never recomputes an evaluation; returns
+    `approval_decision_missing` rather than inventing one. Public
+    read-only. Not cached: the query is a single indexed row, and caching
+    would risk serving a transient boot-time 'missing' after the decision
+    lands."""
+    try:
+        from src.live import model_eval
+        return model_eval.current_approval_decision()
+    except Exception as exc:
+        print(f"[mls] approval failed: {exc}")
+        raise HTTPException(503, "approval unavailable")
+
+
 @app.get("/api/mls/corpus")
 def mls_corpus(version: str | None = Query(None), full: bool = Query(False),
                preview: bool = Query(False)):

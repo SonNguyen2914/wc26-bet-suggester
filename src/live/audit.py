@@ -17,7 +17,8 @@ import json
 from datetime import datetime, timezone
 
 from src.live.db import get_session, plane_ready
-from src.live.models import (Fixture, MarketSnapshot, ModelInputArtifact,
+from src.live.models import (Fixture, MarketSnapshot,
+                             ModelApprovalDecision, ModelInputArtifact,
                              PredictionContract, PredictionRun)
 
 AUDIT_VERSION = "mls-lock-audit-v1"
@@ -48,6 +49,21 @@ def _lock_checks(s, f, lock, n_locks) -> dict:
     priced = [c for c in contracts if c.market_contract_id is not None]
     snap = (s.get(MarketSnapshot, lock.market_snapshot_id)
             if lock.market_snapshot_id else None)
+    # the immutable approval decision the run was authorized under
+    # (V9 eval F1/F10) — a REQUIRED reference, not just the boolean
+    approval = (s.get(ModelApprovalDecision, lock.model_approval_decision_id)
+                if lock.model_approval_decision_id else None)
+    # the engine signature frozen into the input artifact (V9 eval F4) —
+    # presence only, cheap: no full replay is run during the audit
+    art = (s.get(ModelInputArtifact, lock.model_input_artifact_id)
+           if lock.model_input_artifact_id else None)
+    engine_sig = None
+    if art and art.document_json:
+        try:
+            engine_sig = ((json.loads(art.document_json).get("engine") or {})
+                          .get("signature_hash"))
+        except (ValueError, TypeError):
+            engine_sig = None
     # a later COMPLETE run must not exist for this fixture (F9)
     later = (s.query(PredictionRun)
              .filter_by(fixture_id=f.id, status="complete")
@@ -70,8 +86,26 @@ def _lock_checks(s, f, lock, n_locks) -> dict:
             c.market_quote_id is not None for c in priced),
         "model_version_present": lock.model_version_id is not None,
         "model_approved_at_run": bool(lock.model_approved_at_run),
+        # the run must reference the EXACT immutable approval decision that
+        # authorized it (V9 eval F1/F10) — required, not informational
+        "approval_decision_referenced": (
+            lock.model_approval_decision_id is not None),
+        "approval_decision_exists": approval is not None,
+        "approval_decision_model_matches": bool(
+            approval and approval.model_version_id == lock.model_version_id),
+        "approval_decision_is_shadow": bool(
+            approval and approval.approved
+            and approval.approved_mode == "shadow"),
+        "approval_decision_precedes_run": bool(
+            approval and approval.created_at and lock.captured_at
+            and _utc(approval.created_at) <= _utc(lock.captured_at)),
+        "approval_decision_hash_present": bool(
+            approval and approval.content_hash),
         "input_hash_present": bool(lock.input_snapshot_hash),
         "input_artifact_retained": lock.model_input_artifact_id is not None,
+        # the frozen engine signature must be present (V9 eval F4) so the
+        # reproducibility claim is engine-matched, not engine-blind
+        "engine_signature_present": bool(engine_sig),
         # a lineup snapshot must be REFERENCED (Phase 5) — whether or not
         # the lineup was confirmed. Its absence is a provenance gap; a
         # PENDING lineup inside it is honest data, not a failure.
@@ -91,6 +125,9 @@ def _lock_checks(s, f, lock, n_locks) -> dict:
                         if lock.captured_at else None),
         "seconds_before_kickoff": lock.seconds_before_kickoff,
         "market_snapshot_id": lock.market_snapshot_id,
+        "approval_decision_id": lock.model_approval_decision_id,
+        "approval_decision_hash": approval.content_hash if approval else None,
+        "engine_signature_hash": engine_sig,
         "contracts": len(contracts),
         "priced_contracts": len(priced),
         "input_quality": (json.loads(lock.input_quality_json)
@@ -135,26 +172,31 @@ def verify_replay(run_id: str, tol: float = 1e-6) -> dict:
                     "reason": "no input artifact"}
         art = s.get(ModelInputArtifact, run.model_input_artifact_id)
         doc = _json.loads(art.document_json)
-        # engine-drift guard (V9 eval F4): if the artifact froze an engine
-        # signature (v2+), it must match the current engine or we REFUSE
-        # to replay — a mismatch means the constants/runtime moved and the
-        # numbers would silently diverge. "Replayable under the matching
-        # engine", never "bit-identical from the bytes alone across
-        # versions" (the narrowed, honest claim).
-        frozen_sig = (doc.get("engine") or {}).get("signature_hash")
-        if frozen_sig is not None:
-            current_sig = model_mls.engine_signature()["signature_hash"]
-            if frozen_sig != current_sig:
-                return {"run_id": run_id, "replayable": False,
-                        "reason": "engine signature mismatch — refusing to "
-                                  "replay under a different engine",
-                        "frozen_engine": frozen_sig[:16],
-                        "current_engine": current_sig[:16],
-                        "artifact_hash": art.content_hash,
-                        "schema_version": art.schema_version}
+        # the frozen (stored) engine signature vs the current engine
+        # (V9 eval F4). Surfaced in EVERY return path so the reproducibility
+        # claim is engine-matched and independently visible, never blind.
+        stored_sig = (doc.get("engine") or {}).get("signature_hash")
+        current_sig = model_mls.engine_signature()["signature_hash"]
+        engine_match = (stored_sig == current_sig) if stored_sig else None
+        base = {
+            "run_id": run_id,
+            "artifact_hash": art.content_hash,
+            "artifact_schema": art.schema_version,
+            "stored_engine_signature_hash": stored_sig,
+            "current_engine_signature_hash": current_sig,
+            "engine_match": engine_match,
+        }
+        # engine-drift guard: a v2+ artifact whose signature no longer
+        # matches the current engine is REFUSED — the numbers would
+        # silently diverge. "Replayable under the matching engine", never
+        # "bit-identical from the bytes alone across versions".
+        if stored_sig is not None and not engine_match:
+            return {**base, "replayable": False,
+                    "reason": "engine signature mismatch — refusing to "
+                              "replay under a different engine"}
         replayed = model_mls.replay_from_artifact(doc)
         if replayed is None:
-            return {"run_id": run_id, "replayable": False,
+            return {**base, "replayable": False,
                     "reason": "artifact missing ratings"}
         stored = {c.outcome_key: c.raw_probability
                   for c in s.query(PredictionContract)
@@ -163,11 +205,9 @@ def verify_replay(run_id: str, tol: float = 1e-6) -> dict:
         deltas = {k: abs(replayed.get(k, 0.0) - stored.get(k, 0.0))
                   for k in THREE_WAY}
         return {
-            "run_id": run_id,
+            **base,
             "replayable": all(d <= tol for d in deltas.values()),
             "max_delta": max(deltas.values()) if deltas else None,
-            "artifact_hash": art.content_hash,
-            "schema_version": art.schema_version,
         }
     finally:
         s.close()

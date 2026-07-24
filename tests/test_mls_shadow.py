@@ -626,7 +626,8 @@ class TestSlateReport:
         only when clean."""
         from src.live import slate
         from src.live.models import (Fixture, LineupSnapshot,
-                                     MarketSnapshot, ModelInputArtifact,
+                                     MarketSnapshot, ModelApprovalDecision,
+                                     ModelInputArtifact,
                                      ModelVersion, PredictionContract,
                                      PredictionRun)
         from zoneinfo import ZoneInfo
@@ -637,6 +638,10 @@ class TestSlateReport:
         et = past.astimezone(ZoneInfo("America/New_York")).strftime("%Y%m%d")
         live_session.add(ModelVersion(id=1, name=model_mls.MODEL_NAME,
                                       approved_for_shadow=True))
+        live_session.add(ModelApprovalDecision(
+            id=1, model_version_id=1, model_version_name=model_mls.MODEL_NAME,
+            approved_mode="shadow", approved=True, content_hash="dh1",
+            created_at=past - timedelta(days=1)))
 
         def fx(fid, eid, ko, status="post"):
             live_session.add(Fixture(id=fid, competition_slug="mls-2026",
@@ -654,8 +659,9 @@ class TestSlateReport:
         fx(3, "pass", past)
         cap = past - timedelta(minutes=8)
         live_session.add_all([
-            ModelInputArtifact(id=1, schema_version="model-input-v1",
-                               content_hash="h", document_json="{}"),
+            ModelInputArtifact(
+                id=1, schema_version="model-input-v2", content_hash="h",
+                document_json='{"engine": {"signature_hash": "sig-test"}}'),
             MarketSnapshot(id=1, fixture_id=3, captured_at=cap,
                            status="complete", execution_ready=True,
                            policy_version="mls-lock-v1",
@@ -667,6 +673,7 @@ class TestSlateReport:
             id="lk3", fixture_id=3, run_type="t10", status="complete",
             canonical=True, captured_at=cap, seconds_before_kickoff=480,
             market_snapshot_id=1, model_version_id=1,
+            model_approval_decision_id=1,
             model_approved_at_run=True, model_input_artifact_id=1,
             input_snapshot_hash="h", lineup_snapshot_id=1,
             simulation_seed=1,
@@ -706,7 +713,8 @@ class TestSlateReport:
         EXECUTION_NOT_READY — valid evidence, flagged, not a failure."""
         from src.live import slate
         from src.live.models import (Fixture, LineupSnapshot,
-                                     MarketSnapshot, ModelInputArtifact,
+                                     MarketSnapshot, ModelApprovalDecision,
+                                     ModelInputArtifact,
                                      ModelVersion, PredictionContract,
                                      PredictionRun)
         import json as _json
@@ -714,11 +722,17 @@ class TestSlateReport:
         live_session.add_all([
             ModelVersion(id=1, name=model_mls.MODEL_NAME,
                          approved_for_shadow=True),
+            ModelApprovalDecision(
+                id=1, model_version_id=1,
+                model_version_name=model_mls.MODEL_NAME,
+                approved_mode="shadow", approved=True, content_hash="dh1",
+                created_at=base - timedelta(days=1)),
             Fixture(id=7, competition_slug="mls-2026", espn_event_id="enr",
                     current_kickoff_utc=base + timedelta(minutes=5),
                     status="pre"),
-            ModelInputArtifact(id=1, schema_version="model-input-v1",
-                               content_hash="h", document_json="{}"),
+            ModelInputArtifact(
+                id=1, schema_version="model-input-v2", content_hash="h",
+                document_json='{"engine": {"signature_hash": "sig-test"}}'),
             MarketSnapshot(id=2, fixture_id=7,
                            captured_at=base - timedelta(minutes=1),
                            status="complete", execution_ready=False,
@@ -731,7 +745,8 @@ class TestSlateReport:
             id="lk7", fixture_id=7, run_type="t10", status="complete",
             canonical=True, captured_at=base - timedelta(minutes=1),
             seconds_before_kickoff=360, market_snapshot_id=2,
-            model_version_id=1, model_approved_at_run=True,
+            model_version_id=1, model_approval_decision_id=1,
+            model_approved_at_run=True,
             model_input_artifact_id=1, input_snapshot_hash="h",
             lineup_snapshot_id=1, simulation_seed=1,
             input_quality_json=_json.dumps({"TEAM_DATA_FRESH": True})))
@@ -949,10 +964,26 @@ class TestContractRepair:
 
 class TestPredictionRuns:
     def _seed_playable(self, s, n_completed=12):
-        from src.live.models import ModelVersion
-        # run paths enforce the shadow-approval gate (V8 eval F3)
-        s.add(ModelVersion(name=model_mls.MODEL_NAME,
-                           approved_for_shadow=True))
+        from src.live.models import ModelApprovalDecision, ModelVersion
+        # run paths enforce the shadow-approval gate (V8 eval F3). Commit
+        # before identity.seed_teams (which uses a SEPARATE session): an
+        # uncommitted write here would hold the SQLite write lock and the
+        # seed would fail "database is locked".
+        mv = ModelVersion(name=model_mls.MODEL_NAME, approved_for_shadow=True)
+        s.add(mv)
+        s.commit()
+        # the immutable approval decision every canonical lock must
+        # reference (V9 eval F1/F10) — created before any run so it
+        # precedes captured_at
+        s.add(ModelApprovalDecision(
+            model_version_id=mv.id, model_version_name=model_mls.MODEL_NAME,
+            eval_version="model-eval-v1", policy_version="shadow-approval-v1",
+            approved_mode="shadow", approved=True, n_scored=162,
+            edge_json=('{"delta_log_loss": 0.008, '
+                       '"ci95": [-0.012, 0.029], "significant": false}'),
+            content_hash="test-decision-hash-0001",
+            created_at=datetime.now(UTC) - timedelta(days=1)))
+        s.commit()
         identity.seed_teams(CANNED_ESPN)
         teams = {t.canonical_name: t.id for t in
                  s.query(Team).filter_by(competition_slug="mls-2026")}
@@ -1144,8 +1175,55 @@ class TestPredictionRuns:
         assert lock["checks"]["priced_contracts_quote_linked"]
         assert lock["checks"]["model_approved_at_run"]
         assert lock["checks"]["no_post_kickoff_replacement"]
+        # V9 pre-slate: the approval-decision reference is a REQUIRED lock
+        # invariant, and the engine signature must be present
+        assert lock["checks"]["approval_decision_referenced"]
+        assert lock["checks"]["approval_decision_exists"]
+        assert lock["checks"]["approval_decision_model_matches"]
+        assert lock["checks"]["approval_decision_is_shadow"]
+        assert lock["checks"]["approval_decision_precedes_run"]
+        assert lock["checks"]["engine_signature_present"]
+        assert lock["approval_decision_id"] is not None
+        assert lock["approval_decision_hash"] == "test-decision-hash-0001"
+        assert lock["engine_signature_hash"]
         # the report is content-hashed and stable for one DB state
         assert rep["content_hash"] == audit.lock_audit()["content_hash"]
+
+    def test_lock_without_approval_decision_fails_audit(self, live_session,
+                                                        monkeypatch):
+        """V9 pre-slate: a canonical lock that does not reference the
+        immutable approval decision must FAIL the audit — the reference is
+        required, not informational."""
+        from src.live import audit
+        from src.live.models import (MarketSnapshot, ModelApprovalDecision,
+                                     PredictionRun)
+        monkeypatch.setattr(config, "N_SIMULATIONS", 400)
+        up = self._seed_playable(live_session)
+        up.current_kickoff_utc = datetime.now(UTC) + timedelta(minutes=9)
+        live_session.commit()
+        snap = self._fake_snapshot(live_session, up.id)
+        row = live_session.get(MarketSnapshot, snap["snapshot_id"])
+        row.policy_version = "mls-lock-v1"
+        row.required_families_complete = True
+        live_session.commit()
+        monkeypatch.setattr(markets, "capture_lock_snapshot",
+                            lambda fixture_id: snap)
+        import src.live.lineups as lineups_mod
+        monkeypatch.setattr(lineups_mod, "capture_lineup",
+                            lambda fixture_id, **kw: {"snapshot_id": 77,
+                                                      "status": "pending",
+                                                      "quality": {}})
+        import src.alerts as alerts
+        monkeypatch.setattr(alerts, "send_alert", lambda *a, **kw: None)
+        assert runs.t10_locks()["locked"] == 1
+        # sever the reference to simulate an unauthorized/legacy lock
+        live_session.query(PredictionRun).filter_by(
+            run_type="t10", canonical=True).update(
+            {"model_approval_decision_id": None})
+        live_session.commit()
+        lock = audit.lock_audit()["locks"][0]
+        assert not lock["all_pass"]
+        assert lock["checks"]["approval_decision_referenced"] is False
 
     def test_lock_audit_retains_missed_locks(self, live_session,
                                              monkeypatch):
@@ -1255,6 +1333,27 @@ class TestPredictionRuns:
         assert rep["replayable"], rep
         # deterministic: same seed + same inputs => essentially identical
         assert rep["max_delta"] < 1e-6
+        # V9 pre-slate: the engine signature is surfaced and matches (same
+        # process), and the artifact schema is v2
+        assert rep["artifact_schema"] == "model-input-v2"
+        assert rep["stored_engine_signature_hash"]
+        assert (rep["stored_engine_signature_hash"]
+                == rep["current_engine_signature_hash"])
+        assert rep["engine_match"] is True
+
+    def test_approval_reader_returns_stored_decision(self, live_session):
+        """V9 pre-slate: the approval reader returns the STORED decision
+        (never a recomputation), and approval_decision_missing when none."""
+        from src.live import model_eval
+        assert model_eval.current_approval_decision().get(
+            "approval_decision_missing") is True
+        self._seed_playable(live_session)      # seeds an approved decision
+        d = model_eval.current_approval_decision()
+        assert d["approved"] is True and d["approved_mode"] == "shadow"
+        assert d["decision_id"] and d["content_hash"]
+        assert d["ci_low"] == -0.012 and d["ci_high"] == 0.029
+        assert d["edge_significant"] is False
+        assert d["corpus_manifest_hash"] is None   # no published corpus yet
 
     def test_corpus_is_self_contained_and_replayable(self, live_session,
                                                      monkeypatch, tmp_path):
