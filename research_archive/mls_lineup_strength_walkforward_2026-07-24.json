@@ -1,0 +1,16 @@
+{
+  "title": "MLS lineup/XI-strength adjustment \u2014 walk-forward (NEGATIVE result)",
+  "generated_at": "2026-07-24T10:24:30.488883+00:00",
+  "question": "Does adjusting a team rating by its starting XI player strength (summed prior xG/90, vs the team usual XI) beat team-xG (M3) out of sample?",
+  "method": "leak-free walk-forward n=162; reconstructed XI = top-11 by minutes; player strength = recency-weighted xG/90 from prior matches; lambda scaled by (XI/usual)^gamma; gamma=0 == M3.",
+  "results_logloss": {
+    "0.0": 1.054,
+    "0.25": 1.0532,
+    "0.5": 1.0544,
+    "0.75": 1.0579,
+    "1.0": 1.0635
+  },
+  "best_delta_vs_M3": 0.0008,
+  "verdict": "NEGATIVE / marginal. Best +0.0008 (vs xG +0.0071, win% +0.0086) and NON-monotonic (degrades to -0.0094 at full weight). Team xG already encodes who played. Do NOT ship an XI-strength probability adjustment. Player data is best used as DISPLAY context (released XI, key absences) and revisited for (a) targeted key-absence rules, (b) GK/defence effects (untested), (c) larger samples.",
+  "caveats": "Tests attacking XI strength only (xG-based); GK/defence untested; averaged over all matches so rare high-impact absences are diluted; realized top-11-by-minutes stands in for announced XI."
+}
