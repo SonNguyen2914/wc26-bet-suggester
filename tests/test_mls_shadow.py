@@ -897,8 +897,8 @@ class TestModelLadderEval:
         live_session.commit()
         rep = model_eval.evaluate_ladder(n_boot=300)
         assert rep["n_scored"] > 10
-        assert set(rep["variants"]) == {"M0", "M1", "M2", "M2W"}
-        for name in ("M0", "M1", "M2", "M2W"):
+        assert set(rep["variants"]) == {"M0", "M1", "M2", "M2W", "M3"}
+        for name in ("M0", "M1", "M2", "M2W", "M3"):
             assert 0 < rep["variants"][name]["log_loss"] < 5
         edge = rep["edges"]["M2_vs_M0"]
         assert "ci95" in edge and len(edge["ci95"]) == 2
@@ -908,6 +908,9 @@ class TestModelLadderEval:
             rep["variants"]["M0"]["log_loss"] + 0.02
         # the win% blend is scored with its own CI vs M2
         assert "ci95" in rep["edges"]["M2W_vs_M2"]
+        # the xG rung is scored with its own CI vs the deployed win% model;
+        # with no ingested xG it degrades gracefully to M2W (edge ~ 0)
+        assert "ci95" in rep["edges"]["M3_vs_M2W"]
 
     def test_approval_record_never_exceeds_shadow(self, live_session):
         from src.live import model_eval
@@ -1545,3 +1548,138 @@ class TestPredictionRuns:
         c = runs.shadow_counts()
         assert c["teams"] == 4 and c["fixtures"] == 25
         assert c["completed_fixtures"] == 24 and c["t10_locks"] == 0
+
+
+# --- official MLS stats ingestion + xG ratings ---------------------------
+
+def _canned_team_stats(home_code, away_code, home_cid, away_cid):
+    def team(code, cid, role, goals, conceded, xg, inside, outside, sot):
+        return {"team_id": cid, "team_three_letter_code": code,
+                "team_role": role, "goals": goals, "goals_conceded": conceded,
+                "xG": xg, "shots_at_goal_sum": inside + outside,
+                "shots_at_goal_inside_box": inside,
+                "shots_at_goal_outside_box": outside, "shots_on_target": sot,
+                "corner_kicks_sum": 5,
+                "passes_and_crosses_successful_sum": 400,
+                "passes_and_crosses_sum": 480}
+    return {"match_statistics_list": [{"match_statistics": {
+        "team_statistics": [
+            team(home_code, home_cid, "home", 2, 1, 1.80, 9, 4, 6),
+            team(away_code, away_cid, "away", 1, 2, 0.90, 5, 3, 3)]}}]}
+
+
+def _canned_player_stats(home_code, away_code, home_cid, away_cid):
+    def pl(i, code, cid, gk):
+        return {"player_id": f"MLS-OBJ-{code}-{i}",
+                "player_first_name": "F", "player_last_name": f"{code}{i}",
+                "team_id": cid, "team_three_letter_code": code,
+                "goal_keeper": gk, "normalized_player_minutes": 90,
+                "goals": 0, "assists": 0, "xG": 0.1,
+                "shots_at_goal_sum": 1, "shots_on_target": 0,
+                "shots_on_goal_suffered": 0}
+    players = ([pl(i, home_code, home_cid, i == 0) for i in range(3)]
+               + [pl(i, away_code, away_cid, i == 0) for i in range(3)])
+    return {"match_statistics": {"player_statistics": players},
+            "next_page_token": None}
+
+
+class TestMlsStatsIngestion:
+    def _seed(self, s):
+        identity.seed_teams(CANNED_ESPN)   # CLB, NYC, STL, MTL
+        clb = identity.resolve_espn_name("Columbus Crew")
+        nyc = identity.resolve_espn_name("New York City FC")
+        ko = datetime(2026, 5, 1, 23, 0, tzinfo=UTC)
+        fx = Fixture(competition_slug="mls-2026", espn_event_id="e900",
+                     home_team_id=clb.id, away_team_id=nyc.id,
+                     current_kickoff_utc=ko, status="post",
+                     home_goals=2, away_goals=1)
+        s.add(fx)
+        s.commit()
+        return clb, nyc, fx, ko
+
+    def _patch(self, monkeypatch, ko):
+        from src.live import mls_stats
+        monkeypatch.setattr(mls_stats, "THROTTLE_SECONDS", 0)
+
+        schedule = {"schedule": [{
+            "match_id": "MLS-MAT-TEST01",
+            "planned_kickoff_time": ko.isoformat().replace("+00:00", "Z"),
+            "home_team_three_letter_code": "CLB",
+            "away_team_three_letter_code": "NYC",
+            "home_team_id": "MLS-CLU-CLB", "away_team_id": "MLS-CLU-NYC",
+            "home_team_name": "Columbus Crew", "away_team_name": "NYC FC",
+            "home_team_goals": 2, "away_team_goals": 1,
+            "match_status": "finalWhistle"}], "next_page_token": None}
+        team = _canned_team_stats("CLB", "NYC", "MLS-CLU-CLB", "MLS-CLU-NYC")
+        player = _canned_player_stats("CLB", "NYC",
+                                      "MLS-CLU-CLB", "MLS-CLU-NYC")
+
+        def fake_get(path, params=None):
+            if path.startswith("matches/seasons"):
+                return schedule
+            if path.startswith("statistics/clubs/matches"):
+                return team
+            if path.startswith("statistics/players/matches"):
+                return player
+            return None
+        monkeypatch.setattr(mls_stats, "_get", fake_get)
+        return mls_stats
+
+    def test_resolve_mls_club_by_code(self, live_session):
+        self._seed(live_session)
+        assert identity.resolve_mls_club("CLB").abbrev == "CLB"
+        assert identity.resolve_mls_club("ZZZ") is None
+
+    def test_ingest_attaches_team_stats_with_orientation(
+            self, live_session, monkeypatch):
+        clb, nyc, fx, ko = self._seed(live_session)
+        mls_stats = self._patch(monkeypatch, ko)
+        res = mls_stats.ingest_match_stats(gte="2026-04-01", lte="2026-06-01")
+        assert res["ingested"] == 1 and res["team_rows_created"] == 2
+
+        from src.live.models import MlsTeamMatchStat
+        rows = {r.side: r for r in live_session.query(MlsTeamMatchStat).all()}
+        assert set(rows) == {"home", "away"}
+        # orientation taken from OUR fixture, xG matched to the right club
+        assert rows["home"].team_id == clb.id and rows["home"].xg == 1.80
+        assert rows["away"].team_id == nyc.id and rows["away"].xg == 0.90
+        # xg_against is the opponent's xg (denormalized), goals correct
+        assert rows["home"].xg_against == 0.90
+        assert rows["away"].xg_against == 1.80
+        assert rows["home"].goals == 2 and rows["home"].goals_conceded == 1
+        assert rows["home"].shots_total == 13   # 9 inside + 4 outside
+        assert rows["home"].shots_inside_box == 9
+
+    def test_ingest_is_idempotent(self, live_session, monkeypatch):
+        _, _, _, ko = self._seed(live_session)
+        mls_stats = self._patch(monkeypatch, ko)
+        mls_stats.ingest_match_stats(gte="2026-04-01", lte="2026-06-01")
+        mls_stats.ingest_match_stats(gte="2026-04-01", lte="2026-06-01")
+        from src.live.models import MlsTeamMatchStat
+        assert live_session.query(MlsTeamMatchStat).count() == 2
+
+    def test_players_and_gk_captured(self, live_session, monkeypatch):
+        clb, nyc, fx, ko = self._seed(live_session)
+        mls_stats = self._patch(monkeypatch, ko)
+        mls_stats.ingest_match_stats(gte="2026-04-01", lte="2026-06-01")
+        from src.live.models import MlsPlayerMatchStat
+        players = live_session.query(MlsPlayerMatchStat).all()
+        assert len(players) == 6
+        gks = [p for p in players if p.is_goalkeeper]
+        assert len(gks) == 2 and {p.side for p in gks} == {"home", "away"}
+
+    def test_xg_map_and_rating_blend(self, live_session, monkeypatch):
+        _, _, fx, ko = self._seed(live_session)
+        mls_stats = self._patch(monkeypatch, ko)
+        mls_stats.ingest_match_stats(gte="2026-04-01", lte="2026-06-01")
+        xg = mls_stats.team_xg_map()
+        assert fx.id in xg and xg[fx.id]["home"]["xg"] == 1.80
+        # a fit with xg_alpha=0 is byte-identical to the goals model
+        from src.live.db import get_session
+        s = get_session()
+        rows = model_mls._completed(s)
+        s.close()
+        as_of = datetime(2026, 7, 1, tzinfo=UTC)
+        goals = model_mls.fit(rows, as_of)
+        same = model_mls.fit(rows, as_of, xg_by_fixture=xg, xg_alpha=0.0)
+        assert goals["ratings"] == same["ratings"]

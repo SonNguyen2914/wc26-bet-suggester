@@ -78,6 +78,17 @@ GOAL_DISPERSION_CV = float(os.getenv("GOAL_DISPERSION_CV", "0.30"))
 # (M2 vs M2W); deploy the weight that measurably helps.
 MLS_WIN_BLEND_ALPHA = float(os.getenv("MLS_WIN_BLEND_ALPHA", "0.30"))
 
+# MLS xG-based ratings: fraction of each team's attack/defence rating that
+# comes from the provider's per-match expected goals (Sportec xG) rather
+# than actual goals (0 = pure goals ratings == M2/M2W; 1 = pure xG). xG is
+# the less-noisy signal over a half-season. Set to 1.0 after the walk-
+# forward ladder MEASURED it beats the deployed model (M3 vs M2W): xG
+# improves log-loss/Brier/RPS monotonically in alpha (real signal, not
+# overfit), win% stays additive, total edge vs baseline ~3x the original.
+# Still shadow evidence, NOT an established executable edge. Falls back to
+# goals for any fixture the mls_stats ingestion hasn't populated with xG.
+MLS_XG_RATING_ALPHA = float(os.getenv("MLS_XG_RATING_ALPHA", "1.0"))
+
 # --- Model humility (market anchoring) -----------------------------------
 # Final probability = MODEL_WEIGHT * model + (1-MODEL_WEIGHT) * market-implied.
 # Liquid markets are usually right; only large, genuine disagreements should
