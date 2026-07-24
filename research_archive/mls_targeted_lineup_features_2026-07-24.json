@@ -1,0 +1,38 @@
+{
+  "title": "MLS targeted lineup features \u2014 key-attacker + goalkeeper (walk-forward)",
+  "generated_at": "2026-07-24T10:34:40.662950+00:00",
+  "baseline": "M3 (team xG + win%), log_loss 1.0540, n=162",
+  "key_attacker_availability": {
+    "feature": "scale team attack by present-share of its top-3 attackers (prior xG/90, >=3 apps) in the XI, ^gamma",
+    "logloss_by_gamma": {
+      "0.0": 1.054,
+      "0.25": 1.0509,
+      "0.5": 1.0506,
+      "0.75": 1.0528,
+      "1.0": 1.0568
+    },
+    "best": {
+      "gamma": 0.5,
+      "delta_logloss": 0.0034,
+      "delta_brier": 0.003,
+      "ci95": [
+        -0.0148,
+        0.0213
+      ],
+      "significant": false
+    },
+    "verdict": "REAL but MODEST signal with a clean interior optimum (~half of xG); NOT significant at n=162. Deploying needs an ESPN-athlete<->Sportec-player id bridge (matching error could exceed the gain). Revisit when (a) more data tightens the CI, or (b) a lineup source in Sportec player-namespace / the display bridge is built anyway."
+  },
+  "goalkeeper_shot_stopping": {
+    "feature": "reduce opponent expected goals by starting GK prior (xG_against - goals_conceded)/game",
+    "logloss_by_weight": {
+      "0.0": 1.054,
+      "0.25": 1.0595,
+      "0.5": 1.0683,
+      "0.75": 1.0807,
+      "1.0": 1.0969
+    },
+    "verdict": "NEGATIVE, monotonic. GK goals-saved-vs-xG is too noisy over a half-season to be persistent; adjusting by it injects variance. DROP."
+  },
+  "decision": "Deployed model stays M3 (team xG). Neither feature wired into live probabilities. Player data best used as DISPLAY context; key-attacker is the one candidate worth revisiting with more data."
+}
