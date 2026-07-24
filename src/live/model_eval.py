@@ -51,6 +51,9 @@ LADDER = {
            "desc": "team ratings, equal-weighted, minimal pooling"},
     "M2": {"use_ratings": True, "recency": True, "shrink": 24.0,
            "desc": "+ recency + partial pooling (mls-2026-v0)"},
+    "M2W": {"use_ratings": True, "recency": True, "shrink": 24.0,
+            "win_blend": True,
+            "desc": "+ win% (results) blend into the 3-way"},
 }
 FUTURE_RUNGS = {
     "M3": "rest / travel / surface — pending covariates",
@@ -89,7 +92,9 @@ def fit_variant(fixtures, as_of, cfg: dict) -> dict | None:
     its inputs; the walk-forward calls it with prior-only slices."""
     if not fixtures:
         return None
+    from src.live.model_mls import RESULT_SHRINK
     gf, ga, wsum, games = {}, {}, {}, {}
+    wins, draws, losses = {}, {}, {}
     tot_home = tot_away = tot_w = 0.0
     for f in fixtures:
         if cfg["recency"]:
@@ -97,12 +102,21 @@ def fit_variant(fixtures, as_of, cfg: dict) -> dict | None:
             w = 0.5 ** (max(days, 0.0) / HALF_LIFE_DAYS)
         else:
             w = 1.0
-        for team, sc, co in ((f.home_team_id, f.home_goals, f.away_goals),
-                             (f.away_team_id, f.away_goals, f.home_goals)):
+        if f.home_goals > f.away_goals:
+            hr, ar = "w", "l"
+        elif f.home_goals < f.away_goals:
+            hr, ar = "l", "w"
+        else:
+            hr = ar = "d"
+        for team, sc, co, r in (
+                (f.home_team_id, f.home_goals, f.away_goals, hr),
+                (f.away_team_id, f.away_goals, f.home_goals, ar)):
             gf[team] = gf.get(team, 0.0) + w * sc
             ga[team] = ga.get(team, 0.0) + w * co
             wsum[team] = wsum.get(team, 0.0) + w
             games[team] = games.get(team, 0) + 1
+            {"w": wins, "d": draws, "l": losses}[r][team] = \
+                {"w": wins, "d": draws, "l": losses}[r].get(team, 0.0) + w
         tot_home += w * f.home_goals
         tot_away += w * f.away_goals
         tot_w += w
@@ -112,6 +126,7 @@ def fit_variant(fixtures, as_of, cfg: dict) -> dict | None:
     if league <= 0:
         return None
     ratings = {}
+    results = {}
     if cfg["use_ratings"]:
         k = cfg["shrink"]
         for team, w in wsum.items():
@@ -119,10 +134,17 @@ def fit_variant(fixtures, as_of, cfg: dict) -> dict | None:
                 "attack": (gf[team] / league + k) / (w + k),
                 "defence": (ga[team] / league + k) / (w + k),
                 "games": games[team]}
+            kr = RESULT_SHRINK
+            results[team] = {
+                "w": (wins.get(team, 0.0) + kr / 3) / (w + kr),
+                "d": (draws.get(team, 0.0) + kr / 3) / (w + kr),
+                "l": (losses.get(team, 0.0) + kr / 3) / (w + kr)}
     return {"league": league,
             "venue_home": (tot_home / tot_w) / league,
             "venue_away": (tot_away / tot_w) / league,
-            "ratings": ratings, "use_ratings": cfg["use_ratings"]}
+            "ratings": ratings, "results": results,
+            "use_ratings": cfg["use_ratings"],
+            "win_blend": cfg.get("win_blend", False)}
 
 
 def predict_variant(model: dict, fixture) -> dict | None:
@@ -140,7 +162,14 @@ def predict_variant(model: dict, fixture) -> dict | None:
         # M0 still needs enough history to be a fair comparison point
         lam_h = model["league"] * lh_v
         lam_a = model["league"] * la_v
-    return analytic_3way(lam_h, lam_a)
+    three = analytic_3way(lam_h, lam_a)
+    if model.get("win_blend"):
+        import config
+        from src.live.model_mls import blend_with_results, results_prior
+        prior = results_prior(model, fixture.home_team_id,
+                              fixture.away_team_id)
+        three = blend_with_results(three, prior, config.MLS_WIN_BLEND_ALPHA)
+    return three
 
 
 def _rps(p: dict, result: str) -> float:
@@ -213,7 +242,8 @@ def evaluate_ladder(n_boot: int = 1000, seed: int = 12345) -> dict:
 
     # match-cluster bootstrap: resample fixtures with replacement
     rng = np.random.default_rng(seed)
-    pairs = [("M2", "M0"), ("M2", "M1"), ("M1", "M0")]
+    pairs = [("M2", "M0"), ("M2", "M1"), ("M1", "M0"),
+             ("M2W", "M2"), ("M2W", "M0")]
     boot = {f"{a}_vs_{b}": [] for a, b in pairs}
     for _ in range(n_boot):
         idx = rng.integers(0, n, n)
@@ -242,12 +272,22 @@ def evaluate_ladder(n_boot: int = 1000, seed: int = 12345) -> dict:
     }
 
 
+def deployed_variant() -> str:
+    """The ladder rung that matches the DEPLOYED model: M2W when the win%
+    blend is on, else M2. The approval decision evaluates THIS variant so
+    the persisted edge reflects what actually ships."""
+    import config
+    return "M2W" if config.MLS_WIN_BLEND_ALPHA > 0 else "M2"
+
+
 def approval_record(report: dict, corpus_version: str | None = None) -> dict:
     """The model-approval decision record (V8.1 eval Phase 6). Shadow
     approval means 'safe to collect prospective evidence', explicitly
-    NOT 'edge established' — and this record never grants a higher mode."""
-    m2 = (report.get("variants") or {}).get("M2", {})
-    e = (report.get("edges") or {}).get("M2_vs_M0", {})
+    NOT 'edge established' — and this record never grants a higher mode.
+    Evaluates the DEPLOYED variant (M2W when the win% blend is on)."""
+    dv = deployed_variant()
+    m2 = (report.get("variants") or {}).get(dv, {})
+    e = (report.get("edges") or {}).get(f"{dv}_vs_M0", {})
     limitations = [
         "in-sample rolling-origin (not a prospective holdout)",
         "n and CI must be read together — a small point estimate with a "
@@ -286,10 +326,11 @@ def shadow_approval_policy(report: dict) -> tuple[bool, str]:
     if n < MIN_SCORED_FOR_APPROVAL:
         return False, f"insufficient scored sample (n={n} < " \
                       f"{MIN_SCORED_FOR_APPROVAL})"
-    e = (report.get("edges") or {}).get("M2_vs_M0") or {}
+    dv = deployed_variant()
+    e = (report.get("edges") or {}).get(f"{dv}_vs_M0") or {}
     point = e.get("delta_log_loss")
     if point is None:
-        return False, "no M2-vs-baseline edge computed"
+        return False, f"no {dv}-vs-baseline edge computed"
     if e.get("significant") and point < 0:
         return False, (f"model is SIGNIFICANTLY worse than baseline "
                        f"(edge {point}, CI {e.get('ci95')})")
@@ -306,7 +347,7 @@ def _decision_canonical(rec: dict) -> str:
     core = {k: rec.get(k) for k in (
         "model_version", "eval_version", "policy_version", "corpus_version",
         "approved_mode", "approved", "metrics", "edge_vs_baseline",
-        "decision_reason")}
+        "decision_reason", "engine_signature")}
     return _canonical(core)
 
 
@@ -336,16 +377,27 @@ def ensure_approval_decision(corpus_version: str | None = None,
     explicit force=True operator action. Deduped by content hash."""
     if not plane_ready():
         return {"error": "dormant"}
+    from src.live import model_mls
+    current_engine = model_mls.engine_signature()["signature_hash"]
     if not force:
         existing = _active_decision()
-        # load only a COMPLETE decision; one missing its canonical document
-        # (a pre-V9.1.2 row) falls through so the dedupe branch can heal it
+        # load only a COMPLETE decision computed under the CURRENT engine
+        # (V9.2): a model change (new engine signature) or a pre-V9.1.2 row
+        # falls through so a fresh decision evaluates what actually ships —
+        # the win% blend must not be authorized by an M2-only decision
         if existing is not None and existing.decision_document:
-            return {"decision_id": existing.id, "approved": True,
-                    "loaded": True, "content_hash": existing.content_hash,
-                    "reason": "loaded active decision (not recomputed)",
-                    "policy_version": existing.policy_version,
-                    "n_scored": existing.n_scored}
+            try:
+                doc_engine = json.loads(
+                    existing.decision_document).get("engine_signature")
+            except (ValueError, TypeError):
+                doc_engine = None
+            if doc_engine == current_engine:
+                return {"decision_id": existing.id, "approved": True,
+                        "loaded": True,
+                        "content_hash": existing.content_hash,
+                        "reason": "loaded active decision (not recomputed)",
+                        "policy_version": existing.policy_version,
+                        "n_scored": existing.n_scored}
     report = evaluate_ladder(n_boot=n_boot)
     if report.get("n_scored", 0) == 0:
         return {"error": report.get("note") or "no scorable fixtures"}
@@ -354,10 +406,11 @@ def ensure_approval_decision(corpus_version: str | None = None,
     rec["policy_version"] = APPROVAL_POLICY_VERSION
     rec["approved"] = approved
     rec["decision_reason"] = reason
+    rec["engine_signature"] = current_engine   # pins the decision to the
+    #                                            exact deployed model (V9.2)
     canonical = _decision_canonical(rec)
     chash = hashlib.sha256(canonical.encode()).hexdigest()
 
-    from src.live import model_mls
     from src.live.models import ModelApprovalDecision, ModelVersion
     s = get_session()
     try:
