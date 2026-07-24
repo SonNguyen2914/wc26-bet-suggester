@@ -1,5 +1,10 @@
 # WC26 → Multi-League Platform — Project Documentation & Roadmap
 
+> **SUPERSEDED BY V9.1** (`docs/V9.1/`, Jul 24) — the frozen pre-slate
+> edition: P0 remediations deployed, the `mls-shadow-v1.1` baseline, and
+> the enforced approval + engine-signature evidence contract. This V9
+> edition is kept as the pre-remediation snapshot.
+
 **V9 — July 23, 2026. THE VALIDATION-READY EDITION.** V8 opened the MLS
 expansion; V9 closes the arc that followed it — two independent
 evaluations of the shadow platform and the full remediation-plus-roadmap
