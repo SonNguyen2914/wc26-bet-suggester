@@ -157,3 +157,69 @@ def unmapped_upcoming(names: list[str]) -> list[str]:
     """Readiness invariant helper: which of these ESPN names lack an
     approved mapping."""
     return [n for n in names if resolve_espn_name(n) is None]
+
+
+# --- official MLS stats API (Sportec) identity ---------------------------
+# Verified Jul 24 against the live season: all 30 Sportec
+# `three_letter_code`s equal our ESPN `abbrev`s exactly (0 unmatched both
+# ways), so a stats club resolves to our team by abbrev with no curation.
+# A name-containment fallback is kept purely as defence against future
+# expansion drift.
+
+def resolve_mls_club(code: str, name: str | None = None) -> Team | None:
+    """Resolve a Sportec club (its three-letter code, e.g. 'NSH') to our
+    Team. Primary key is abbrev == code (the verified 1:1); the name is a
+    defensive fallback only. No alias pre-seeding required."""
+    if not code:
+        return None
+    s = get_session()
+    if s is None:
+        return None
+    try:
+        row = (s.query(Team)
+               .filter_by(competition_slug="mls-2026")
+               .filter(Team.abbrev == code).first())
+        if row is not None:
+            return row
+        if name:
+            for t in s.query(Team).filter_by(competition_slug="mls-2026"):
+                cn = norm(t.canonical_name)
+                if norm(name) == cn or norm(name) in cn or cn in norm(name):
+                    return t
+        return None
+    finally:
+        s.close()
+
+
+def seed_mls_club_aliases(clubs: list[dict]) -> dict:
+    """Record approved TeamAlias(source='mls_stats', alias=MLS-CLU-id) rows
+    for provenance/audit. `clubs` = [{'sportec_id','code','name'}, ...].
+    Ingestion resolves by code directly, so this is an auditable bridge,
+    not a dependency. Idempotent; logs any club it cannot map."""
+    if not plane_ready():
+        return {"skipped": "dormant"}
+    added = 0
+    unmapped: list[str] = []
+    s = get_session()
+    try:
+        for c in clubs:
+            sportec_id = c.get("sportec_id")
+            team = resolve_mls_club(c.get("code"), c.get("name"))
+            if team is None or not sportec_id:
+                unmapped.append(f"{c.get('code')}/{sportec_id}")
+                continue
+            if not s.query(TeamAlias).filter_by(
+                    source="mls_stats", alias=sportec_id).first():
+                s.add(TeamAlias(team_id=team.id, alias=sportec_id,
+                                source="mls_stats", approved=True))
+                added += 1
+        s.commit()
+        if unmapped:
+            print(f"[identity] UNMAPPED mls_stats clubs: {unmapped}")
+        return {"added_aliases": added, "unmapped": unmapped}
+    except Exception as exc:
+        s.rollback()
+        print(f"[identity] mls club alias seed failed: {exc}")
+        return {"error": str(exc)[:200]}
+    finally:
+        s.close()

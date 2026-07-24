@@ -533,6 +533,71 @@ class RegistryDiscovery(LiveBase):
     completed_at = Column(DateTime(timezone=True))
 
 
+class MlsTeamMatchStat(LiveBase):
+    """Per-match, per-team OFFICIAL MLS (Sportec/StatsPerform) statistics —
+    the richer shot/xG signal the goals-only model cannot see. One row per
+    (fixture, side). Sourced from stats-api.mlssoccer.com, content-hashed
+    into SourceObservation, and attached to OUR fixture by (kickoff date,
+    the two clubs' resolved team ids). ADDITIVE EVIDENCE: the model reads
+    these when present and falls back to goals when absent — a fixture is
+    never dropped for missing stats. `xg` is the provider's own expected
+    goals (not our proxy); `xg_against` denormalizes the opponent row's xg
+    so a defence rating needs no self-join and survives a one-sided row."""
+    __tablename__ = "mls_team_match_stat"
+    id = Column(Integer, primary_key=True)
+    fixture_id = Column(Integer, ForeignKey("fixture.id"), nullable=False)
+    team_id = Column(Integer, ForeignKey("team.id"), nullable=False)
+    side = Column(String(8), nullable=False)          # home | away
+    sportec_match_id = Column(String(32))             # MLS-MAT-...
+    sportec_club_id = Column(String(32))              # MLS-CLU-...
+    goals = Column(Integer)
+    goals_conceded = Column(Integer)
+    xg = Column(Float)                                # provider xG, for
+    xg_against = Column(Float)                        # opponent xG (against)
+    shots_total = Column(Integer)                     # shots_at_goal_sum
+    shots_inside_box = Column(Integer)
+    shots_outside_box = Column(Integer)
+    shots_on_target = Column(Integer)
+    corners = Column(Integer)
+    passes_successful = Column(Integer)
+    passes_total = Column(Integer)
+    source_observation_id = Column(
+        Integer, ForeignKey("source_observation.id"))
+    observed_at = Column(DateTime(timezone=True))
+    __table_args__ = (UniqueConstraint("fixture_id", "side"),)
+
+
+class MlsPlayerMatchStat(LiveBase):
+    """Per-match player statistics from the official MLS players endpoint —
+    the durable substrate for player-strength / goalkeeper features (the
+    M4/M5 rungs). Captured now so the history exists; consumed by the model
+    only once a feature is MEASURED to help. `xg` and `is_goalkeeper` come
+    straight from the provider; `minutes` is normalized_player_minutes."""
+    __tablename__ = "mls_player_match_stat"
+    id = Column(Integer, primary_key=True)
+    fixture_id = Column(Integer, ForeignKey("fixture.id"), nullable=False)
+    team_id = Column(Integer, ForeignKey("team.id"))
+    side = Column(String(8))                          # home | away
+    sportec_match_id = Column(String(32))
+    sportec_club_id = Column(String(32))
+    sportec_player_id = Column(String(32))
+    player_name = Column(String(96))
+    is_goalkeeper = Column(Boolean)
+    minutes = Column(Float)
+    goals = Column(Integer)
+    assists = Column(Integer)
+    xg = Column(Float)
+    shots_total = Column(Integer)
+    shots_on_target = Column(Integer)
+    shots_faced = Column(Integer)                     # shots_on_goal_suffered
+    source_observation_id = Column(
+        Integer, ForeignKey("source_observation.id"))
+    observed_at = Column(DateTime(timezone=True))
+    __table_args__ = (
+        UniqueConstraint("fixture_id", "sportec_player_id"),
+    )
+
+
 class CorpusExport(LiveBase):
     """An IMMUTABLE published corpus version (V9 eval F3). build_corpus
     reads live state, so its bytes legitimately drift as the database

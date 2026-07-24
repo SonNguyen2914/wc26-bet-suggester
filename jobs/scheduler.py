@@ -226,6 +226,14 @@ def mls_boot() -> None:
             "src.live.identity", fromlist=["x"]).seed_teams()),
         ("season_ingest", lambda: __import__(
             "src.live.ingest", fromlist=["x"]).ingest_season_schedules()),
+        # official Sportec team stats (xG) — AFTER fixtures exist (they're
+        # the attach target) and BEFORE approval/runs, so the first
+        # evaluation + shadow runs see xG. skip_existing makes re-boots
+        # cheap: only newly-completed matches are fetched. team-only keeps
+        # boot bounded; the rolling job below adds players + freshness.
+        ("stats_backfill", lambda: __import__(
+            "src.live.mls_stats", fromlist=["x"]).ingest_match_stats(
+                with_players=False, skip_existing=True)),
         ("market_map", lambda: __import__(
             "src.live.markets", fromlist=["x"]).discover_and_map()),
     )
@@ -290,6 +298,21 @@ def mls_runs_job() -> None:
         print(f"[mls-runs] error: {exc}")
 
 
+def mls_stats_job() -> None:
+    """Rolling refresh of official Sportec team + player stats for recently
+    completed matches (xG substrate for the model, player rows for future
+    GK/availability features). Cheap: only the last ~2 weeks, re-fetched so
+    provisional stats correct themselves. Instant no-op when dormant."""
+    try:
+        from src.live import mls_stats
+        r = mls_stats.ingest_match_stats(days_back=16, with_players=True)
+        if r.get("ingested"):
+            print(f"[mls-stats] {r.get('ingested')} matches, "
+                  f"{r.get('player_rows')} player rows")
+    except Exception as exc:
+        print(f"[mls-stats] error: {exc}")
+
+
 def mls_t10_job() -> None:
     """The atomic T-10 lock sweep (book freeze + canonical run)."""
     try:
@@ -340,6 +363,11 @@ def start_scheduler() -> BackgroundScheduler:
                       id="mls_markets", coalesce=True, max_instances=1)
     scheduler.add_job(mls_runs_job, "interval", minutes=15,
                       id="mls_runs", coalesce=True, max_instances=1)
+    # Official Sportec stats refresh: low frequency (stats only change when
+    # matches complete), throttled + idempotent. Its own cadence so a slow
+    # external fetch never delays the fixture/market/run jobs.
+    scheduler.add_job(mls_stats_job, "interval", minutes=180,
+                      id="mls_stats", coalesce=True, max_instances=1)
     scheduler.add_job(mls_t10_job, "interval", seconds=60,
                       id="mls_t10", coalesce=True, max_instances=1)
     # Live-plane boot is its OWN one-shot, never chained into the archive

@@ -54,12 +54,15 @@ LADDER = {
     "M2W": {"use_ratings": True, "recency": True, "shrink": 24.0,
             "win_blend": True,
             "desc": "+ win% (results) blend into the 3-way"},
+    "M3": {"use_ratings": True, "recency": True, "shrink": 24.0,
+           "win_blend": True, "xg_from_config": True,
+           "desc": "+ provider xG-based attack/defence ratings"},
 }
 FUTURE_RUNGS = {
-    "M3": "rest / travel / surface — pending covariates",
-    "M4": "availability / lineup effects — data captured (Phase 5), "
-          "not yet consumed pending this evaluation",
-    "M5": "goalkeeper effects — data captured, not yet consumed",
+    "M4": "availability / lineup effects — player stats captured "
+          "(mls_stats), consumed once measured to help",
+    "M5": "goalkeeper effects — player GK stats captured, "
+          "consumed once measured to help",
 }
 
 
@@ -87,15 +90,28 @@ def analytic_3way(lam_h: float, lam_a: float) -> dict:
             "away_win": away / tot}
 
 
-def fit_variant(fixtures, as_of, cfg: dict) -> dict | None:
+def fit_variant(fixtures, as_of, cfg: dict,
+                xg_by_fixture: dict | None = None) -> dict | None:
     """Ratings + league params under a ladder config. Pure function of
-    its inputs; the walk-forward calls it with prior-only slices."""
+    its inputs; the walk-forward calls it with prior-only slices. Mirrors
+    model_mls.fit — including the xG-based rating blend (cfg['xg_alpha'])
+    so the M3 rung measures exactly the deployed feature."""
     if not fixtures:
         return None
     from src.live.model_mls import RESULT_SHRINK
+    # xG weight: an explicit cfg value (offline sweeps) wins; otherwise the
+    # M3 rung tracks the deployed config so the ladder measures what ships
+    xg_alpha = cfg.get("xg_alpha")
+    if xg_alpha is None and cfg.get("xg_from_config"):
+        import config as _cfg
+        xg_alpha = _cfg.MLS_XG_RATING_ALPHA
+    xg_alpha = float(xg_alpha or 0.0)
     gf, ga, wsum, games = {}, {}, {}, {}
+    xgf, xga, xwsum = {}, {}, {}
     wins, draws, losses = {}, {}, {}
     tot_home = tot_away = tot_w = 0.0
+    tot_xg = txg_w = 0.0
+    xgm = xg_by_fixture or {}
     for f in fixtures:
         if cfg["recency"]:
             days = (as_of - _utc(f.current_kickoff_utc)).total_seconds() / 86400
@@ -108,15 +124,24 @@ def fit_variant(fixtures, as_of, cfg: dict) -> dict | None:
             hr, ar = "l", "w"
         else:
             hr = ar = "d"
-        for team, sc, co, r in (
-                (f.home_team_id, f.home_goals, f.away_goals, hr),
-                (f.away_team_id, f.away_goals, f.home_goals, ar)):
+        fxg = xgm.get(getattr(f, "id", None)) if xg_alpha > 0 else None
+        for team, sc, co, r, sidek in (
+                (f.home_team_id, f.home_goals, f.away_goals, hr, "home"),
+                (f.away_team_id, f.away_goals, f.home_goals, ar, "away")):
             gf[team] = gf.get(team, 0.0) + w * sc
             ga[team] = ga.get(team, 0.0) + w * co
             wsum[team] = wsum.get(team, 0.0) + w
             games[team] = games.get(team, 0) + 1
             {"w": wins, "d": draws, "l": losses}[r][team] = \
                 {"w": wins, "d": draws, "l": losses}[r].get(team, 0.0) + w
+            side = fxg.get(sidek) if fxg else None
+            if side and side.get("xg") is not None \
+                    and side.get("xg_against") is not None:
+                xgf[team] = xgf.get(team, 0.0) + w * side["xg"]
+                xga[team] = xga.get(team, 0.0) + w * side["xg_against"]
+                xwsum[team] = xwsum.get(team, 0.0) + w
+                tot_xg += w * side["xg"]
+                txg_w += w
         tot_home += w * f.home_goals
         tot_away += w * f.away_goals
         tot_w += w
@@ -125,15 +150,22 @@ def fit_variant(fixtures, as_of, cfg: dict) -> dict | None:
     league = (tot_home + tot_away) / (2 * tot_w)
     if league <= 0:
         return None
+    league_xg = (tot_xg / txg_w) if txg_w > 0 else league
     ratings = {}
     results = {}
     if cfg["use_ratings"]:
         k = cfg["shrink"]
         for team, w in wsum.items():
-            ratings[team] = {
-                "attack": (gf[team] / league + k) / (w + k),
-                "defence": (ga[team] / league + k) / (w + k),
-                "games": games[team]}
+            atk = (gf[team] / league + k) / (w + k)
+            dfc = (ga[team] / league + k) / (w + k)
+            xw = xwsum.get(team, 0.0)
+            if xg_alpha > 0 and xw > 0 and league_xg > 0:
+                atk_x = (xgf[team] / league_xg + k) / (xw + k)
+                dfc_x = (xga[team] / league_xg + k) / (xw + k)
+                atk = (1 - xg_alpha) * atk + xg_alpha * atk_x
+                dfc = (1 - xg_alpha) * dfc + xg_alpha * dfc_x
+            ratings[team] = {"attack": atk, "defence": dfc,
+                             "games": games[team]}
             kr = RESULT_SHRINK
             results[team] = {
                 "w": (wins.get(team, 0.0) + kr / 3) / (w + kr),
@@ -205,6 +237,10 @@ def evaluate_ladder(n_boot: int = 1000, seed: int = 12345) -> dict:
         rows = _completed(s)
     finally:
         s.close()
+    # provider xG per fixture, loaded once (M3); rungs without xg_alpha
+    # ignore it. Keyed by fixture id, so slicing `rows` restricts it too.
+    from src.live import mls_stats
+    xg_map = mls_stats.team_xg_map()
     # per-fixture per-variant scores (only fixtures every variant can
     # predict, so the comparison is on identical ground)
     per_fixture: list[dict] = []
@@ -213,7 +249,7 @@ def evaluate_ladder(n_boot: int = 1000, seed: int = 12345) -> dict:
         preds = {}
         ok = True
         for name, cfg in LADDER.items():
-            m = fit_variant(prior, as_of, cfg)
+            m = fit_variant(prior, as_of, cfg, xg_by_fixture=xg_map)
             p = predict_variant(m, f) if m else None
             if p is None:
                 ok = False
@@ -243,7 +279,8 @@ def evaluate_ladder(n_boot: int = 1000, seed: int = 12345) -> dict:
     # match-cluster bootstrap: resample fixtures with replacement
     rng = np.random.default_rng(seed)
     pairs = [("M2", "M0"), ("M2", "M1"), ("M1", "M0"),
-             ("M2W", "M2"), ("M2W", "M0")]
+             ("M2W", "M2"), ("M2W", "M0"),
+             ("M3", "M2W"), ("M3", "M0")]
     boot = {f"{a}_vs_{b}": [] for a, b in pairs}
     for _ in range(n_boot):
         idx = rng.integers(0, n, n)
@@ -273,10 +310,13 @@ def evaluate_ladder(n_boot: int = 1000, seed: int = 12345) -> dict:
 
 
 def deployed_variant() -> str:
-    """The ladder rung that matches the DEPLOYED model: M2W when the win%
-    blend is on, else M2. The approval decision evaluates THIS variant so
-    the persisted edge reflects what actually ships."""
+    """The ladder rung that matches the DEPLOYED model: M3 when xG ratings
+    are on, else M2W when the win% blend is on, else M2. The approval
+    decision evaluates THIS variant so the persisted edge reflects what
+    actually ships."""
     import config
+    if config.MLS_XG_RATING_ALPHA > 0:
+        return "M3"
     return "M2W" if config.MLS_WIN_BLEND_ALPHA > 0 else "M2"
 
 
@@ -292,7 +332,7 @@ def approval_record(report: dict, corpus_version: str | None = None) -> dict:
         "in-sample rolling-origin (not a prospective holdout)",
         "n and CI must be read together — a small point estimate with a "
         "CI spanning 0 is NOT an established edge",
-        "M3-M5 rungs (rest/travel/lineup/GK) not yet implemented",
+        "M4-M5 rungs (lineup availability / GK) not yet implemented",
         "forecast quality only — market-relative and execution "
         "performance evaluated separately, after settlement",
     ]

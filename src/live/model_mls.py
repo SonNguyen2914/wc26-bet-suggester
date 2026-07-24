@@ -67,16 +67,30 @@ def _utc(dt):
     return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
-def fit(fixtures, as_of) -> dict | None:
+def fit(fixtures, as_of, xg_by_fixture: dict | None = None,
+        xg_alpha: float = 0.0) -> dict | None:
     """Ratings + league parameters from a list of completed fixtures.
     Pure function of its inputs — the walk-forward validator calls it
-    with prior-only slices."""
+    with prior-only slices.
+
+    xG-BASED RATINGS (xg_alpha>0): when a per-fixture xG map is supplied
+    (from mls_stats.team_xg_map, keyed by fixture id), each team's
+    attack/defence is blended toward a rating built on the provider's
+    expected goals instead of actual goals. xG is the less-noisy signal
+    over a half-season. A fixture missing xG contributes only to the goals
+    rating for that team, so partial coverage degrades gracefully and
+    xg_alpha=0 is byte-identical to the pure-goals model."""
     if not fixtures:
         return None
     gf: dict[int, float] = {}
     ga: dict[int, float] = {}
     w_sum: dict[int, float] = {}
     n_games: dict[int, int] = {}
+    # xG-for / xG-against accumulators + their own weight sum (only over
+    # matches that carry provider xG) — a separately-shrunk rating
+    xgf: dict[int, float] = {}
+    xga: dict[int, float] = {}
+    xw_sum: dict[int, float] = {}
     # recency-weighted results (win/draw/loss) per team — the win% signal
     # (captures teams whose RESULTS outperform their goal difference, which
     # a pure goals-Poisson model under-rates)
@@ -84,6 +98,8 @@ def fit(fixtures, as_of) -> dict | None:
     draws: dict[int, float] = {}
     losses: dict[int, float] = {}
     tot_home = tot_away = tot_w = 0.0
+    tot_xg = txg_w = 0.0
+    xgm = xg_by_fixture or {}
     for f in fixtures:
         days = (as_of - _utc(f.current_kickoff_utc)).total_seconds() / 86400
         w = _weight(days)
@@ -93,15 +109,24 @@ def fit(fixtures, as_of) -> dict | None:
             h_res, a_res = "l", "w"
         else:
             h_res = a_res = "d"
-        for team, scored, conceded, res in (
-                (f.home_team_id, f.home_goals, f.away_goals, h_res),
-                (f.away_team_id, f.away_goals, f.home_goals, a_res)):
+        fxg = xgm.get(getattr(f, "id", None)) if xg_alpha > 0 else None
+        for team, scored, conceded, res, sidek in (
+                (f.home_team_id, f.home_goals, f.away_goals, h_res, "home"),
+                (f.away_team_id, f.away_goals, f.home_goals, a_res, "away")):
             gf[team] = gf.get(team, 0.0) + w * scored
             ga[team] = ga.get(team, 0.0) + w * conceded
             w_sum[team] = w_sum.get(team, 0.0) + w
             n_games[team] = n_games.get(team, 0) + 1
             bucket = {"w": wins, "d": draws, "l": losses}[res]
             bucket[team] = bucket.get(team, 0.0) + w
+            side = fxg.get(sidek) if fxg else None
+            if side and side.get("xg") is not None \
+                    and side.get("xg_against") is not None:
+                xgf[team] = xgf.get(team, 0.0) + w * side["xg"]
+                xga[team] = xga.get(team, 0.0) + w * side["xg_against"]
+                xw_sum[team] = xw_sum.get(team, 0.0) + w
+                tot_xg += w * side["xg"]
+                txg_w += w
         tot_home += w * f.home_goals
         tot_away += w * f.away_goals
         tot_w += w
@@ -110,6 +135,9 @@ def fit(fixtures, as_of) -> dict | None:
     league_gpg = (tot_home + tot_away) / (2 * tot_w)
     if league_gpg <= 0:
         return None
+    # league average xG per team-game (the denominator for xG ratings);
+    # falls back to the goal scale if no xG was seen
+    league_xg = (tot_xg / txg_w) if txg_w > 0 else league_gpg
     ratings = {}
     results = {}
     for team, w in w_sum.items():
@@ -117,6 +145,13 @@ def fit(fixtures, as_of) -> dict | None:
         k = SHRINK_GAMES
         atk = (gf[team] / league_gpg + k) / (w + k)
         dfc = (ga[team] / league_gpg + k) / (w + k)
+        # blend in an xG-based rating (each shrunk on its own xG sample)
+        xw = xw_sum.get(team, 0.0)
+        if xg_alpha > 0 and xw > 0 and league_xg > 0:
+            atk_x = (xgf[team] / league_xg + k) / (xw + k)
+            dfc_x = (xga[team] / league_xg + k) / (xw + k)
+            atk = (1 - xg_alpha) * atk + xg_alpha * atk_x
+            dfc = (1 - xg_alpha) * dfc + xg_alpha * dfc_x
         ratings[team] = {"attack": atk, "defence": dfc,
                          "games": n_games[team]}
         # win/draw/loss RATES, shrunk toward the league draw-ish prior so a
@@ -131,6 +166,10 @@ def fit(fixtures, as_of) -> dict | None:
     return {
         "results": results,
         "league_gpg": league_gpg,
+        "league_xg": league_xg,
+        "xg_alpha": xg_alpha,
+        # fraction of team-match observations (2 per fixture) carrying xG
+        "xg_coverage": round(txg_w / (2 * tot_w), 3) if tot_w else 0.0,
         # fitted venue split: home teams score tot_home/tot_w per game
         "venue_home": (tot_home / tot_w) / league_gpg,
         "venue_away": (tot_away / tot_w) / league_gpg,
@@ -311,6 +350,10 @@ def build_input_artifact(fixture, model: dict,
             "shrink_games": SHRINK_GAMES,
             "half_life_days": HALF_LIFE_DAYS,
             "min_games": MIN_GAMES,
+            # xG-rating provenance (ratings already bake the blend in, so
+            # replay from team_ratings is unaffected — these are audit)
+            "xg_rating_alpha": model.get("xg_alpha", 0.0),
+            "xg_coverage": model.get("xg_coverage", 0.0),
         },
         "league": {
             "league_gpg": model["league_gpg"],
@@ -439,16 +482,23 @@ def predict_fixture(fixture, model: dict, run_type: str = "scheduled",
 
 
 def current_model() -> dict | None:
-    """Fit from everything completed as of now."""
+    """Fit from everything completed as of now. Uses xG-based ratings when
+    config.MLS_XG_RATING_ALPHA>0 and the ingestion has populated team xG."""
     if not plane_ready():
         return None
     from datetime import datetime
     s = get_session()
     try:
         rows = _completed(s)
-        return fit(rows, datetime.now(timezone.utc))
     finally:
         s.close()
+    xg_map = None
+    alpha = config.MLS_XG_RATING_ALPHA
+    if alpha > 0:
+        from src.live import mls_stats
+        xg_map = mls_stats.team_xg_map()
+    return fit(rows, datetime.now(timezone.utc),
+               xg_by_fixture=xg_map, xg_alpha=alpha)
 
 
 # --- rolling-origin validation --------------------------------------------
