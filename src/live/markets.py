@@ -191,38 +191,55 @@ def _rules_hash(m: dict) -> str | None:
     return hashlib.sha256(raw.encode()).hexdigest() if raw else None
 
 
-def _depth_levels(ob_payload: dict
+DEPTH_KEEP = 10          # levels retained per side (policy: best_10_each_side)
+
+
+def _depth_levels(ob_payload: dict, keep: int = DEPTH_KEEP
                   ) -> list[tuple[str, int, int, str | None, str | None]]:
     """(side, price_c, size, price_dollars, size_fp) rows from the CURRENT
     'orderbook_fp' shape (dollar-string pairs), with the legacy
     integer-cent 'orderbook' shape as fallback. The derived cent/size
-    ints stay the executable comparator; the EXACT provider strings are
-    retained beside them (V9 eval F7) — a large paper order walks depth,
-    so subpenny prices and fractional sizes at each level are material.
-    Bounded to the top 10 levels/side (policy top_10_depth). The V8
-    evaluation proved the old parser stored ZERO depth rows against live
-    responses."""
+    ints stay a display comparator; the EXACT provider strings are
+    retained beside them (V9 eval F7) and are what paper execution walks.
+
+    We keep the BEST `keep` levels per side — the HIGHEST-priced bids
+    (V9.1 eval F1). Kalshi returns each side's bids in ASCENDING price
+    order (the best/highest bid is LAST), so the previous `[:10]` kept the
+    WORST ten and dropped the best — for a NO bid at price q (= a YES ask
+    at 1-q) that meant the executable top of book was missing. We now sort
+    explicitly and keep the top by price, so the result is correct
+    regardless of the provider's array order. The V8 evaluation proved the
+    old parser stored ZERO depth rows against live responses."""
     rows: list[tuple[str, int, int, str | None, str | None]] = []
     fp = ob_payload.get("orderbook_fp")
     if isinstance(fp, dict):
         for side, key in (("yes", "yes_dollars"), ("no", "no_dollars")):
-            for lvl in (fp.get(key) or [])[:10]:
+            parsed: list[tuple[int, int, str, str]] = []
+            for lvl in (fp.get(key) or []):
                 try:
-                    rows.append((side, int(round(float(lvl[0]) * 100)),
-                                 int(float(lvl[1])),
-                                 str(lvl[0]), str(lvl[1])))
+                    parsed.append((int(round(float(lvl[0]) * 100)),
+                                   int(float(lvl[1])),
+                                   str(lvl[0]), str(lvl[1])))
                 except (TypeError, ValueError, IndexError):
                     continue
+            # best bids = highest price; keep top `keep` after an explicit
+            # sort (never trust the provider's array order)
+            parsed.sort(key=lambda x: x[0], reverse=True)
+            for price_c, size, pd, sf in parsed[:keep]:
+                rows.append((side, price_c, size, pd, sf))
         return rows
     legacy = ob_payload.get("orderbook")
     if isinstance(legacy, dict):
         for side in ("yes", "no"):
-            for lvl in (legacy.get(side) or [])[:10]:
+            parsed_legacy: list[tuple[int, int]] = []
+            for lvl in (legacy.get(side) or []):
                 try:
-                    rows.append((side, int(lvl[0]), int(lvl[1]),
-                                 None, None))
+                    parsed_legacy.append((int(lvl[0]), int(lvl[1])))
                 except (TypeError, ValueError, IndexError):
                     continue
+            parsed_legacy.sort(key=lambda x: x[0], reverse=True)
+            for price_c, size in parsed_legacy[:keep]:
+                rows.append((side, price_c, size, None, None))
     return rows
 
 
@@ -393,6 +410,15 @@ def discover_and_map() -> dict:
                         contracts_filled += 1
                     except requests.RequestException as exc:
                         print(f"[markets] contracts {ticker}: {exc}")
+        # persist the sweep's completeness as a durable, auditable record
+        # (V9.1 eval F10) — not just a transient return value
+        from src.live.models import RegistryDiscovery
+        s.add(RegistryDiscovery(
+            competition_slug="mls-2026", provider="kalshi",
+            complete=not truncated_series,
+            truncated_series_json=json.dumps(truncated_series),
+            events_seen=seen, newly_mapped=mapped, unmapped=unmapped,
+            contracts_filled=contracts_filled, completed_at=_now()))
         s.commit()
         return {"events_seen": seen, "newly_mapped": mapped,
                 "unmapped": unmapped,
@@ -650,11 +676,15 @@ def capture_lock_snapshot(fixture_id: int) -> dict | None:
         snap.required_families_complete = required_ok
         # execution-ready is DISTINCT from capture-complete: the game
         # comparator must be two-sided (bid AND ask) AND fresh on a KNOWN
-        # basis within the age ceiling — the old `oldest_age == 0` escape
-        # (which passed timestamp-less quotes as fresh) is gone (F9)
+        # basis within the age ceiling. V9.1 eval F6: only a PROVIDER
+        # timestamp counts as executable freshness — a capture-time
+        # fallback is honest RESEARCH freshness (we received the response
+        # recently) but does NOT establish when the order book last
+        # changed, so it is NOT execution-ready. Capture-completeness is
+        # unaffected; only tradeability requires the provider clock.
         snap.execution_ready = (
             game_two_sided >= 3
-            and freshness_basis in ("provider", "capture_time")
+            and freshness_basis == "provider"
             and game_oldest_age is not None
             and game_oldest_age <= 600)
         # CAPTURE-completeness gate (not tradeability): every event

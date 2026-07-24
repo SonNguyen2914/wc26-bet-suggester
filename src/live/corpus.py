@@ -178,14 +178,15 @@ def build_corpus(version: str = "mls-shadow-2026-v1") -> dict:
         s.close()
 
 
-def publish_corpus(version: str, overwrite: bool = False) -> dict:
+def publish_corpus(version: str) -> dict:
     """Freeze the current corpus as an IMMUTABLE published version (V9
     eval F3). build_corpus reads live state, so its bytes drift as the
     database grows — meaning the same version LABEL rebuilt on each call
     is NOT immutable. Publishing stores one version's bytes + manifest in
     corpus_export; get_published then serves FROM that row, never a
-    rebuild. Re-publishing an existing version is refused (immutability);
-    overwrite is reserved for an operator correcting a mistaken publish."""
+    rebuild. Re-publishing an existing version is ALWAYS refused — there is
+    no overwrite path (V9.1 eval F12); bump the version instead. A mistaken
+    publish is corrected by a deliberate migration, not a runtime flag."""
     if not plane_ready():
         return {"skipped": "dormant"}
     bundle = build_corpus(version)
@@ -196,14 +197,11 @@ def publish_corpus(version: str, overwrite: bool = False) -> dict:
     s = get_session()
     try:
         existing = s.query(CorpusExport).filter_by(version=version).first()
-        if existing is not None and not overwrite:
+        if existing is not None:
             return {"error": "version already published — corpus versions "
                              "are immutable; bump the version",
                     "version": version,
                     "manifest_hash": existing.manifest_hash}
-        if existing is not None:
-            s.delete(existing)
-            s.flush()
         row = CorpusExport(
             version=version,
             schema_version=manifest.get("schema_version"),

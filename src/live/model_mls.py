@@ -147,11 +147,12 @@ def seed_for(fixture, run_type: str) -> int:
     return int(h[:8], 16) & 0x7FFFFFFF
 
 
-# v2 (V9 eval F4): the artifact now freezes the ENGINE signature too, so
-# a replay is verified against the same simulator constants + runtime it
-# was produced under — not silently re-run through whatever the current
-# engine happens to be.
-INPUT_ARTIFACT_SCHEMA = "model-input-v2"
+# v3 (V9.1 eval F5): the engine signature now fingerprints the actual
+# SOURCE of the model/simulator modules plus the runtime (code revision,
+# python, numpy) — not just selected constants — so an implementation
+# change changes the signature. v2 froze constants+numpy only (a code
+# change could pass the guard); v1 froze no engine at all.
+INPUT_ARTIFACT_SCHEMA = "model-input-v3"
 _GIT_REV = os.getenv("RAILWAY_GIT_COMMIT_SHA", "")[:40]
 
 
@@ -165,14 +166,15 @@ def _canonical(doc: dict) -> str:
 
 
 def engine_signature() -> dict:
-    """The behaviorally-relevant engine constants + runtime a replay
-    depends on (V9 eval F4). The V8 artifact froze the model inputs but
-    NOT the engine, so a later change to (say) GOAL_DISPERSION_CV moved
-    replayed probabilities silently. This is frozen into every artifact;
-    a replay compares signature_hash and REFUSES on drift instead of
-    quietly returning different numbers. signature_hash covers the values
-    that actually change the math (the constants + the numpy version);
-    code_revision / python are recorded as metadata."""
+    """A fingerprint of the ACTUAL engine implementation + runtime a replay
+    depends on (V9.1 eval F5). The V8 artifact froze no engine; v2 froze
+    selected constants + numpy, so a logic change that left those constants
+    alone could still pass the replay guard. This hashes the SOURCE of the
+    model/simulator modules themselves, plus the code revision, python, and
+    numpy versions — so an implementation change changes signature_hash and
+    replay refuses. (Container/wheel digests are the stronger form; a
+    source-tree digest is the portable version available in-process.)"""
+    import importlib
     import platform
 
     import numpy as _np
@@ -189,14 +191,32 @@ def engine_signature() -> dict:
         "red_card_risk_default": 0.06,
         "xg_model_version": _XG_VERSION,
     }
-    behavioral = _canonical({"constants": constants,
-                             "numpy": _np.__version__})
+    # source digest over the modules that actually compute the numbers
+    source_sha256: dict[str, str | None] = {}
+    for name in ("src.live.model_mls", "src.models.simulator",
+                 "src.models.xg_model", "src.models.features"):
+        try:
+            mod = importlib.import_module(name)
+            with open(mod.__file__, "rb") as fh:
+                source_sha256[name] = hashlib.sha256(fh.read()).hexdigest()
+        except (OSError, ImportError, AttributeError, TypeError):
+            source_sha256[name] = None
+    runtime = {
+        "python": platform.python_version(),
+        "numpy": _np.__version__,
+        "code_revision": _GIT_REV,
+    }
+    fingerprint = {"constants": constants, "source_sha256": source_sha256,
+                   "runtime": runtime}
+    sig_hash = hashlib.sha256(_canonical(fingerprint).encode()).hexdigest()
     return {
         "constants": constants,
-        "numpy": _np.__version__,
+        "source_sha256": source_sha256,
+        "runtime": runtime,
+        "numpy": _np.__version__,            # kept for display/back-compat
         "python": platform.python_version(),
         "code_revision": _GIT_REV,
-        "signature_hash": hashlib.sha256(behavioral.encode()).hexdigest(),
+        "signature_hash": sig_hash,
     }
 
 

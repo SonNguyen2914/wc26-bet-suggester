@@ -161,6 +161,10 @@ class ModelApprovalDecision(LiveBase):
     edge_json = Column(Text)             # M2_vs_M0 point + ci95 + significant
     limitations_json = Column(Text)
     report_json = Column(Text)           # the full evaluate_ladder report
+    # the EXACT canonical bytes content_hash covers (V9.1 eval F4): the
+    # audit recomputes sha256(decision_document) and compares, so a lock's
+    # approval hash is independently verifiable, not merely present
+    decision_document = Column(Text)
     approved_by = Column(String(32))
     content_hash = Column(String(64), unique=True, nullable=False)
     created_at = Column(DateTime(timezone=True))
@@ -456,8 +460,12 @@ class PaperSignal(LiveBase):
     outcome_key = Column(String(32))
     policy_version = Column(String(24))
     model_probability = Column(Float)
-    ask_c = Column(Integer)
-    fee_c = Column(Integer)
+    ask_c = Column(Integer)              # display (rounded)
+    fee_c = Column(Integer)              # display (rounded)
+    # EXACT provider-precision economics (V9.1 eval F2/F3), stored beside
+    # the display cents so paper P&L can be reconciled to the centicent
+    ask_dollars = Column(String(16))
+    fee_dollars = Column(String(16))
     net_edge = Column(Float)             # model_p - (ask + fee)
     decision = Column(String(12))        # fill | reject
     reject_reason = Column(String(48))
@@ -478,12 +486,19 @@ class PaperFill(LiveBase):
     paper_signal_id = Column(Integer, ForeignKey("paper_signal.id"),
                              nullable=False)
     requested_contracts = Column(Integer)
-    filled_contracts = Column(Integer)
-    avg_fill_price_c = Column(Integer)
+    filled_contracts = Column(Integer)            # display (int)
+    avg_fill_price_c = Column(Integer)            # display (rounded)
     best_ask_c = Column(Integer)
     slippage_c = Column(Integer)         # avg fill - best ask
     fee_c = Column(Integer)
     cost_c = Column(Integer)             # contracts*price + fee
+    # EXACT provider-precision economics (V9.1 eval F2/F3): fractional
+    # fills, subpenny weighted price, and centicent fees/costs, retained
+    # beside the display cents so P&L reconciles exactly
+    filled_contracts_fp = Column(String(24))
+    avg_fill_price_dollars = Column(String(16))
+    fee_dollars = Column(String(16))
+    cost_dollars = Column(String(24))
     levels_consumed = Column(Integer)
     latency_ms = Column(Integer)         # recorded assumption
     reason = Column(String(48))          # filled | partial | no_depth
@@ -493,7 +508,29 @@ class PaperFill(LiveBase):
     outcome_hit = Column(Boolean)
     payout_c = Column(Integer)
     pnl_c = Column(Integer)
+    payout_dollars = Column(String(24))
+    pnl_dollars = Column(String(24))
     settled_at = Column(DateTime(timezone=True))
+
+
+class RegistryDiscovery(LiveBase):
+    """A durable record of a market-discovery sweep's COMPLETENESS (V9.1
+    eval F10). The cursor helper can report a page cap, but that state was
+    transient — a truncated local registry could silently define an
+    incomplete universe as 'expected' for a lock's completeness gate. Each
+    sweep now persists whether every series exhausted its cursor or hit the
+    cap, so completeness is first-class and auditable."""
+    __tablename__ = "registry_discovery"
+    id = Column(Integer, primary_key=True)
+    competition_slug = Column(String(32))
+    provider = Column(String(24))
+    complete = Column(Boolean, nullable=False)
+    truncated_series_json = Column(Text)     # series that hit the page cap
+    events_seen = Column(Integer)
+    newly_mapped = Column(Integer)
+    unmapped = Column(Integer)
+    contracts_filled = Column(Integer)
+    completed_at = Column(DateTime(timezone=True))
 
 
 class CorpusExport(LiveBase):

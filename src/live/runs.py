@@ -88,6 +88,10 @@ def _write_run(s, fixture, run_type: str, model: dict, mv: ModelVersion,
             .filter_by(model_version_name=model_mls.MODEL_NAME,
                        approved=True)
             .order_by(ModelApprovalDecision.id.desc()).first())
+    # V9.1 eval F9: never CREATE an audit-invalid canonical lock — a
+    # canonical run without an approved decision is structurally refused
+    if canonical and _dec is None:
+        return None
     ko = _utc(fixture.current_kickoff_utc)
     run = PredictionRun(
         fixture_id=fixture.id, run_type=run_type,
@@ -255,6 +259,14 @@ def t10_locks() -> dict:
         mv = approved_model_version(s)
         if mv is None:
             return {"skipped": "model not approved for shadow (F3 gate)"}
+        # V9.1 eval F9: a canonical lock MUST reference a valid approved
+        # decision — refuse to even attempt one without it, rather than
+        # creating an audit-invalid run and detecting it afterward.
+        from src.live.models import ModelApprovalDecision
+        if (s.query(ModelApprovalDecision)
+                .filter_by(model_version_name=model_mls.MODEL_NAME,
+                           approved=True).first()) is None:
+            return {"skipped": "no approved model-approval decision (F9)"}
         for f in (s.query(Fixture)
                   .filter_by(competition_slug="mls-2026", status="pre")
                   .all()):
