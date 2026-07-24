@@ -1,0 +1,99 @@
+{
+  "title": "mls-2026-v0 xG-based ratings \u2014 pre-deploy walk-forward evidence",
+  "generated_at": "2026-07-24T09:02:00.887181+00:00",
+  "data": "season-to-date completed top-division fixtures with provider (Sportec) team xG ingested",
+  "n_scored": 162,
+  "n_bootstrap": 2000,
+  "method": "analytic independent-Poisson 3-way, rolling-origin, match-cluster bootstrap (no Monte Carlo noise)",
+  "variants": {
+    "M0": {
+      "log_loss": 1.0776,
+      "brier": 0.653,
+      "rps": 0.2349,
+      "desc": "league scoring + venue split"
+    },
+    "M1": {
+      "log_loss": 1.1658,
+      "brier": 0.6954,
+      "rps": 0.255,
+      "desc": "team ratings, equal-weighted, minimal pooling"
+    },
+    "M2": {
+      "log_loss": 1.0697,
+      "brier": 0.6469,
+      "rps": 0.2322,
+      "desc": "+ recency + partial pooling (mls-2026-v0)"
+    },
+    "M2W": {
+      "log_loss": 1.0611,
+      "brier": 0.6401,
+      "rps": 0.2285,
+      "desc": "+ win% (results) blend into the 3-way"
+    },
+    "M3": {
+      "log_loss": 1.054,
+      "brier": 0.6349,
+      "rps": 0.226,
+      "desc": "+ provider xG-based attack/defence ratings"
+    }
+  },
+  "edges": {
+    "M2_vs_M0": {
+      "delta_log_loss": 0.0079,
+      "ci95": [
+        -0.0123,
+        0.0274
+      ],
+      "significant": false
+    },
+    "M2_vs_M1": {
+      "delta_log_loss": 0.0961,
+      "ci95": [
+        0.0245,
+        0.1773
+      ],
+      "significant": true
+    },
+    "M1_vs_M0": {
+      "delta_log_loss": -0.0883,
+      "ci95": [
+        -0.1884,
+        0.0004
+      ],
+      "significant": false
+    },
+    "M2W_vs_M2": {
+      "delta_log_loss": 0.0085,
+      "ci95": [
+        -0.0067,
+        0.0243
+      ],
+      "significant": false
+    },
+    "M2W_vs_M0": {
+      "delta_log_loss": 0.0164,
+      "ci95": [
+        -0.0089,
+        0.0412
+      ],
+      "significant": false
+    },
+    "M3_vs_M2W": {
+      "delta_log_loss": 0.0071,
+      "ci95": [
+        -0.0014,
+        0.016
+      ],
+      "significant": false
+    },
+    "M3_vs_M0": {
+      "delta_log_loss": 0.0235,
+      "ci95": [
+        -0.0014,
+        0.048
+      ],
+      "significant": false
+    }
+  },
+  "decision": "xG at alpha=1.0 blended with win% (M3). Monotonic improvement in alpha across log-loss/Brier/RPS; win% additive on top of xG; total edge vs baseline ~3x the original. Shadow evidence only, NOT an established executable edge. Money LOCKED."
+}
