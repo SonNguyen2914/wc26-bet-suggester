@@ -1668,6 +1668,21 @@ class TestMlsStatsIngestion:
         gks = [p for p in players if p.is_goalkeeper]
         assert len(gks) == 2 and {p.side for p in gks} == {"home", "away"}
 
+    def test_coverage_reports_gaps(self, live_session, monkeypatch):
+        _, _, fx, ko = self._seed(live_session)
+        mls_stats = self._patch(monkeypatch, ko)
+        cov0 = mls_stats.coverage()
+        assert cov0["completed_fixtures"] == 1
+        assert cov0["team_stats"]["matches_covered"] == 0
+        assert cov0["team_stats"]["complete"] is False
+        mls_stats.ingest_match_stats(gte="2026-04-01", lte="2026-06-01")
+        cov1 = mls_stats.coverage()
+        assert cov1["team_stats"]["matches_covered"] == 1
+        assert cov1["team_stats"]["matches_with_xg"] == 1
+        assert cov1["team_stats"]["complete"] is True
+        assert cov1["player_stats"]["matches_covered"] == 1
+        assert cov1["player_stats"]["complete"] is True
+
     def test_xg_map_and_rating_blend(self, live_session, monkeypatch):
         _, _, fx, ko = self._seed(live_session)
         mls_stats = self._patch(monkeypatch, ko)
