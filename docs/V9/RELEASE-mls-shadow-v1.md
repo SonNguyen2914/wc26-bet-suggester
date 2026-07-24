@@ -1,15 +1,18 @@
 # Release: mls-shadow-v1 (frozen baseline for the first MLS slate)
 
-> **FROZEN-TAG state vs CURRENT-BRANCH state (V9 eval F9.7).** Every value
-> in the manifest below is the state *at the `mls-shadow-v1` tag* and is
-> deliberately left unchanged as a historical record — it is NOT the
-> current branch. Since the tag, the V9 P0-remediation pass advanced the
-> branch: Alembic head is now `f9a1c0d2b3e4` (was `c21ba2ee8df4` here /
-> `755ded7a27ff` mid-branch), input artifacts are `model-input-v2` (frozen
-> engine signature), and the paper engine uses the order-level fee
-> schedule. See [`docs/V9/P0-REMEDIATIONS.md`](P0-REMEDIATIONS.md). If the
-> first slate is collected on the post-remediation branch rather than the
-> frozen tag, re-cut the tag and this manifest first.
+> **The actual pre-slate baseline is `mls-shadow-v1.1`, not this tag.**
+> Every value in the manifest below is the state *at the original
+> `mls-shadow-v1` tag* and is left unchanged as a historical record.
+> Since it, the V9 P0-remediation pass + a pre-slate observability patch
+> advanced the branch, and the build that collects the first slate is the
+> new frozen tag **`mls-shadow-v1.1`** (backend `6aae126`, frontend
+> `2eed3ad`, Alembic head `f9a1c0d2b3e4`, input artifacts `model-input-v2`
+> with a frozen engine signature, order-level paper fees). The exact,
+> hashed pre-slate baseline is recorded in
+> [`docs/V9/PRE-SLATE-EVIDENCE-2026-07-25.md`](PRE-SLATE-EVIDENCE-2026-07-25.md);
+> the remediation detail is in
+> [`docs/V9/P0-REMEDIATIONS.md`](P0-REMEDIATIONS.md). Do NOT treat
+> `mls-shadow-v1` as the slate-producing build.
 
 The exact version that collects the first clean MLS T-10 slate
 (Saturday July 25, 2026). Frozen per the V8.1 launch-gate roadmap's
