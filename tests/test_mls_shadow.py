@@ -1614,7 +1614,7 @@ class TestMlsStatsIngestion:
         player = _canned_player_stats("CLB", "NYC",
                                       "MLS-CLU-CLB", "MLS-CLU-NYC")
 
-        def fake_get(path, params=None):
+        def fake_get(path, params=None, quiet_404=False):
             if path.startswith("matches/seasons"):
                 return schedule
             if path.startswith("statistics/clubs/matches"):
