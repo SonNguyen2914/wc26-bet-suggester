@@ -147,7 +147,11 @@ def seed_for(fixture, run_type: str) -> int:
     return int(h[:8], 16) & 0x7FFFFFFF
 
 
-INPUT_ARTIFACT_SCHEMA = "model-input-v1"
+# v2 (V9 eval F4): the artifact now freezes the ENGINE signature too, so
+# a replay is verified against the same simulator constants + runtime it
+# was produced under — not silently re-run through whatever the current
+# engine happens to be.
+INPUT_ARTIFACT_SCHEMA = "model-input-v2"
 _GIT_REV = os.getenv("RAILWAY_GIT_COMMIT_SHA", "")[:40]
 
 
@@ -158,6 +162,42 @@ def _canonical(doc: dict) -> str:
     import json as _json
     return _json.dumps(doc, sort_keys=True, ensure_ascii=False,
                        separators=(",", ":"))
+
+
+def engine_signature() -> dict:
+    """The behaviorally-relevant engine constants + runtime a replay
+    depends on (V9 eval F4). The V8 artifact froze the model inputs but
+    NOT the engine, so a later change to (say) GOAL_DISPERSION_CV moved
+    replayed probabilities silently. This is frozen into every artifact;
+    a replay compares signature_hash and REFUSES on drift instead of
+    quietly returning different numbers. signature_hash covers the values
+    that actually change the math (the constants + the numpy version);
+    code_revision / python are recorded as metadata."""
+    import platform
+
+    import numpy as _np
+
+    import config
+    from src.models.simulator import RED_CARD_OPP_MULT, RED_CARD_OWN_MULT
+    from src.models.xg_model import MODEL_VERSION as _XG_VERSION
+    from src.models.xg_model import SET_PIECE_BASELINE
+    constants = {
+        "set_piece_baseline": SET_PIECE_BASELINE,
+        "goal_dispersion_cv": config.GOAL_DISPERSION_CV,
+        "red_card_own_mult": RED_CARD_OWN_MULT,
+        "red_card_opp_mult": RED_CARD_OPP_MULT,
+        "red_card_risk_default": 0.06,
+        "xg_model_version": _XG_VERSION,
+    }
+    behavioral = _canonical({"constants": constants,
+                             "numpy": _np.__version__})
+    return {
+        "constants": constants,
+        "numpy": _np.__version__,
+        "python": platform.python_version(),
+        "code_revision": _GIT_REV,
+        "signature_hash": hashlib.sha256(behavioral.encode()).hexdigest(),
+    }
 
 
 def build_input_artifact(fixture, model: dict,
@@ -174,6 +214,8 @@ def build_input_artifact(fixture, model: dict,
         "schema_version": INPUT_ARTIFACT_SCHEMA,
         "model": MODEL_NAME,
         "code_revision": _GIT_REV,
+        # the frozen engine the run simulated under (V9 eval F4)
+        "engine": engine_signature(),
         "fixture": {
             "provider": "espn",
             "event_id": str(getattr(fixture, "espn_event_id", "")),
@@ -222,13 +264,18 @@ def replay_from_artifact(document: dict,
     sim_cfg = document.get("simulation") or {}
     if not tr.get("home") or not tr.get("away"):
         return None
+    # replay the injectable engine constants FROM the artifact when it
+    # froze them (v2+); legacy v1 artifacts fall back to current (V9 F4)
+    eng = (document.get("engine") or {}).get("constants") or {}
+    set_piece = eng.get("set_piece_baseline", SET_PIECE_BASELINE)
+    red_risk = eng.get("red_card_risk_default", 0.06)
 
     def raw(r, venue):
         return {
             "attack": r["attack"], "defence": r["defence"],
             "form": 0.5, "fatigue": 0.0,
-            "set_piece_threat": SET_PIECE_BASELINE,
-            "red_card_risk": 0.06, "elo": 1500.0,
+            "set_piece_threat": set_piece,
+            "red_card_risk": red_risk, "elo": 1500.0,
             "league_base": lg["league_gpg"],
             "venue_mult": lg[f"venue_{venue}"],
         }

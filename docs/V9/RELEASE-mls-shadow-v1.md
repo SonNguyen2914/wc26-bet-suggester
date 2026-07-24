@@ -1,5 +1,16 @@
 # Release: mls-shadow-v1 (frozen baseline for the first MLS slate)
 
+> **FROZEN-TAG state vs CURRENT-BRANCH state (V9 eval F9.7).** Every value
+> in the manifest below is the state *at the `mls-shadow-v1` tag* and is
+> deliberately left unchanged as a historical record — it is NOT the
+> current branch. Since the tag, the V9 P0-remediation pass advanced the
+> branch: Alembic head is now `f9a1c0d2b3e4` (was `c21ba2ee8df4` here /
+> `755ded7a27ff` mid-branch), input artifacts are `model-input-v2` (frozen
+> engine signature), and the paper engine uses the order-level fee
+> schedule. See [`docs/V9/P0-REMEDIATIONS.md`](P0-REMEDIATIONS.md). If the
+> first slate is collected on the post-remediation branch rather than the
+> frozen tag, re-cut the tag and this manifest first.
+
 The exact version that collects the first clean MLS T-10 slate
 (Saturday July 25, 2026). Frozen per the V8.1 launch-gate roadmap's
 step 1 — do not change model behavior during the first collection slate

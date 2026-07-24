@@ -25,6 +25,7 @@ extension.
 """
 from __future__ import annotations
 
+import math
 from datetime import datetime, timezone
 
 import config
@@ -36,10 +37,28 @@ from src.live.runs import approved_model_version
 
 THREE_WAY = ("home_win", "draw", "away_win")
 
+# Kalshi's general trading fee, FROZEN so paper P&L ties to the exact
+# rule that produced it (V9 eval F8). The published general formula is
+# fee = ceil(0.07 * C * P * (1-P)) in dollars = ceil(7 * C * P * (1-P))
+# in cents, computed ONCE on the whole order and rounded UP — never
+# rounded per contract (the V8/V9 bug, which zeroed the fee at the
+# extremes and flipped sign by price). Series/event overrides and
+# maker/taker differences are NOT yet modeled, so paper P&L stays
+# explicitly approximate until they are.
+FEE_SCHEDULE = {
+    "version": "kalshi-general-2026-07",
+    "rate": 0.07,
+    "rounding": "ceil_per_order",
+    "modeled": "general taker fee only",
+    "not_modeled": "series/event overrides, maker/taker, per-fill "
+                   "accumulation — paper P&L is approximate",
+}
+
 # The execution policy is versioned so paper results can be tied to the
 # exact rules that produced them.
 EXEC_POLICY = {
-    "version": "paper-exec-v1",
+    "version": "paper-exec-v2",          # v2: order-level fee (V9 eval F8)
+    "fee_schedule": FEE_SCHEDULE["version"],
     "min_top_size": 10,       # contracts available at the ask to bother
     "max_spread_c": 8,        # widest yes ask-bid we'll cross
     "max_quote_age_s": 600,   # snapshot freshness ceiling
@@ -53,10 +72,16 @@ def _now():
     return datetime.now(timezone.utc)
 
 
-def _fee_c(price_c: int) -> int:
-    """Kalshi entry fee, integer cents: 0.07 * p * (1-p) per contract."""
+def order_fee_c(price_c: int | None, contracts: int) -> int:
+    """Kalshi general trading fee for a WHOLE order, integer cents,
+    rounded up once (V9 eval F8): ceil(7 * C * P * (1-P)). Computing it
+    per contract and multiplying (the old bug) is materially wrong — it
+    rounds to 0 at the extremes and over/under-charges by price."""
+    if not contracts or contracts <= 0 or price_c is None:
+        return 0
     p = price_c / 100.0
-    return round(0.07 * p * (1 - p) * 100)
+    return int(math.ceil(FEE_SCHEDULE["rate"] * 100.0 * contracts
+                         * p * (1.0 - p)))
 
 
 def yes_buy_ladder(quote: MarketQuote, depth: list) -> list[tuple[int, int]]:
@@ -151,7 +176,10 @@ def paper_trade_lock(run_id: str) -> dict:
                 fixture_id=run.fixture_id, outcome_key=c.outcome_key,
                 policy_version=EXEC_POLICY["version"],
                 model_probability=c.raw_probability,
-                ask_c=quote.yes_ask_c, fee_c=_fee_c(quote.yes_ask_c or 0),
+                ask_c=quote.yes_ask_c,
+                # illustrative whole-order fee at the policy target size
+                fee_c=order_fee_c(quote.yes_ask_c,
+                                  EXEC_POLICY["target_contracts"]),
                 net_edge=net_edge,
                 decision="reject" if reason else "fill",
                 reject_reason=reason, created_at=_now())
@@ -168,7 +196,9 @@ def paper_trade_lock(run_id: str) -> dict:
                 sig.decision = "reject"
                 sig.reject_reason = "DEPTH_INSUFFICIENT"
                 continue
-            fee_total = _fee_c(fill["avg_price_c"]) * fill["filled"]
+            # whole-order fee on the ACTUAL filled quantity, rounded up
+            # once (V9 eval F8) — not a per-contract fee times count
+            fee_total = order_fee_c(fill["avg_price_c"], fill["filled"])
             cost = fill["filled"] * fill["avg_price_c"] + fee_total
             # EXPOSURE gates — the central risk authority, after the fill
             # cost is known (position size / correlation / bankroll / kill)
@@ -259,6 +289,8 @@ def paper_summary() -> dict:
         cost = sum(f.cost_c or 0 for f in settled)
         return {
             "paper": True, "policy_version": EXEC_POLICY["version"],
+            "fee_schedule": FEE_SCHEDULE["version"],
+            "fee_basis": FEE_SCHEDULE["not_modeled"],
             "signals": s.query(PaperSignal).count(),
             "fills": len(fills),
             "rejected": rejects, "reject_reasons": reasons,
@@ -266,8 +298,10 @@ def paper_summary() -> dict:
             "settled_fills": len(settled),
             "settled_cost_c": cost, "settled_pnl_c": pnl,
             "roi_pct": round(100 * pnl / cost, 2) if cost else None,
-            "note": ("paper execution against frozen T-10 books — never "
-                     "a real order; execution evidence, not a track record"),
+            "note": ("paper execution against frozen T-10 books — never a "
+                     "real order; approximate general fees (series/event "
+                     "overrides + maker/taker not modeled); execution "
+                     "evidence, not a track record"),
         }
     finally:
         s.close()

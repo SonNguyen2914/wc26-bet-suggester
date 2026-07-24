@@ -4,10 +4,10 @@
 expansion; V9 closes the arc that followed it — two independent
 evaluations of the shadow platform and the full remediation-plus-roadmap
 build they prescribed. Every step of that roadmap that is *code* is now
-done: an atomic, completeness-gated evidence chain; retrievable,
+done: a two-phase, completeness-gated evidence chain; retrievable,
 independently-reproducible model inputs; a self-contained research
 corpus; a model-development ladder scored with noise-free analytics and
-confidence intervals; execution-quality paper trading; a central risk
+confidence intervals; depth-aware paper trading; a central risk
 engine; operational observability; real-PostgreSQL CI; frontend
 decision-safety E2E; and a slate scorecard standing by to grade the
 first live matchday. The system does exactly what a serious shadow
@@ -16,6 +16,18 @@ tells the truth about what it does and does not know, and keeps every
 path to real money closed. Docs live in `docs/V9/`; V8 remains the
 expansion snapshot; V7 the evaluation-hardening close; V6 the
 tournament close; V5 on `docs-v5-handoff`.
+
+> **V9 P0 remediation pass (July 23, 2026):** a *second* independent
+> evaluation of the V9 zip raised 21 findings; the P0 set is now built.
+> See [`docs/V9/P0-REMEDIATIONS.md`](P0-REMEDIATIONS.md) for the
+> finding-by-finding response — and for the **precise, narrowed claims**
+> it settles: the T-10 lock is *two-phase completeness-gated* (not one
+> atomic transaction); replay is *bit-identical under the matching engine*
+> (an engine signature is frozen and drift is refused, not silently
+> replayed); the corpus is *immutable once published* (served from stored
+> bytes); the book is the *top-10-depth required-family* book; paper fees
+> are the *order-level general schedule, approximate* (no maker/taker or
+> series overrides). Migration head is now `f9a1c0d2b3e4`.
 
 ---
 
@@ -30,26 +42,29 @@ on durable Railway PostgreSQL: the full 2026 season ingested from ESPN,
 approved-alias identity, integer-cent capture across all 12 per-match
 Kalshi families, and a league-fitted model (`mls-2026-v0`) whose every
 run is a status-gated evidence package — deterministic seed from stable
-provider identity, a retrievable canonical input document, an atomic
-T-10 lock frozen against a completeness-validated market snapshot with
-the lineup it saw, and every priced contract joined to its frozen
-quote. On top of that: paper trading with realistic depth-walk fills, a
+provider identity, a retrievable canonical input document (with a frozen
+engine signature), a two-phase completeness-gated T-10 lock frozen
+against a completeness-validated market snapshot with the lineup it saw
+(recorded even on a provider fetch failure), and every priced contract
+joined to its frozen quote. On top of that: paper trading with realistic depth-walk fills, a
 central risk engine, a model-eval ladder with bootstrap CIs, a
 self-contained corpus, observability, and a slate scorecard. Public
 site at namson.dev/bet-suggester (`?league=mls`). **Real-money
 recommendations are disabled and no code path can enable them.**
 
 ### Where things stand right now
-- **Repos:** backend `~/dev/wc26-bet-suggester` @ `6637f76` (**436 tests
-  green + 5 real-PostgreSQL skipped-without-server**, 142 commits, ~13.3k
-  LOC src+api+jobs, ~6.7k LOC tests); frontend `~/dev/namson-dev` @
-  `356a25b` (121 commits). Local == remote == deployed.
+- **Repos:** backend `~/dev/wc26-bet-suggester` (**441 tests green + 5
+  real-PostgreSQL run in CI** — the one network-dependent lineup test is
+  now hermetic, V9 eval F2/F9.8; ~13.6k LOC src+api+jobs); frontend
+  `~/dev/namson-dev`. Local == remote == deployed.
 - **CI (both repos, blocking):** backend runs the SQLite suite + real
   `postgres:16` migrations (empty→head and previous-release→head) +
   the PostgreSQL integration tests; frontend runs install + typecheck +
   lint + build + Playwright decision-safety E2E. Both green.
-- **Prod:** `/api/ready` reports both planes healthy, `shadow_ready:
-  true`, `real_money_signals: false`, migrations at head `755ded7a27ff`.
+- **Prod:** `/api/ready` reports both planes healthy, mode-specific
+  readiness (`archive_ready` / `shadow_collection_ready` /
+  `paper_execution_ready`, V9 eval F17), `real_money_signals: false`,
+  migrations at head `f9a1c0d2b3e4`.
 - **Frozen baseline:** tag `mls-shadow-v1` on both repos
   (`docs/V9/RELEASE-mls-shadow-v1.md`) — the version that collects the
   first slate.
@@ -79,7 +94,7 @@ disables the live plane (records `LIVE_BOOT_ERROR`, surfaced by
 | | Archive (WC26) | Live (MLS) |
 |---|---|---|
 | Storage | SQLite in-container, ephemeral | Railway **PostgreSQL + volume**, durable |
-| Schema | `src/db.py`, created at boot | `src/live/models.py`, **Alembic** (head `755ded7a27ff`) |
+| Schema | `src/db.py`, created at boot | `src/live/models.py`, **Alembic** (head `f9a1c0d2b3e4`) |
 | On deploy | Self-heals from committed artifacts | Persists; migrations run once at boot |
 | Writes | Operator-token only (fail-closed) | Scheduler jobs only |
 
@@ -99,9 +114,9 @@ disables the live plane (records `LIVE_BOOT_ERROR`, surfaced by
   the input-quality states.
 - `model_mls.py` — `mls-2026-v0`; the retrievable input artifact +
   deterministic replay.
-- `runs.py` — status-gated prediction runs, the atomic T-10 lock, the
+- `runs.py` — status-gated prediction runs, the two-phase T-10 lock, the
   approval gate, the public/hub payloads.
-- `paper.py` — execution-quality paper trading (Part E).
+- `paper.py` — depth-aware paper trading, order-level general fees (Part E).
 - `risk.py` — the central risk engine (Part F).
 - `audit.py` / `slate.py` / `corpus.py` / `model_eval.py` /
   `observability.py` — the evidence + evaluation surfaces (Part G).
@@ -150,12 +165,15 @@ verified `max_delta 0.0`), the **market snapshot** it priced against, the
 **lineup snapshot** it saw, the frozen **input-quality states**, and one
 contract per priced outcome each joined to its frozen quote.
 
-**The atomic T-10 lock** (`runs.t10_locks`, 60s): fixtures 0–11 min from
-kickoff without a canonical lock get (1) a completeness-gated market
-snapshot — every event fetched and the game 3-way priced, else it stays
-`failed` and no lock happens; (2) a lineup snapshot; (3) the
-transactional run frozen against both; (4) paper trading; (5) a
-PAPER-labeled alert. One canonical complete t10 per fixture, enforced by
+**The two-phase, completeness-gated T-10 lock** (`runs.t10_locks`, 60s):
+fixtures 0–11 min from kickoff without a canonical lock get (1) a
+completeness-gated market snapshot — every event fetched and the game
+3-way priced, else it stays `failed` and no lock happens; (2) a lineup
+snapshot, recorded even when the provider fetch fails (V9 eval F2), so
+the lock never references a null lineup; (3) the transactional run frozen
+against both; (4) paper trading; (5) a PAPER-labeled alert. Two-phase,
+not one transaction: the completed snapshot commits before the run
+(V9 eval F11) — a crash can orphan a snapshot but never fabricate a lock. One canonical complete t10 per fixture, enforced by
 a partial unique index proven on PostgreSQL. A missing lock stays
 visibly missing.
 

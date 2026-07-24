@@ -134,6 +134,38 @@ class ModelVersion(LiveBase):
     created_at = Column(DateTime(timezone=True))
 
 
+class ModelApprovalDecision(LiveBase):
+    """The immutable model-approval DECISION a run is authorized under
+    (V9 eval F1/F10). Boot no longer sets approved_for_shadow from a bare
+    Monte-Carlo point estimate: it runs the confidence-interval evaluator
+    (model_eval.evaluate_ladder), records the whole decision here — the
+    M2-vs-baseline edge WITH its 95% CI, the metrics, the limitations, the
+    eval/policy/corpus versions — content-hashes it, and only then flips
+    the flag. Deduped by content_hash: an unchanged evaluation reuses one
+    row, a changed one writes a new, never-overwritten record. Shadow
+    approval means 'safe to collect prospective evidence', NEVER 'edge
+    established' — approved_mode is capped at 'shadow' and there is no
+    real-money setter anywhere."""
+    __tablename__ = "model_approval_decision"
+    id = Column(Integer, primary_key=True)
+    model_version_id = Column(Integer, ForeignKey("model_version.id"),
+                              nullable=False)
+    model_version_name = Column(String(48))
+    eval_version = Column(String(24))
+    policy_version = Column(String(24))
+    corpus_version = Column(String(48))
+    approved_mode = Column(String(16), nullable=False)      # shadow
+    approved = Column(Boolean, nullable=False)
+    n_scored = Column(Integer)
+    metrics_json = Column(Text)          # log_loss / brier / rps / n
+    edge_json = Column(Text)             # M2_vs_M0 point + ci95 + significant
+    limitations_json = Column(Text)
+    report_json = Column(Text)           # the full evaluate_ladder report
+    approved_by = Column(String(32))
+    content_hash = Column(String(64), unique=True, nullable=False)
+    created_at = Column(DateTime(timezone=True))
+
+
 class Player(LiveBase):
     """Player identity (V8.1 evaluation Phase 5). Keyed by provider id;
     team membership + availability live in the snapshot tables so a
@@ -208,17 +240,26 @@ class PredictionRun(LiveBase):
     status = Column(String(12), nullable=False, default="writing")
     canonical = Column(Boolean, nullable=False, default=False)
     model_version_id = Column(Integer, ForeignKey("model_version.id"))
+    # the immutable approval decision this run was authorized under
+    # (V9 eval F1/F10) — the CI-based record, not just a boolean
+    model_approval_decision_id = Column(
+        Integer, ForeignKey("model_approval_decision.id"))
     git_revision = Column(String(40))
     simulation_seed = Column(Integer)
     simulation_count = Column(Integer)
     input_snapshot_hash = Column(String(64))
     model_input_artifact_id = Column(
         Integer, ForeignKey("model_input_artifact.id"))
+    # tranche-2 provenance entities not yet built (no team/player/
+    # availability snapshot tables exist). RESERVED, never populated —
+    # V9 eval F14 removed the earlier dishonest conflation that wrote the
+    # lineup id into availability_snapshot_id. No FK: no table to point at.
     team_snapshot_id = Column(Integer)
     player_snapshot_id = Column(Integer)
     availability_snapshot_id = Column(Integer)
-    lineup_snapshot_id = Column(Integer)
-    market_snapshot_id = Column(Integer)
+    # real provenance links, now enforced as foreign keys (V9 eval F5)
+    lineup_snapshot_id = Column(Integer, ForeignKey("lineup_snapshot.id"))
+    market_snapshot_id = Column(Integer, ForeignKey("market_snapshot.id"))
     created_at = Column(DateTime(timezone=True))
     completed_at = Column(DateTime(timezone=True))
     failure_reason = Column(Text)
@@ -326,7 +367,14 @@ class MarketSnapshot(LiveBase):
     quotes_with_prices = Column(Integer)
     quotes_without_prices = Column(Integer)
     depth_rows_written = Column(Integer)
-    oldest_quote_age_seconds = Column(Integer)
+    oldest_quote_age_seconds = Column(Integer)          # over ALL quotes
+    # freshness computed specifically over the REQUIRED game quotes, with
+    # an explicit basis (V9 eval F9): a missing provider timestamp must
+    # not read as age zero / "fresh". basis is 'provider' when every game
+    # quote carried a provider timestamp, 'capture_time' when we fell back
+    # to our own capture clock, 'none' when no game quote was priced.
+    game_oldest_quote_age_seconds = Column(Integer)
+    freshness_basis = Column(String(16))
     required_families_complete = Column(Boolean)
     execution_ready = Column(Boolean)
     failure_reason = Column(Text)
@@ -362,6 +410,18 @@ class MarketQuote(LiveBase):
     fee_schedule_version = Column(String(16))
     source_observation_id = Column(Integer,
                                    ForeignKey("source_observation.id"))
+    # EXACT provider fixed-point values retained beside the derived integer
+    # cents (V9 eval F7): subpenny dollar-string prices and fractional
+    # *_fp sizes are evidence and must not be rounded away at ingest. The
+    # integer-cent columns above stay the executable comparator; these are
+    # the lossless record. provider_precision names the schema they came
+    # from so a later reader knows how to interpret them.
+    yes_bid_dollars = Column(String(16))
+    yes_ask_dollars = Column(String(16))
+    no_bid_dollars = Column(String(16))
+    no_ask_dollars = Column(String(16))
+    sizes_fp_json = Column(Text)         # exact *_fp size strings, by field
+    provider_precision = Column(String(24))
 
 
 class MarketDepthLevel(LiveBase):
@@ -370,8 +430,12 @@ class MarketDepthLevel(LiveBase):
     market_quote_id = Column(Integer, ForeignKey("market_quote.id"),
                              nullable=False)
     side = Column(String(8), nullable=False)        # yes | no
-    price_c = Column(Integer, nullable=False)
-    size = Column(Integer, nullable=False)
+    price_c = Column(Integer, nullable=False)       # derived (rounded)
+    size = Column(Integer, nullable=False)          # derived (truncated)
+    # exact provider values (V9 eval F7): a large paper order walks depth,
+    # so subpenny prices and fractional sizes at each level are material.
+    price_dollars = Column(String(16))
+    size_fp = Column(String(24))
 
 
 class PaperSignal(LiveBase):
@@ -430,3 +494,24 @@ class PaperFill(LiveBase):
     payout_c = Column(Integer)
     pnl_c = Column(Integer)
     settled_at = Column(DateTime(timezone=True))
+
+
+class CorpusExport(LiveBase):
+    """An IMMUTABLE published corpus version (V9 eval F3). build_corpus
+    reads live state, so its bytes legitimately drift as the database
+    grows — meaning the same version LABEL served fresh each call is not
+    immutable. Publishing freezes one version's bytes + manifest into this
+    row; the public endpoint serves a published version FROM HERE, never a
+    rebuild. A version is written once — re-publishing the same label is
+    refused. (In-database bytes are the immutable artifact at the current
+    corpus size; object storage is the documented scale-up path.)"""
+    __tablename__ = "corpus_export"
+    id = Column(Integer, primary_key=True)
+    version = Column(String(48), unique=True, nullable=False)
+    schema_version = Column(String(24))
+    manifest_hash = Column(String(64), nullable=False)
+    manifest_json = Column(Text, nullable=False)
+    bundle_json = Column(Text, nullable=False)     # full self-contained bundle
+    backend_revision = Column(String(40))
+    size_bytes = Column(Integer)
+    published_at = Column(DateTime(timezone=True))

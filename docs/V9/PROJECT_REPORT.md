@@ -7,12 +7,24 @@ that took it from "plausible prototype" to "provenance-complete,
 independently-reproducible, honestly-evaluated, and ready for its first
 prospective slate — with money still locked."*
 
+> **A THIRD review, and its P0 build (July 23, 2026).** After this report
+> was first written, a third independent evaluation of the V9 zip raised
+> 21 findings. The P0 set is now built — persisted CI-based model
+> approval, lineup-failure snapshots, provenance foreign keys,
+> cursor-complete market discovery, exact fixed-point capture, explicit
+> quote-freshness basis, the correct order-level Kalshi fee, immutable
+> published corpus artifacts, a frozen-engine replay guard, mode-specific
+> readiness, and frontend temporal labeling — with several claims
+> narrowed to exactly what the code proves. The finding-by-finding
+> response is [`docs/V9/P0-REMEDIATIONS.md`](P0-REMEDIATIONS.md).
+
 ## The one-liner
 
 Extended a completed-tournament research archive into a multi-league
-live platform, then — under two rounds of independent technical review —
-rebuilt its MLS evidence chain until every canonical lock is an atomic,
-reproducible research artifact; proved the model's construction while
+live platform, then — under three rounds of independent technical
+review — rebuilt its MLS evidence chain until every canonical lock is a
+two-phase, completeness-gated, reproducible research artifact; proved the
+model's construction while
 honestly measuring that its edge over a naive baseline is *not yet
 established*; and built the execution, risk, observability, and
 audit machinery that a serious shadow study needs — all without ever
@@ -49,8 +61,11 @@ built, in order:
 - **Phase 2 — retrievable input artifact.** The last provenance gap: a
   hash proves integrity but not reproducibility unless the bytes it
   hashed are kept. Now every run stores its exact canonical input
-  document; `GET /api/mls/replay/{id}` reproduces it — verified
-  `max_delta 0.0`, bit-identical from the bytes alone. *Level 3 reached.*
+  document — including a frozen ENGINE signature (V9 eval F4) — and
+  `GET /api/mls/replay/{id}` reproduces it, verified `max_delta 0.0`,
+  bit-identical *under the matching engine*; if the engine constants or
+  runtime have drifted, replay refuses rather than silently diverging.
+  *Level 3 reached.*
 - **Phase 3 — the corpus.** A self-contained, hashed, immutable export of
   every research entity, and a one-command analyzer that reproduces
   metrics with **no database** — proven end-to-end against production.
@@ -100,14 +115,17 @@ makes it impossible to reintroduce.
 
 ## By the numbers
 
-- **436 backend tests** (+5 real-PostgreSQL, skipped without a server);
-  142 backend commits / 121 frontend; ~13.3k src + ~6.7k test LOC.
-- **8 clean production PostgreSQL migrations**; the archive never blinked
-  through ~15 deploys; **1 outage (25 min)**, converted into a law + test.
+- **441 backend tests** (+5 real-PostgreSQL run in CI; the one
+  network-dependent lineup test is now hermetic, V9 eval F2/F9.8);
+  ~13.6k src + ~6.9k test LOC.
+- **9 clean production PostgreSQL migrations** (the ninth is the V9 P0
+  remediation, head `f9a1c0d2b3e4`, round-tripped empty→head→down on
+  real `postgres:16`); the archive never blinked through ~15 deploys;
+  **1 outage (25 min)**, converted into a law + test.
 - **Model ladder, n=162:** M2 vs baseline +0.008, **CI [−0.012, +0.029],
   not significant** — the honest headline the whole gate rests on.
-- **Two independent evaluations**, T-10 integrity 3.5 → 8.4 → central
-  objection closed.
+- **Three independent evaluations**, T-10 integrity 3.5 → 8.4 → P0
+  remediations closed; central objection closed.
 
 ## Resume bullets (ready to paste)
 
@@ -116,8 +134,9 @@ makes it impossible to reintroduce.
   tests and a real-PostgreSQL CI matrix after a production incident.
 - Built a provenance-complete evidence chain — completeness-gated market
   snapshots, retrievable and independently-reproducible model input
-  artifacts (bit-identical replay), and atomic pre-kickoff locks enforced
-  by partial unique indexes — under two rounds of independent review.
+  artifacts (engine-signature-guarded replay), and two-phase
+  completeness-gated pre-kickoff locks enforced by partial unique
+  indexes — under three rounds of independent review.
 - Evaluated a forecasting model with analytic (noise-free) scoring and
   match-cluster bootstrap confidence intervals; reported that its edge
   over a naive baseline was not statistically established and kept

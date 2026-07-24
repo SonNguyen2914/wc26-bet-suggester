@@ -90,12 +90,42 @@ def _upsert_player(s, competition, e) -> int | None:
     return p.id
 
 
+def _empty_quality() -> dict:
+    """Input-quality states for a non-observation — every flag False, so
+    a missing lineup is recorded as missing, never absorbed as truth."""
+    return {"LINEUP_CONFIRMED": False, "GOALKEEPER_CONFIRMED": False,
+            "AVAILABILITY_COMPLETE": False, "PLAYER_DATA_FRESH": False}
+
+
+def _record_unavailable(s, fixture_id: int, status: str,
+                        note: str) -> dict:
+    """Persist a snapshot for a NON-observation — a fetch failure or an
+    unavailable lineup (V9 eval F2). The model doesn't consume lineups,
+    so this does not block the market/model lock, but the lock must still
+    reference EXPLICIT provenance: a null lineup id would let a canonical
+    lock pass with no lineup reference and fail its own audit. Missing
+    data is recorded, never a silent None."""
+    snap = LineupSnapshot(
+        fixture_id=fixture_id, captured_at=_now(), observed_at=None,
+        provider="espn", parser_version=PARSER_VERSION,
+        source_observation_id=None, status=status,
+        home_confirmed=False, away_confirmed=False)
+    s.add(snap)
+    s.flush()
+    s.commit()
+    return {"snapshot_id": snap.id, "status": status,
+            "quality": _empty_quality(), "note": note[:200]}
+
+
 def capture_lineup(fixture_id: int, summary: dict | None = None
                    ) -> dict | None:
     """Fetch (or accept a canned) ESPN summary, parse the selection
     state, and write a provenance-complete LineupSnapshot + entries.
-    Returns {'snapshot_id', 'status', 'quality'} or None on failure.
-    ALWAYS records a snapshot — a pending lineup is evidence too."""
+    Returns {'snapshot_id', 'status', 'quality'}; None only when the plane
+    is dormant or the fixture is unknown. ALWAYS records a snapshot when
+    the fixture exists — a pending lineup, an unavailable one, and a fetch
+    FAILURE are all evidence, and each gets an explicit snapshot (V9 eval
+    F2) so a T-10 lock never references a null lineup."""
     if not plane_ready():
         return None
     s = get_session()
@@ -112,7 +142,8 @@ def capture_lineup(fixture_id: int, summary: dict | None = None
                 summary = r.json()
             except requests.RequestException as exc:
                 print(f"[lineups] fetch {fx.espn_event_id}: {exc}")
-                return None
+                return _record_unavailable(
+                    s, fixture_id, "fetch_failed", str(exc))
         parsed = parse_lineup(summary)
         raw = json.dumps(summary.get("rosters") or [], sort_keys=True)
         obs = SourceObservation(
