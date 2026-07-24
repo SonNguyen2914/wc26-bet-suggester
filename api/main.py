@@ -314,6 +314,35 @@ def mls_approval():
         raise HTTPException(503, "approval unavailable")
 
 
+@app.get("/api/mls/stats-coverage")
+def mls_stats_coverage():
+    """Official-stats coverage: how many completed matches we hold team
+    stats (and provider xG) and player stats for. The verifiable answer to
+    'do we have all the stats?'. Public read-only, 60s cache."""
+    from src.mls import _cached
+    try:
+        from src.live import mls_stats
+        return _cached("mls_stats_coverage", 60, mls_stats.coverage) or {}
+    except Exception as exc:
+        print(f"[mls] stats-coverage failed: {exc}")
+        raise HTTPException(503, "stats-coverage unavailable")
+
+
+@app.post("/api/admin/mls/stats-backfill")
+def mls_stats_backfill(request: Request, players: bool = Query(True),
+                       skip_existing: bool = Query(True)):
+    """Operator-only: backfill the full season's official stats in the
+    background (fills the player-history gap the team-only boot leaves).
+    Additive — no model output changes. Poll /api/mls/stats-coverage for
+    progress. The middleware enforces the token in read-only mode; the
+    explicit check keeps it locked even if that mode is ever off."""
+    if not _admin_ok(request):
+        raise HTTPException(403, "operator credentials required")
+    from src.live import mls_stats
+    return mls_stats.start_backfill(with_players=players,
+                                    skip_existing=skip_existing)
+
+
 @app.get("/api/mls/corpus")
 def mls_corpus(version: str | None = Query(None), full: bool = Query(False),
                preview: bool = Query(False)):

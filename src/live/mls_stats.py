@@ -421,3 +421,77 @@ def team_xg_map() -> dict[int, dict]:
         return out
     finally:
         s.close()
+
+
+def coverage() -> dict:
+    """How much of the season's completed matches we actually hold stats
+    for — the answer to 'do we have all the team + player stats?'. Reports
+    completed fixtures vs. matches with team stats (and with provider xG)
+    and with player rows, so any gap is visible, not assumed."""
+    if not plane_ready():
+        return {"dormant": True}
+    from sqlalchemy import distinct, func
+    s = get_session()
+    try:
+        completed = (s.query(Fixture)
+                     .filter_by(competition_slug="mls-2026", status="post")
+                     .filter(Fixture.home_goals.isnot(None),
+                             Fixture.home_team_id.isnot(None),
+                             Fixture.away_team_id.isnot(None)).count())
+        team_matches = s.query(
+            func.count(distinct(MlsTeamMatchStat.fixture_id))).scalar() or 0
+        team_xg_matches = (s.query(
+            func.count(distinct(MlsTeamMatchStat.fixture_id)))
+            .filter(MlsTeamMatchStat.xg.isnot(None)).scalar() or 0)
+        player_matches = s.query(
+            func.count(distinct(MlsPlayerMatchStat.fixture_id))).scalar() or 0
+        return {
+            "completed_fixtures": completed,
+            "team_stats": {
+                "matches_covered": team_matches,
+                "matches_with_xg": team_xg_matches,
+                "rows": s.query(MlsTeamMatchStat).count(),
+                "complete": team_matches >= completed and completed > 0},
+            "player_stats": {
+                "matches_covered": player_matches,
+                "rows": s.query(MlsPlayerMatchStat).count(),
+                "goalkeeper_rows": s.query(MlsPlayerMatchStat)
+                .filter_by(is_goalkeeper=True).count(),
+                "complete": player_matches >= completed and completed > 0},
+            "backfill": dict(_backfill_state),
+        }
+    finally:
+        s.close()
+
+
+# one-shot operator backfill runs in a daemon thread so a full-season
+# player pass (minutes of throttled fetches) doesn't block the request
+_backfill_state: dict = {"running": False, "started_at": None, "last": None}
+
+
+def start_backfill(with_players: bool = True,
+                   skip_existing: bool = True) -> dict:
+    """Kick off a full-season stats ingest in the background (operator
+    action). skip_existing makes it resumable and cheap on re-runs; the
+    default fills the player-history gap the team-only boot leaves."""
+    import threading
+    if not plane_ready():
+        return {"skipped": "dormant"}
+    if _backfill_state["running"]:
+        return {"status": "already_running",
+                "started_at": _backfill_state["started_at"]}
+
+    def _run():
+        _backfill_state["running"] = True
+        _backfill_state["started_at"] = _now().isoformat()
+        try:
+            _backfill_state["last"] = ingest_match_stats(
+                with_players=with_players, skip_existing=skip_existing)
+        except Exception as exc:                       # never leave stuck
+            _backfill_state["last"] = {"error": str(exc)[:200]}
+        finally:
+            _backfill_state["running"] = False
+
+    threading.Thread(target=_run, daemon=True).start()
+    return {"status": "started", "with_players": with_players,
+            "skip_existing": skip_existing}
